@@ -5,7 +5,6 @@
 #include "Ig_Tools/IgHook/interface/IgHook.h"
 #include "Ig_Tools/IgHook/interface/IgHookTrace.h"
 #include "Ig_Tools/IgHook/interface/IgHookLiveMap.h"
-#include <cassert>
 #include <cstdlib>
 #include <signal.h>
 #include <pthread.h>
@@ -172,7 +171,7 @@ registerThisThread (void)
 {
     IgProf::debug ("Perf: registering thread %lu\n", (unsigned long) pthread_self ());
     pthread_mutex_lock (&s_lock);
-    assert (s_nthreads < 1024);
+    IGPROF_ASSERT (s_nthreads < 1024);
     s_threads [s_nthreads++] = pthread_self ();
     pthread_mutex_unlock (&s_lock);
 }

@@ -5,7 +5,6 @@
 #include "Ig_Tools/IgHook/interface/IgHook.h"
 #include "Ig_Tools/IgHook/interface/IgHookTrace.h"
 #include "Ig_Tools/IgHook/interface/IgHookLiveMap.h"
-#include <cassert>
 #include <cstdlib>
 
 //<<<<<< PRIVATE DEFINES                                                >>>>>>
@@ -53,12 +52,12 @@ remove (int fd)
     if (s_count_leaks)
     {
 	IgHookLiveMap::Iterator	info = s_live->find (fd);
-	assert (info != s_live->end ());
+	IGPROF_ASSERT (info != s_live->end ());
 
 	IgHookTrace	*node = info->second.first;
 	size_t		size = info->second.second;
 
-	assert (node->counter (&s_ct_live)->value () >= size);
+	IGPROF_ASSERT (node->counter (&s_ct_live)->value () >= size);
 	node->counter (&s_ct_live)->sub (size);
 
 	s_live->remove (info);
