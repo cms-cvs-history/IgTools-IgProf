@@ -55,6 +55,8 @@ IGPROF_LIBHOOK (4, int, dopthread_create, _pthread21,
 static IgHookTrace::Counter	s_ct_ticks	= { "PERF_TICKS" };
 static int			s_enabled	= 0;
 static bool			s_initialized	= false;
+static int			s_signal	= SIGPROF;
+static int			s_itimer	= ITIMER_PROF;
 #if __linux
 static pthread_mutex_t		s_lock		= PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t		s_sigstart	= PTHREAD_MUTEX_INITIALIZER;
@@ -80,7 +82,8 @@ add (void)
     node->counter (&s_ct_ticks)->tick ();
 }
 
-/** SIGPROF signal handler.  Record a tick for the current program
+/** Performance profiler signal handler, SIGPROF or SIGALRM depending
+    on current profiler mode.  Record a tick for the current program
     location.  For POSIX-conforming systems assumes the signal handler
     is registered for the correct thread.  For non-conforming old
     GNU/Linux systems assumes there is a separate thread listening for
@@ -97,7 +100,7 @@ profileSignalHandler (void)
     {
 	pthread_mutex_lock (&s_lock);
 	for (int i = 0; i < s_nthreads; ++i)
-	    pthread_kill (s_threads [i], SIGPROF);
+	    pthread_kill (s_threads [i], s_signal);
 	pthread_mutex_unlock (&s_lock);
     }
     else
@@ -112,13 +115,13 @@ static void
 enableTimer (void)
 {
     itimerval interval = { { 0, 1000 }, { 0, 1000 } };
-    setitimer (ITIMER_PROF, &interval, 0);
+    setitimer (s_itimer, &interval, 0);
 }
 
-/** Enable SIGPROF signal handler.  */
+/** Enable profiling signal handler.  */
 static void
 enableSignalHandler (void)
-{ signal (SIGPROF, (sighandler_t) &profileSignalHandler); }
+{ signal (s_signal, (sighandler_t) &profileSignalHandler); }
 
 #if __linux
 /** Old GNU/Linux system hack.  Make sure the signal handling thread
@@ -130,8 +133,8 @@ profileSignalThreadFork (void)
     enableTimer ();
 }
 
-/** Old GNU/Linux system hack.  Worker thread for receiving SIGPROF
-    signals on behalf of all the other threads.  */
+/** Old GNU/Linux system hack.  Worker thread for receiving
+    profiling signals on behalf of all the other threads.  */
 static void *
 profileSignalThread (void *)
 {
@@ -151,7 +154,7 @@ profileSignalThread (void *)
 
 /** Old GNU/Linux system hack.  If the process is multi-threaded
     (linked against pthreads), start a a worker thread to listen for
-    the SIGPROF signals.  */
+    the profiling signals.  */
 static void
 enableSignalThread (void)
 {
@@ -165,7 +168,7 @@ enableSignalThread (void)
 }
 
 /** Old GNU/Linux system hack.  Record this thread to the table of
-    threads we need to pass SIGPROF for.  */
+    threads we need to pass profiling signal to.  */
 static void
 registerThisThread (void)
 {
@@ -192,7 +195,7 @@ threadWrapper (void *arg)
 
     sigset_t profset;
     sigemptyset (&profset);
-    sigaddset (&profset, SIGPROF);
+    sigaddset (&profset, s_signal);
     pthread_sigmask (SIG_UNBLOCK, &profset, 0);
 
     // Enable profiling in this thread.
@@ -237,6 +240,32 @@ IgProfPerf::initialize (void)
 	{
 	    enable = true;
 	    options += 4;
+	    while (*options)
+	    {
+		if (! strncmp (options, ":real", 5))
+		{
+		    IgProf::debug ("Perf: measuring real time\n");
+		    s_signal = SIGALRM;
+		    s_itimer = ITIMER_REAL;
+		    options += 5;
+		}
+		else if (! strncmp (options, ":user", 5))
+		{
+		    IgProf::debug ("Perf: profiling user time\n");
+		    s_signal = SIGVTALRM;
+		    s_itimer = ITIMER_VIRTUAL;
+		    options += 5;
+		}
+		else if (! strncmp (options, ":process", 7))
+		{
+		    IgProf::debug ("Perf: profiling process time\n");
+		    s_signal = SIGPROF;
+		    s_itimer = ITIMER_PROF;
+		    options += 7;
+		}
+		else
+		    break;
+	    }
 	}
 	else
 	    options++;
@@ -248,7 +277,7 @@ IgProfPerf::initialize (void)
     if (enable)
     {
 	// Enable profiler.  On old GNU/Linux systems, also start a
-	// signal handling worker thread that mirrors the SIGPROF
+	// signal handling worker thread that mirrors the profiling
 	// signal to all real user-threads.
 	IgProf::debug ("Performance profiler enabled\n");
 #if __linux

@@ -1,5 +1,8 @@
 2004-06-04  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProfPerf.cc: Support real, user and process time profiling.
+	Select the timer and signal to use based on this choice.
+
 	* IgProfMem.cc: Make "live" memory track both final live memory
 	(= leaked memory) and maximum live memory in each call context.
 
