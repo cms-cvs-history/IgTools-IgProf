@@ -1,0 +1,3 @@
+#!/bin/bash
+
+cat $1 | sed -e "s|^\([0-9]*\)\( bytes allocated by \)\([_a-zA-Z0-9]*\)\(.*\)|\1 \3|" | grep -v "^[MAN-]" | c++filt

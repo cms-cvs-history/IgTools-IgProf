@@ -1,0 +1,41 @@
+#!/bin/bash
+# Collect up args for Valgrind.  Only --version and --skin are intercepted
+# here;  the rest are passed to vg_main.c.
+
+igprofhelp () {
+	echo -e "--help                \tthis help message"
+	echo -e "--memory-profiler     \tstart the memory profiler"
+	echo -e "--performance-profiler\tstart the performance profile"
+	echo -e "--check-leaks         \tstart the leaks checker"
+	echo -e "--sort-by-self        \tsort the profiler output by the amount of"
+	echo -e "                      \tmemory/ticks allocated/occurred in the "
+	echo -e "                      \tsame function, rather then using the"
+	echo -e "                      \tcumulative sum of all a parent and all its"
+        echo -e "                      \tchildren functions."
+	echo -e "--reverse-sorting     \tsort by from smaller to bigger rather then bigger to smaller."
+	echo -e "--no-filtering        \tdoes not filter out any simbol from the output."
+}
+
+while [ $# != 0 ]
+do
+	arg=$1
+  	case "$arg" in
+	    --help|-h)			igprofhelp;;
+	    --memory-profiler|-mp)	;;
+	    --performance-profiler|-pp) OPTIONS="$OPTIONS profilespeed";;
+	    --check-leaks|-cl)		OPTIONS="$OPTIONS leaks";;
+	    --sort-by-self|-sbs)	OPTIONS="$OPTIONS byselfsorting";;
+	    --reverse-sorting|-r)	OPTIONS="$OPTIONS reverse";;
+	    --no-filtering|-nf)         OPTIONS="$OPTIONS nofiltering";;
+	    *)                      	break;;
+  	esac
+	shift
+done
+
+while [ $# != 0 ]
+do
+	COMMAND="$COMMAND $1"
+	shift
+done
+
+LD_PRELOAD=libMemProfLib.so MEMPROF=$OPTIONS $COMMAND

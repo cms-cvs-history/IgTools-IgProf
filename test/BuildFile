@@ -1,0 +1,5 @@
+<external ref=sockets>
+<bin file=test_leaks.cc>Test for leaks</bin>
+<bin file=test_performance.cc>Test for performance</bin>
+<bin file=test_instrumentation.cc>Test for instrumentation API</bin>
+<bin file=test_overriddenNew.cc>Test for overridden new operator</bin>
