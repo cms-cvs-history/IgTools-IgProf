@@ -1,1 +1,1 @@
-<external ref="sockets">
+<Use name=Ig_Tools/IgHook>

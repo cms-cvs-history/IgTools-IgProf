@@ -1,21 +1,23 @@
-#ifndef IG_PROF_IG_MPROF_TYPEDEFS_H
-# define IG_PROF_IG_MPROF_TYPEDEFS_H
+#ifndef IG_PROF_IG_PROF_FILE_DESC_H
+# define IG_PROF_IG_PROF_FILE_DESC_H
 
 //<<<<<< INCLUDES                                                       >>>>>>
-
-# include "Ig_Tools/IgProf/interface/config.h"
-
 //<<<<<< PUBLIC DEFINES                                                 >>>>>>
 //<<<<<< PUBLIC CONSTANTS                                               >>>>>>
 //<<<<<< PUBLIC TYPES                                                   >>>>>>
-
-typedef unsigned long long	allocationSize_t;
-typedef unsigned int		memAddress_t;
-
 //<<<<<< PUBLIC VARIABLES                                               >>>>>>
 //<<<<<< PUBLIC FUNCTIONS                                               >>>>>>
 //<<<<<< CLASS DECLARATIONS                                             >>>>>>
+
+class IgProfFileDesc
+{
+public:
+    static void initialize (void);
+    static void enable (void);
+    static void disable (void);
+};
+
 //<<<<<< INLINE PUBLIC FUNCTIONS                                        >>>>>>
 //<<<<<< INLINE MEMBER FUNCTIONS                                        >>>>>>
 
-#endif // IG_PROF_IG_MPROF_TYPEDEFS_H
+#endif // IG_PROF_IG_PROF_FILE_DESC_H
