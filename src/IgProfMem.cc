@@ -31,11 +31,9 @@ IGPROF_HOOK (void * (size_t, size_t), memalign, igmemalign);
 IGPROF_HOOK (void * (size_t), valloc, igvalloc);
 IGPROF_HOOK (void (void *), free, igfree);
 
-static IgHookTrace::Counter	s_ct_allocs	= { "MEM_ALLOCS" };
 static IgHookTrace::Counter	s_ct_total	= { "MEM_TOTAL" };
 static IgHookTrace::Counter	s_ct_largest	= { "MEM_MAX" };
 static IgHookTrace::Counter	s_ct_live	= { "MEM_LIVE" };
-static bool			s_count_allocs	= 0;
 static bool			s_count_total	= 0;
 static bool			s_count_largest	= 0;
 static bool			s_count_live	= 0;
@@ -60,7 +58,6 @@ add (void *ptr, size_t size)
 	node = node->child (IgHookTrace::tosymbol (addresses [i]));
 
     // Increment counters for this node
-    if (s_count_allocs)  node->counter (&s_ct_allocs)->tick ();
     if (s_count_total)   node->counter (&s_ct_total)->add (size);
     if (s_count_largest) node->counter (&s_ct_largest)->max (size);
     if (s_count_live)    node->counter (&s_ct_live)->max (size);
@@ -112,14 +109,7 @@ IgProfMem::initialize (void)
 	    options += 3;
 	    while (*options)
 	    {
-	        if (! strncmp (options, ":allocs", 7))
-	        {
-		    IgProf::debug ("Memory: enabling allocation counting\n");
-		    s_count_allocs = 1;
-		    options += 7;
-		    opts = true;
-	        }
-		else if (! strncmp (options, ":total", 6))
+		if (! strncmp (options, ":total", 6))
 	        {
 		    IgProf::debug ("Memory: enabling total counting\n");
 		    s_count_total = 1;
@@ -151,7 +141,6 @@ IgProfMem::initialize (void)
 		else if (! strncmp (options, ":all", 4))
 		{
 		    IgProf::debug ("Memory: enabling everything\n");
-		    s_count_allocs = 1;
 		    s_count_total = 1;
 		    s_count_largest = 1;
 		    s_count_live = 1;

@@ -41,7 +41,7 @@ while [ "$#" != 0 ]; do
 
     --memory-profiler | --memory | -m | -mp )
       [ -z "$MEM" ] && MEM=mem
-      MEM="$MEM:allocs:total:largest:live" MODE=profile; shift;;
+      MEM="$MEM:total:largest:live" MODE=profile; shift;;
 
     --file-descriptor | --fd | -f | -fd )
       [ -z "$FD" ] && FD=fd
