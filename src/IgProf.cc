@@ -313,8 +313,9 @@ IgProf::panic (const char *file, int line, const char *func, const char *expr)
 	const char	*sym = 0;
 	const char	*lib = 0;
 	int		offset = 0;
-	bool		nonheap = IgHookTrace::symbol (trace [i], sym, lib, offset);
-	fprintf (stderr, "  %p %s + %d [%s]\n", trace [i], sym, offset, lib);
+	int		liboffset = 0;
+	bool		nonheap = IgHookTrace::symbol (trace [i], sym, lib, offset, liboffset);
+	fprintf (stderr, "  %p %s + %d [%s + %d]\n", trace [i], sym, offset, lib, liboffset);
 	if (! nonheap) delete [] sym;
     }
 
@@ -349,11 +350,13 @@ dumpSymbols (FILE *output, IgHookTrace *node, std::set<void *> &addresses)
 	const char	*sym;
 	const char	*lib;
 	int		offset;
-	bool		nonheap = node->symbol (sym, lib, offset);
+	int		liboffset;
+	bool		nonheap = node->symbol (sym, lib, offset, liboffset);
 
 	// FIXME: url quote lib name!
-	fprintf (output, "  <sym addr=\"%p\" offset=\"%d\" name=\"%s\" lib=\"%s\"/>\n",
-		 node->address (), offset, sym ? sym : "", lib ? lib : "");
+	fprintf (output,
+		 "  <sym addr=\"%p\" offset=\"%d\" name=\"%s\" lib=\"%s\" liboff=\"%d\"/>\n",
+		 node->address (), offset, sym ? sym : "", lib ? lib : "", liboffset);
 
 	if (! nonheap) delete [] sym;
 

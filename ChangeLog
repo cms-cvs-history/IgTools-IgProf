@@ -1,3 +1,10 @@
+2004-06-15  Lassi A. Tuura  <lat@iki.fi>
+
+	* IgProf.cc (panic, dumpSymbols): Also print out library offset.
+	* scripts/igprof-analyse: Handle new library offset for symbols.
+	Optionally remap symbols with gdb to real (possibly private)
+	symbols.
+
 2004-06-07  Giulio Eulisse  <giulio.eulisse@cern.ch>
 
 	* IgProfPerf.cc (add): Drop profileSignalHandlerFrame ().

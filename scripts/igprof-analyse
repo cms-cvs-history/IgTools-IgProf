@@ -4,6 +4,7 @@ BEGIN { use strict; $^W = 1; }
 
 my $output = "text";
 my $demangle = 0;
+my $gdb = 1;
 my $showlibs = 0;
 my @keys;
 my @allkeys;
@@ -21,11 +22,34 @@ my @builtinfilter = qw(malloc calloc realloc memalign posix_memalign valloc _Znw
 my %demangled = ();
 sub symname
 {
-    my $sym = shift;
+    my ($sym, $lib, $liboffset) = @_;
     if (! exists $demangled{$sym}) {
 	my $new = $sym;
+	if ($gdb)
+	{
+	    # use gdb to figure out real symbol
+	    my $file = "/tmp/igprof-analyse.$$";
+	    open (TMP, " > $file") || die;
+	    print TMP "file $lib\n";
+	    print TMP "info line *$liboffset\n";
+	    close (TMP) || die;
+
+	    open (GDB, "gdb --batch --command=$file |") || die;
+	    while (<GDB>)
+	    {
+		if (/^Line .* starts at .* <(.*)(\+\d+)> and /) {
+		    $new = $1; last;
+		} elsif (/^No line number .* <(.*)(\+\d+)>/) {
+		    $new = $1; last;
+	        }
+	    }
+	    close (GDB);
+	    unlink ($file);
+	}
+	
 	if ($demangle) {
-	    chomp ($new = `c++filt '$sym'`);
+	    # now demangle if requested
+	    chomp ($new = `c++filt '$new'`);
 	}
 	$demangled{$sym} = $new;
     }
@@ -46,11 +70,12 @@ sub readDump
     while (<DUMP>)
     {
         chomp;
-	if (m|<sym addr="(.*)" offset="(.*)" name="(.*)" lib="(.*)"/>|)
+	if (m|<sym addr="(.*)" offset="(.*)" name="(.*)" lib="(.*)"( liboff="(.*)")?/>|)
 	{
 	    $syms->{$1}{OFFSET} = $2;
 	    $syms->{$1}{NAME} = $3;
 	    $syms->{$1}{LIB} = $4;
+	    $syms->{$1}{LIBOFF} = ($6 || 0);
 	}
 	elsif (/(\s+)<node id="([^"]*)" symaddr="([^"]*)">/)
 	{
@@ -171,7 +196,8 @@ sub analyse
 	    my $thiscall = $flat->{$caller}{CALLS}{$sym};
 	    my $callrow = [ $flat->{$caller}{RANK},
 			    $dump->{SYMS}{$caller}{NAME},
-			    $dump->{SYMS}{$caller}{LIB} ];
+			    $dump->{SYMS}{$caller}{LIB},
+			    $dump->{SYMS}{$caller}{LIBOFF} ];
 	    foreach my $key (@keyorder)
 	    {
 		push (@$callrow,
@@ -185,6 +211,7 @@ sub analyse
 	push (@{$row->{SYM}}, $flat->{$sym}{RANK});
 	push (@{$row->{SYM}}, $dump->{SYMS}{$sym}{NAME});
 	push (@{$row->{SYM}}, $dump->{SYMS}{$sym}{LIB});
+	push (@{$row->{SYM}}, $dump->{SYMS}{$sym}{LIBOFF});
 	push (@{$row->{SYM}}, map { $flat->{$sym}{$sortkey}{$_} } @keyorder);
 
 	# children
@@ -193,7 +220,8 @@ sub analyse
 	    my $thiscall = $flat->{$sym}{CALLS}{$callee};
 	    my $callrow = [ $flat->{$callee}{RANK},
 			    $dump->{SYMS}{$callee}{NAME},
-			    $dump->{SYMS}{$callee}{LIB} ];
+			    $dump->{SYMS}{$callee}{LIB},
+			    $dump->{SYMS}{$callee}{LIBOFF} ];
 	    foreach my $key (@keyorder)
 	    {
 		push (@$callrow,
@@ -214,24 +242,24 @@ sub analyse
 	    print "\n", "-" x 70, "\n";
 	    foreach my $caller (@{$entry->{CALLERS}})
 	    {
-		($rank, $name, $lib, @keys) = @$caller;
+		($rank, $name, $lib, $liboff, @keys) = @$caller;
 		print join("\t", "", map { "$_->[0]/$_->[1]" } map { @$_ } @keys);
-		print "\t@{[&symname ($name)]} [$rank]";
+		print "\t@{[&symname ($name, $lib, $liboff)]} [$rank]";
 		print " ($lib)" if $showlibs;
 		print "\n";
 	    }
 
-	    ($rank, $name, $lib, @keys) = @{$entry->{SYM}};
+	    ($rank, $name, $lib, $liboff, @keys) = @{$entry->{SYM}};
 	    print join("\t", "[$rank]", map { @$_ } @keys);
-	    print "\t@{[&symname ($name)]}";
+	    print "\t@{[&symname ($name, $lib, $liboff)]}";
 	    print " ($lib)" if $showlibs;
 	    print "\n";
 
 	    foreach my $callee (@{$entry->{CALLS}})
 	    {
-		($rank, $name, $lib, @keys) = @$callee;
+		($rank, $name, $lib, $liboff, @keys) = @$callee;
 		print join("\t", "", map { "$_->[0]/$_->[1]" } map { @$_ } @keys);
-		print "\t@{[&symname ($name)]} [$rank]";
+		print "\t@{[&symname ($name, $lib, $liboff)]} [$rank]";
 		print " ($lib)" if $showlibs;
 		print "\n";
 	    }
@@ -247,7 +275,7 @@ sub analyse
 	}
 	    
 	sub htmlrow {
-	    my ($keyorder, $type, $rank, $name, $lib, @keys) = @_;
+	    my ($keyorder, $type, $rank, $name, $lib, $liboff, @keys) = @_;
 	    print "  <tr>\n";
 	    if ($type eq 0) {
 		print "    <td><a name=\"R$rank\">[$rank]</a></td>\n";
@@ -265,7 +293,7 @@ sub analyse
 		    &htmlcounter (2, @$val);
 		}
 	    }
-	    $name = &symname ($name);
+	    $name = &symname ($name, $lib, $liboff);
 	    $name =~ s/&/&amp;/g; $name =~ s/</&lt;/g; $name =~ s/>/&gt;/g;
 	    print "    <td><a href=\"#R$rank\">$name</a>";
 	    if ($type eq 0) {
@@ -546,11 +574,12 @@ sub usage
     		 "  [-s/--sort KEY[,KEY]...] [-o/--order ORDER]\n",
 		 "  [-f/--filter FILE] [-F/--no-filter]\n",
 		 "  { [-e/--self] | [-c/--cumulative] }\n",
-		 "  { [-x/--xml] | [-h/--html] | [-t/--text]\n",
+		 "  { [-x/--xml] | [-h/--html] | [-t/--text] }\n",
+		 "  [--libs] [--demangle] [--gdb]\n",
 		 "  [--] [FILE]...\n";
 }
 
-while ($#ARGV != 0)
+while ($#ARGV > 0)
 {
     if ($ARGV[0] eq '--help')
     { &usage(); exit (1); }
@@ -578,6 +607,8 @@ while ($#ARGV != 0)
     { $output = "text"; shift (@ARGV); }
     elsif ($ARGV[0] eq '--demangle' || $ARGV[0] eq '-d')
     { $demangle = 1; shift (@ARGV); }
+    elsif ($ARGV[0] eq '--gdb' || $ARGV[0] eq '-g')
+    { $gdb = 1; shift (@ARGV); }
     elsif ($ARGV[0] eq '--')
     { last; }
     elsif ($ARGV[0] =~ /^-/)
