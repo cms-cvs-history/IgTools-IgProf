@@ -1,5 +1,7 @@
 2004-05-12  Lassi A. Tuura  <lat@iki.fi>
 
+	* igprof-analyse: First complete version (except recursion).
+
 	* IgProf.cc: Output counter counts.  Clean up output layout.
 
 	* igprof, IgProfMem.cc: Counters now have counts as well as
