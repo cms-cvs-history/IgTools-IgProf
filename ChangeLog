@@ -1,5 +1,7 @@
 2004-05-14  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProf.h: Restore old interface.
+
 	* IgProfPerf.cc: Disable/enable timer and signal handler when
 	the module is disabled/enabled.  Rearrange init sequence so
 	we can call system pthread_create().

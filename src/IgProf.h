@@ -53,9 +53,11 @@ public:
     static void			activate (void);
     static void			deactivate (void);
 
+    static bool			isMultiThreaded (void);
+
 private:
     friend class IgProfLock;
-    static bool			lock (void);
+    static void			lock (void);
     static void			unlock (void);
 
     static void			enable (void);
@@ -74,7 +76,6 @@ private:
     IgProfLock (const IgProfLock &);
     IgProfLock &operator= (const IgProfLock &);
 
-    bool	m_locked;
     int		m_enabled;
 };
 
