@@ -4,4 +4,6 @@
 	MEM_PROF_LIB changed to IG_PROF.
 
 	* (all files): copied as is from IGUANA Ig_Imports/MemProfLib
+	
+	* BuildFile: moved from Ig_Tools/IgProf/src to Ig_Tools/IgProf.
 
