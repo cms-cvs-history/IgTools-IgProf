@@ -1,9 +1,9 @@
-#ifndef MEM_PROF_LIB_IG_MPROF_BOOTSTRAP_H
-# define MEM_PROF_LIB_IG_MPROF_BOOTSTRAP_H
+#ifndef IG_PROF_IG_MPROF_BOOTSTRAP_H
+# define IG_PROF_IG_MPROF_BOOTSTRAP_H
 
 //<<<<<< INCLUDES                                                       >>>>>>
 
-# include "Ig_Imports/MemProfLib/interface/config.h"
+# include "Ig_Tools/IgProf/interface/config.h"
 # include "signal.h"
 //<<<<<< PUBLIC DEFINES                                                 >>>>>>
 //<<<<<< PUBLIC CONSTANTS                                               >>>>>>
@@ -14,7 +14,7 @@ class IgMProfLinearBrowser;
 //<<<<<< PUBLIC FUNCTIONS                                               >>>>>>
 //<<<<<< CLASS DECLARATIONS                                             >>>>>>
 
-class MEM_PROF_LIB_API IgMProfBootstrap
+class IG_PROF_API IgMProfBootstrap
 {
 public:
     IgMProfBootstrap (void);
@@ -33,4 +33,4 @@ static IgMProfBootstrap bootstrap;
 //<<<<<< INLINE PUBLIC FUNCTIONS                                        >>>>>>
 //<<<<<< INLINE MEMBER FUNCTIONS                                        >>>>>>
 
-#endif // MEM_PROF_LIB_IG_MPROF_BOOTSTRAP_H
+#endif // IG_PROF_IG_MPROF_BOOTSTRAP_H

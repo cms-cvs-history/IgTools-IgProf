@@ -1,9 +1,9 @@
-#ifndef MEM_PROF_LIB_IG_MPROF_TREE_LEAF_H
-# define MEM_PROF_LIB_IG_MPROF_TREE_LEAF_H
+#ifndef IG_PROF_IG_MPROF_TREE_LEAF_H
+# define IG_PROF_IG_MPROF_TREE_LEAF_H
 
 //<<<<<< INCLUDES                                                       >>>>>>
 
-# include "Ig_Imports/MemProfLib/interface/config.h"
+# include "Ig_Tools/IgProf/interface/config.h"
 # include <ext/hash_map>
 # include "IgMProfAllocator.h"
 # include "IgMProfTypedefs.h"
@@ -20,7 +20,7 @@
     All the information relative to children of this node are stored in the m_leafMap map.
  */
 
-class MEM_PROF_LIB_API IgMProfTreeLeaf
+class IG_PROF_API IgMProfTreeLeaf
 {
 public:
     typedef __gnu_cxx::hash_map<int, IgMProfTreeLeaf *, __gnu_cxx::hash<int>,
@@ -54,4 +54,4 @@ private:
 //<<<<<< INLINE PUBLIC FUNCTIONS                                        >>>>>>
 //<<<<<< INLINE MEMBER FUNCTIONS                                        >>>>>>
 
-#endif // MEM_PROF_LIB_IG_MPROF_TREE_LEAF_H
+#endif // IG_PROF_IG_MPROF_TREE_LEAF_H

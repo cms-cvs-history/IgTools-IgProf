@@ -1,9 +1,9 @@
-#ifndef MEM_PROF_LIB_IG_MPROF_ALLOCATOR_H
-# define MEM_PROF_LIB_IG_MPROF_ALLOCATOR_H
+#ifndef IG_PROF_IG_MPROF_ALLOCATOR_H
+# define IG_PROF_IG_MPROF_ALLOCATOR_H
 
 //<<<<<< INCLUDES                                                       >>>>>>
 
-# include "Ig_Imports/MemProfLib/interface/config.h"
+# include "Ig_Tools/IgProf/interface/config.h"
 # include <vector>
 
 //<<<<<< PUBLIC DEFINES                                                 >>>>>>
@@ -19,7 +19,7 @@
    For this reason we have written a separate allocator.
    FIXME: put this in proper english...;-)
  */
-template <class _Tp> class MEM_PROF_LIB_API IgMProfAllocator : public std::allocator<_Tp>
+template <class _Tp> class IG_PROF_API IgMProfAllocator : public std::allocator<_Tp>
 {
     typedef std::__default_alloc_template<true, -1> _Alloc; // The underlying allocator.
 public:
@@ -41,4 +41,4 @@ public:
 //<<<<<< INLINE PUBLIC FUNCTIONS                                        >>>>>>
 //<<<<<< INLINE MEMBER FUNCTIONS                                        >>>>>>
 
-#endif // MEM_PROF_LIB_IG_MPROF_ALLOCATOR_H
+#endif // IG_PROF_IG_MPROF_ALLOCATOR_H

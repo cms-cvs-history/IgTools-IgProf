@@ -1,9 +1,9 @@
-#ifndef MEM_PROF_LIB_IG_MPROF_CONFIGURATION_H
-# define MEM_PROF_LIB_IG_MPROF_CONFIGURATION_H
+#ifndef IG_PROF_IG_MPROF_CONFIGURATION_H
+# define IG_PROF_IG_MPROF_CONFIGURATION_H
 
 //<<<<<< INCLUDES                                                       >>>>>>
 
-# include "Ig_Imports/MemProfLib/interface/config.h"
+# include "Ig_Tools/IgProf/interface/config.h"
 # include <string>
 //<<<<<< PUBLIC DEFINES                                                 >>>>>>
 //<<<<<< PUBLIC CONSTANTS                                               >>>>>>
@@ -24,7 +24,7 @@
  *    	- leaks: enables the possible leaks checker.
  *	- nofiltering: does not filter any symbol from the output.
  */
-class MEM_PROF_LIB_API IgMProfConfiguration
+class IG_PROF_API IgMProfConfiguration
 {
 public:
     IgMProfConfiguration (void)
@@ -87,7 +87,7 @@ public:
     // implicit destructor
 };
 
-class MEM_PROF_LIB_API IgMProfConfigurationSingleton : private IgMProfConfiguration
+class IG_PROF_API IgMProfConfigurationSingleton : private IgMProfConfiguration
 {
 private:
     IgMProfConfigurationSingleton (void)
@@ -108,4 +108,4 @@ public:
 //<<<<<< INLINE PUBLIC FUNCTIONS                                        >>>>>>
 //<<<<<< INLINE MEMBER FUNCTIONS                                        >>>>>>
 
-#endif // MEM_PROF_LIB_IG_MPROF_CONFIGURATION_H
+#endif // IG_PROF_IG_MPROF_CONFIGURATION_H

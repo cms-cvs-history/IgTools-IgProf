@@ -1,10 +1,10 @@
-#ifndef MEM_PROF_LIB_IG_MPROF_LINEAR_BROWSER_H
-# define MEM_PROF_LIB_IG_MPROF_LINEAR_BROWSER_H
+#ifndef IG_PROF_IG_MPROF_LINEAR_BROWSER_H
+# define IG_PROF_IG_MPROF_LINEAR_BROWSER_H
 
 //<<<<<< INCLUDES                                                       >>>>>>
 
-# include "Ig_Imports/MemProfLib/interface/config.h"
-# include "Ig_Imports/MemProfLib/src/IgMProfTypedefs.h"
+# include "Ig_Tools/IgProf/interface/config.h"
+# include "Ig_Tools/IgProf/src/IgMProfTypedefs.h"
 # include <string>
 # include <fstream>
 # include <map>
@@ -19,7 +19,7 @@ class IgMProfLinearRep;
 //<<<<<< PUBLIC FUNCTIONS                                               >>>>>>
 //<<<<<< CLASS DECLARATIONS                                             >>>>>>
 
-class MEM_PROF_LIB_API IgMProfLinearBrowser
+class IG_PROF_API IgMProfLinearBrowser
 {
 private:
     IgMProfLinearRep *m_rep;    
@@ -54,4 +54,4 @@ public:
 //<<<<<< INLINE PUBLIC FUNCTIONS                                        >>>>>>
 //<<<<<< INLINE MEMBER FUNCTIONS                                        >>>>>>
 
-#endif // MEM_PROF_LIB_IG_MPROF_LINEAR_BROWSER_H
+#endif // IG_PROF_IG_MPROF_LINEAR_BROWSER_H

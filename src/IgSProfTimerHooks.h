@@ -1,9 +1,9 @@
-#ifndef MEM_PROF_LIB_IG_SPROF_TIMER_HOOKS_H
-# define MEM_PROF_LIB_IG_SPROF_TIMER_HOOKS_H
+#ifndef IG_PROF_IG_SPROF_TIMER_HOOKS_H
+# define IG_PROF_IG_SPROF_TIMER_HOOKS_H
 
 //<<<<<< INCLUDES                                                       >>>>>>
 
-# include "Ig_Imports/MemProfLib/interface/config.h"
+# include "Ig_Tools/IgProf/interface/config.h"
 
 //<<<<<< PUBLIC DEFINES                                                 >>>>>>
 //<<<<<< PUBLIC CONSTANTS                                               >>>>>>
@@ -19,4 +19,4 @@ void IGUANA_sprof_initialize_hook(void);
 //<<<<<< INLINE PUBLIC FUNCTIONS                                        >>>>>>
 //<<<<<< INLINE MEMBER FUNCTIONS                                        >>>>>>
 
-#endif // MEM_PROF_LIB_IG_SPROF_TIMER_HOOKS_H
+#endif // IG_PROF_IG_SPROF_TIMER_HOOKS_H

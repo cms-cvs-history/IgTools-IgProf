@@ -1,7 +1,7 @@
 //<<<<<< INCLUDES                                                       >>>>>>
 
-#include "Ig_Imports/MemProfLib/interface/IgMProfTotalMem.h"
-#include "Ig_Imports/MemProfLib/src/IgMProfLinearRep.h"
+#include "Ig_Tools/IgProf/interface/IgMProfTotalMem.h"
+#include "Ig_Tools/IgProf/src/IgMProfLinearRep.h"
 
 //<<<<<< PRIVATE DEFINES                                                >>>>>>
 //<<<<<< PRIVATE CONSTANTS                                              >>>>>>

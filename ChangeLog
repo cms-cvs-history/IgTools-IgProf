@@ -1,4 +1,7 @@
 2003-10-07  Giulio Eulisse  <giulio.eulisse@cern.ch>
 
+	* (all files): renamed Ig_Imports/MemProfLib to Ig_Tools/IgProf.
+	MEM_PROF_LIB changed to IG_PROF.
+
 	* (all files): copied as is from IGUANA Ig_Imports/MemProfLib
 

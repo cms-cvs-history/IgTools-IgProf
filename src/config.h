@@ -1,5 +1,5 @@
-#ifndef MEM_PROF_LIB_SRC_CONFIG_H
-# define MEM_PROF_LIB_SRC_CONFIG_H
+#ifndef IG_PROF_SRC_CONFIG_H
+# define IG_PROF_SRC_CONFIG_H
 
 #include <stdlib.h>
 
@@ -7,4 +7,4 @@
 # define __HAS_MALLOC_H__
 #endif
 
-#endif // MEM_PROF_LIB_CONFIG_H
+#endif // IG_PROF_CONFIG_H

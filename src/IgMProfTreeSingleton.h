@@ -1,10 +1,10 @@
-#ifndef MEM_PROF_LIB_IG_MPROF_TREE_SINGLETON_H
-# define MEM_PROF_LIB_IG_MPROF_TREE_SINGLETON_H
+#ifndef IG_PROF_IG_MPROF_TREE_SINGLETON_H
+# define IG_PROF_IG_MPROF_TREE_SINGLETON_H
 
 //<<<<<< INCLUDES                                                       >>>>>>
 
-# include "Ig_Imports/MemProfLib/interface/config.h"
-# include "Ig_Imports/MemProfLib/src/IgMProfSymbolFilter.h"
+# include "Ig_Tools/IgProf/interface/config.h"
+# include "Ig_Tools/IgProf/src/IgMProfSymbolFilter.h"
 # include "IgMProfTreeRep.h"
 
 //<<<<<< PUBLIC DEFINES                                                 >>>>>>
@@ -14,7 +14,7 @@
 //<<<<<< PUBLIC FUNCTIONS                                               >>>>>>
 //<<<<<< CLASS DECLARATIONS                                             >>>>>>
 
-class MEM_PROF_LIB_API IgMProfMallocTreeSingleton
+class IG_PROF_API IgMProfMallocTreeSingleton
 {
 public:
     static IgMProfTreeRep *instance(void)
@@ -28,7 +28,7 @@ public:
 	}    
 };
 
-class MEM_PROF_LIB_API IgMProfProfileTreeSingleton
+class IG_PROF_API IgMProfProfileTreeSingleton
 {
 public:
     static IgMProfTreeRep *instance(void)
@@ -46,4 +46,4 @@ public:
 //<<<<<< INLINE PUBLIC FUNCTIONS                                        >>>>>>
 //<<<<<< INLINE MEMBER FUNCTIONS                                        >>>>>>
 
-#endif // MEM_PROF_LIB_IG_MPROF_TREE_SINGLETON_H
+#endif // IG_PROF_IG_MPROF_TREE_SINGLETON_H

@@ -6,7 +6,7 @@
 #include "IgMProfTreeLeafFactory.h"
 #include "IgMProfSymbolMap.h"
 #include "IgMProfSymbolFilter.h"
-#include "Ig_Imports/MemProfLib/src/IgMProfConfiguration.h"
+#include "Ig_Tools/IgProf/src/IgMProfConfiguration.h"
 #include <dlfcn.h>
 #include <execinfo.h>
 

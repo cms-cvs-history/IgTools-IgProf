@@ -1,6 +1,6 @@
 //<<<<<< INCLUDES                                                       >>>>>>
 
-#include "Ig_Imports/MemProfLib/src/IgMProfLinearRep.h"
+#include "Ig_Tools/IgProf/src/IgMProfLinearRep.h"
 #include <iostream>
 #include <execinfo.h>
 

@@ -1,9 +1,9 @@
-#ifndef MEM_PROF_LIB_IG_MPROF_TREE_TEXT_BROWSER_H
-# define MEM_PROF_LIB_IG_MPROF_TREE_TEXT_BROWSER_H
+#ifndef IG_PROF_IG_MPROF_TREE_TEXT_BROWSER_H
+# define IG_PROF_IG_MPROF_TREE_TEXT_BROWSER_H
 
 //<<<<<< INCLUDES                                                       >>>>>>
 
-# include "Ig_Imports/MemProfLib/interface/config.h"
+# include "Ig_Tools/IgProf/interface/config.h"
 # include <map>
 # include "IgMProfAllocator.h"
 # include "IgMProfStacktraceFlatNode.h"
@@ -21,7 +21,7 @@ class IgMProfTreeLeaf;
 //<<<<<< PUBLIC FUNCTIONS                                               >>>>>>
 //<<<<<< CLASS DECLARATIONS                                             >>>>>>
 
-class MEM_PROF_LIB_API IgMProfTreeTextBrowser
+class IG_PROF_API IgMProfTreeTextBrowser
 {
 private:
     typedef std::map<int,IgMProfFlatNode *, std::less<int>, IgMProfAllocator<IgMProfFlatNode *> > FlatMap;
@@ -78,4 +78,4 @@ public:
 //<<<<<< INLINE PUBLIC FUNCTIONS                                        >>>>>>
 //<<<<<< INLINE MEMBER FUNCTIONS                                        >>>>>>
 
-#endif // MEM_PROF_LIB_IG_MPROF_TREE_TEXT_BROWSER_H
+#endif // IG_PROF_IG_MPROF_TREE_TEXT_BROWSER_H

@@ -1,9 +1,9 @@
-#ifndef MEM_PROF_LIB_IG_MPROF_TREE_LEAF_FACTORY_H
-# define MEM_PROF_LIB_IG_MPROF_TREE_LEAF_FACTORY_H
+#ifndef IG_PROF_IG_MPROF_TREE_LEAF_FACTORY_H
+# define IG_PROF_IG_MPROF_TREE_LEAF_FACTORY_H
 
 //<<<<<< INCLUDES                                                       >>>>>>
 
-# include "Ig_Imports/MemProfLib/interface/config.h"
+# include "Ig_Tools/IgProf/interface/config.h"
 
 //<<<<<< PUBLIC DEFINES                                                 >>>>>>
 //<<<<<< PUBLIC CONSTANTS                                               >>>>>>
@@ -14,7 +14,7 @@ class IgMProfTreeLeaf;
 //<<<<<< PUBLIC FUNCTIONS                                               >>>>>>
 //<<<<<< CLASS DECLARATIONS                                             >>>>>>
 
-class MEM_PROF_LIB_API IgMProfTreeLeafFactory
+class IG_PROF_API IgMProfTreeLeafFactory
 {
 private:
     int m_allocatedLeafCount;
@@ -29,4 +29,4 @@ public:
 //<<<<<< INLINE PUBLIC FUNCTIONS                                        >>>>>>
 //<<<<<< INLINE MEMBER FUNCTIONS                                        >>>>>>
 
-#endif // MEM_PROF_LIB_IG_MPROF_TREE_LEAF_FACTORY_H
+#endif // IG_PROF_IG_MPROF_TREE_LEAF_FACTORY_H

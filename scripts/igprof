@@ -38,4 +38,4 @@ do
 	shift
 done
 
-LD_PRELOAD=libMemProfLib.so MEMPROF=$OPTIONS $COMMAND
+LD_PRELOAD=libIgProf.so MEMPROF=$OPTIONS $COMMAND

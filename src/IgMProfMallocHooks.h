@@ -1,9 +1,9 @@
-#ifndef MEM_PROF_LIB_IG_MPROF_MALLOC_HOOKS_H
-# define MEM_PROF_LIB_IG_MPROF_MALLOC_HOOKS_H
+#ifndef IG_PROF_IG_MPROF_MALLOC_HOOKS_H
+# define IG_PROF_IG_MPROF_MALLOC_HOOKS_H
 
 //<<<<<< INCLUDES                                                       >>>>>>
 
-# include "Ig_Imports/MemProfLib/interface/config.h"
+# include "Ig_Tools/IgProf/interface/config.h"
 # include <stdlib.h>
 
 //<<<<<< PUBLIC DEFINES                                                 >>>>>>
@@ -36,4 +36,4 @@ void IGUANA_memdebug_disable_hooks (void);
 //<<<<<< INLINE PUBLIC FUNCTIONS                                        >>>>>>
 //<<<<<< INLINE MEMBER FUNCTIONS                                        >>>>>>
 
-#endif // MEM_PROF_LIB_IG_MPROF_MALLOC_HOOKS_H
+#endif // IG_PROF_IG_MPROF_MALLOC_HOOKS_H

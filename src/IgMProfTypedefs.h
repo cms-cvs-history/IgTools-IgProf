@@ -1,9 +1,9 @@
-#ifndef MEM_PROF_LIB_IG_MPROF_TYPEDEFS_H
-# define MEM_PROF_LIB_IG_MPROF_TYPEDEFS_H
+#ifndef IG_PROF_IG_MPROF_TYPEDEFS_H
+# define IG_PROF_IG_MPROF_TYPEDEFS_H
 
 //<<<<<< INCLUDES                                                       >>>>>>
 
-# include "Ig_Imports/MemProfLib/interface/config.h"
+# include "Ig_Tools/IgProf/interface/config.h"
 
 //<<<<<< PUBLIC DEFINES                                                 >>>>>>
 //<<<<<< PUBLIC CONSTANTS                                               >>>>>>
@@ -18,4 +18,4 @@ typedef unsigned int		memAddress_t;
 //<<<<<< INLINE PUBLIC FUNCTIONS                                        >>>>>>
 //<<<<<< INLINE MEMBER FUNCTIONS                                        >>>>>>
 
-#endif // MEM_PROF_LIB_IG_MPROF_TYPEDEFS_H
+#endif // IG_PROF_IG_MPROF_TYPEDEFS_H

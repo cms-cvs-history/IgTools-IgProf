@@ -1,9 +1,9 @@
-#ifndef MEM_PROF_LIB_IG_MPROF_TOTAL_MEM_H
-# define MEM_PROF_LIB_IG_MPROF_TOTAL_MEM_H
+#ifndef IG_PROF_IG_MPROF_TOTAL_MEM_H
+# define IG_PROF_IG_MPROF_TOTAL_MEM_H
 
 //<<<<<< INCLUDES                                                       >>>>>>
 
-# include "Ig_Imports/MemProfLib/interface/config.h"
+# include "Ig_Tools/IgProf/interface/config.h"
 
 //<<<<<< PUBLIC DEFINES                                                 >>>>>>
 //<<<<<< PUBLIC CONSTANTS                                               >>>>>>
@@ -17,4 +17,4 @@ int totalAllocatedMemory ();
 //<<<<<< INLINE PUBLIC FUNCTIONS                                        >>>>>>
 //<<<<<< INLINE MEMBER FUNCTIONS                                        >>>>>>
 
-#endif // MEM_PROF_LIB_IG_MPROF_TOTAL_MEM_H
+#endif // IG_PROF_IG_MPROF_TOTAL_MEM_H

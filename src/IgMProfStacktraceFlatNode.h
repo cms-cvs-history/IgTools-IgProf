@@ -1,9 +1,9 @@
-#ifndef MEM_PROF_LIB_IG_STACKTRACE_FLAT_NODE_H
-# define MEM_PROF_LIB_IG_STACKTRACE_FLAT_NODE_H
+#ifndef IG_PROF_IG_STACKTRACE_FLAT_NODE_H
+# define IG_PROF_IG_STACKTRACE_FLAT_NODE_H
 
 //<<<<<< INCLUDES                                                       >>>>>>
 
-# include "Ig_Imports/MemProfLib/interface/config.h"
+# include "Ig_Tools/IgProf/interface/config.h"
 # include "IgMProfTypedefs.h"
 # include <string>
 # include <set>
@@ -35,4 +35,4 @@ struct IgMProfFlatNode {
 //<<<<<< INLINE PUBLIC FUNCTIONS                                        >>>>>>
 //<<<<<< INLINE MEMBER FUNCTIONS                                        >>>>>>
 
-#endif // MEM_PROF_LIB_IG_STACKTRACE_FLAT_NODE_H
+#endif // IG_PROF_IG_STACKTRACE_FLAT_NODE_H

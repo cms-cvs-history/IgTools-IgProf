@@ -1,9 +1,9 @@
-#ifndef MEM_PROF_LIB_IG_MPROF_TREE_REP_H
-# define MEM_PROF_LIB_IG_MPROF_TREE_REP_H
+#ifndef IG_PROF_IG_MPROF_TREE_REP_H
+# define IG_PROF_IG_MPROF_TREE_REP_H
 
 //<<<<<< INCLUDES                                                       >>>>>>
 
-# include "Ig_Imports/MemProfLib/interface/config.h"
+# include "Ig_Tools/IgProf/interface/config.h"
 # include "IgMProfTypedefs.h"
 # include "IgMProfAllocator.h"
 # include <ext/hash_map>
@@ -21,7 +21,7 @@ class IgMProfSymbolFilter;
 //<<<<<< PUBLIC FUNCTIONS                                               >>>>>>
 //<<<<<< CLASS DECLARATIONS                                             >>>>>>
 
-class MEM_PROF_LIB_API IgMProfTreeRep
+class IG_PROF_API IgMProfTreeRep
 {
 public:
     IgMProfTreeLeaf *m_rootLeaf;
@@ -54,4 +54,4 @@ private:
 //<<<<<< INLINE PUBLIC FUNCTIONS                                        >>>>>>
 //<<<<<< INLINE MEMBER FUNCTIONS                                        >>>>>>
 
-#endif // MEM_PROF_LIB_IG_MPROF_TREE_REP_H
+#endif // IG_PROF_IG_MPROF_TREE_REP_H

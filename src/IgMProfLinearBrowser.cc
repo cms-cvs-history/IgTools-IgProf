@@ -1,9 +1,9 @@
 //<<<<<< INCLUDES                                                       >>>>>>
 
-#include "Ig_Imports/MemProfLib/src/IgMProfLinearBrowser.h"
-#include "Ig_Imports/MemProfLib/src/IgMProfLinearRep.h"
-#include "Ig_Imports/MemProfLib/src/IgMProfMallocHooks.h"
-#include "Ig_Imports/MemProfLib/src/IgMProfTypedefs.h"
+#include "Ig_Tools/IgProf/src/IgMProfLinearBrowser.h"
+#include "Ig_Tools/IgProf/src/IgMProfLinearRep.h"
+#include "Ig_Tools/IgProf/src/IgMProfMallocHooks.h"
+#include "Ig_Tools/IgProf/src/IgMProfTypedefs.h"
 #include <execinfo.h>
 #include <dlfcn.h>
 #ifdef __GLIBC__

@@ -1,9 +1,9 @@
-#ifndef MEM_PROF_LIB_IG_MPROF_SYMBOL_FILTER_H
-# define MEM_PROF_LIB_IG_MPROF_SYMBOL_FILTER_H
+#ifndef IG_PROF_IG_MPROF_SYMBOL_FILTER_H
+# define IG_PROF_IG_MPROF_SYMBOL_FILTER_H
 
 //<<<<<< INCLUDES                                                       >>>>>>
 
-# include "Ig_Imports/MemProfLib/interface/config.h"
+# include "Ig_Tools/IgProf/interface/config.h"
 # include "IgMProfTypedefs.h"
 # include <iostream>
 # include <fstream>
@@ -19,7 +19,7 @@
 //<<<<<< PUBLIC FUNCTIONS                                               >>>>>>
 //<<<<<< CLASS DECLARATIONS                                             >>>>>>
 
-class MEM_PROF_LIB_API IgMProfSymbolFilter
+class IG_PROF_API IgMProfSymbolFilter
 {
 public:
     IgMProfSymbolFilter (void);    
@@ -37,4 +37,4 @@ private:
 //<<<<<< INLINE PUBLIC FUNCTIONS                                        >>>>>>
 //<<<<<< INLINE MEMBER FUNCTIONS                                        >>>>>>
 
-#endif // MEM_PROF_LIB_IG_MPROF_SYMBOL_FILTER_H
+#endif // IG_PROF_IG_MPROF_SYMBOL_FILTER_H

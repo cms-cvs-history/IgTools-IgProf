@@ -1,9 +1,9 @@
-#ifndef MEM_PROF_LIB_IG_MPROF_SYMBOL_LIST_H
-# define MEM_PROF_LIB_IG_MPROF_SYMBOL_LIST_H
+#ifndef IG_PROF_IG_MPROF_SYMBOL_LIST_H
+# define IG_PROF_IG_MPROF_SYMBOL_LIST_H
 
 //<<<<<< INCLUDES                                                       >>>>>>
 
-# include "Ig_Imports/MemProfLib/interface/config.h"
+# include "Ig_Tools/IgProf/interface/config.h"
 # include <ext/hash_map>
 # include <dlfcn.h>
 # include <execinfo.h>
@@ -18,7 +18,7 @@
     Symbols are cached after the first time they are accessed so that dladdr() lookup overhead
     is reduced.
  */
-class MEM_PROF_LIB_API IgMProfSymbolMap 
+class IG_PROF_API IgMProfSymbolMap 
 {
 private:
     typedef __gnu_cxx::hash_map<memAddress_t, memAddress_t, __gnu_cxx::hash<int>,
@@ -56,4 +56,4 @@ public:
 //<<<<<< INLINE PUBLIC FUNCTIONS                                        >>>>>>
 //<<<<<< INLINE MEMBER FUNCTIONS                                        >>>>>>
 
-#endif // MEM_PROF_LIB_IG_MPROF_SYMBOL_LIST_H
+#endif // IG_PROF_IG_MPROF_SYMBOL_LIST_H
