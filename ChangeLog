@@ -5,6 +5,7 @@
 	are quitting to avoid invoking into pthreads in destructors
 	(e.g. from late-delivered profile signal).  Try to work around
 	bugs in linux recursive mutex handling within signals.
+	* IgProf.h (IgProfLock): Update.
 
 	* IgProfPerf.cc: Synchronise profiling signal thread startup.
 	Correctly check whether profiling module is enabled.  Make sure

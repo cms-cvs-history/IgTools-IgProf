@@ -55,7 +55,7 @@ public:
 
 private:
     friend class IgProfLock;
-    static void			lock (void);
+    static bool			lock (void);
     static void			unlock (void);
 
     static void			enable (void);
@@ -74,6 +74,7 @@ private:
     IgProfLock (const IgProfLock &);
     IgProfLock &operator= (const IgProfLock &);
 
+    bool	m_locked;
     int		m_enabled;
 };
 
