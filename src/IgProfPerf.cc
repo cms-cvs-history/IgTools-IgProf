@@ -37,19 +37,19 @@ IGPROF_LIBHOOK (4, int, dopthread_create, _main,
 	        (pthread_t *thread, const pthread_attr_t *attr,
 		 void * (*start_routine)(void *), void *arg),
 		(thread, attr, start_routine, arg),
-	        "pthread_create", 0, 0);
+	        "pthread_create", 0, 0)
 
 IGPROF_LIBHOOK (4, int, dopthread_create, _pthread20,
 	        (pthread_t *thread, const pthread_attr_t *attr,
 		 void * (*start_routine)(void *), void *arg),
 		(thread, attr, start_routine, arg),
-	        "pthread_create", "GLIBC_2.0", 0);
+	        "pthread_create", "GLIBC_2.0", 0)
 
 IGPROF_LIBHOOK (4, int, dopthread_create, _pthread21,
 	        (pthread_t *thread, const pthread_attr_t *attr,
 		 void * (*start_routine)(void *), void *arg),
 		(thread, attr, start_routine, arg),
-	        "pthread_create", "GLIBC_2.1", 0);
+	        "pthread_create", "GLIBC_2.1", 0)
 
 // Data for this profiler module
 static IgHookTrace::Counter	s_ct_ticks	= { "PERF_TICKS" };

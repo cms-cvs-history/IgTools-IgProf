@@ -20,25 +20,25 @@
 // Traps for this profiling module
 IGPROF_DUAL_HOOK (3, int, doopen, _main, _libc,
 		  (const char *fn, int flags, int mode), (fn, flags, mode),
-		  "open", 0, "libc.so.6");
+		  "open", 0, "libc.so.6")
 IGPROF_DUAL_HOOK (3, int, doopen64, _main, _libc,
 		  (const char *fn, int flags, int mode), (fn, flags, mode),
-		  "__open64", 0, "libc.so.6");
+		  "__open64", 0, "libc.so.6")
 IGPROF_DUAL_HOOK (1, int, doclose, _main, _libc,
 		  (int fd), (fd),
-		  "close", 0, "libc.so.6");
+		  "close", 0, "libc.so.6")
 IGPROF_DUAL_HOOK (1, int, dodup, _main, _libc,
 		  (int fd), (fd),
-		  "dup", 0, "libc.so.6");
+		  "dup", 0, "libc.so.6")
 IGPROF_DUAL_HOOK (2, int, dodup2, _main, _libc,
 		  (int fd, int newfd), (fd, newfd),
-		  "dup2", 0, "libc.so.6");
+		  "dup2", 0, "libc.so.6")
 IGPROF_DUAL_HOOK (3, int, dosocket, _main, _libc,
 		  (int domain, int type, int proto), (domain, type, proto),
-		  "socket", 0, "libc.so.6");
+		  "socket", 0, "libc.so.6")
 IGPROF_DUAL_HOOK (3, int, doaccept, _main, _libc,
 		  (int fd, sockaddr *addr, socklen_t *len), (fd, addr, len),
-		  "accept", 0, "libc.so.6");
+		  "accept", 0, "libc.so.6")
 
 // Data for this profiling module
 static IgHookTrace::Counter	s_ct_used	= { "FD_USED" };

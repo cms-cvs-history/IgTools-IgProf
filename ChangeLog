@@ -1,5 +1,8 @@
 2004-05-15  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProf.cc, IgProfFileDesc.cc, IgProfMem.cc, IgProfPerf.cc:
+	Remove unnecessary semi-colons.
+
 	* IgProf.h, IgProfMacros.h: Split macros off to another header.
 	Provide easier interface to registering hooks, provide trampolines
 	directly and support dual hooks for binaries that have symbols in

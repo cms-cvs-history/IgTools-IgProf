@@ -33,13 +33,13 @@ typedef std::list<void (*) (void)>		ActivationList;
 // Traps for this profiling module
 IGPROF_DUAL_HOOK (1, void, doexit, _main, _libc,
 		  (int code), (code),
-		  "exit", 0, "libc.so.6");
+		  "exit", 0, "libc.so.6")
 IGPROF_DUAL_HOOK (1, void, doexit, _main2, _libc2,
 		  (int code), (code),
-		  "_exit", 0, "libc.so.6");
+		  "_exit", 0, "libc.so.6")
 IGPROF_DUAL_HOOK (2, int,  dokill, _main, _libc,
 		  (pid_t pid, int sig), (pid, sig),
-		  "kill", 0, "libc.so.6");
+		  "kill", 0, "libc.so.6")
 
 // Data for this profiler module
 static int		s_enabled	= 0;
