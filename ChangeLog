@@ -1,3 +1,14 @@
+2004-03-15  Giulio Eulisse  <giulio.eulisse@cern.ch>
+
+	* IgSProfTimerHooks.cc: more robust support for multithreading.
+
+	* IgSProfPThreadCreateHooks.cc: added magic code for
+	wrapping pthread_create and several other pthread related
+	functions in order to intercept the creation of a new thread.
+
+	* IgMProfSymbolFilter.cc (IgMProfSymbolFilter): beatification
+	fixes.
+
 2004-02-04  Giulio Eulisse  <giulio.eulisse@cern.ch>
 
 	* test_forking.cc: test for pthreads profiling... 

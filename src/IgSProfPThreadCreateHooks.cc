@@ -1,11 +1,13 @@
 //<<<<<< INCLUDES                                                       >>>>>>
 
+//#include <iostream>
 #include <dlfcn.h>
-#include <stdio.h>
 #include <pthread.h>
 #include <signal.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <stdio.h>
+
 //<<<<<< PRIVATE DEFINES                                                >>>>>>
 //<<<<<< PRIVATE CONSTANTS                                              >>>>>>
 //<<<<<< PRIVATE TYPES                                                  >>>>>>
@@ -22,14 +24,25 @@
 extern "C"
 {
     unsigned int __igprof_magic_lastThread = 0;
+    unsigned int __igprof_magic_threadArray[1024];    
+    bool	 __igprof_magic_inPthreadLock = false;    
     
     typedef int (*pthread_create_ptr) (void * __thread,
 				       const void * __attr,
 				       void *(*__start_routine) (void *),
 				       void * __arg);
-        
-    typedef void *(* PthreadHandlerRoutine) (void *);    
 
+    typedef int (*pthread_sigmask_ptr) (int how, 
+				    const sigset_t *newmask, 
+				    sigset_t *oldmask);
+    
+    typedef void *(* PthreadHandlerRoutine) (void *);    
+    typedef int (*pthread_mutex_lock_ptr) (pthread_mutex_t *mutex);
+    typedef int (*pthread_mutex_unlock_ptr) (pthread_mutex_t *mutex);
+    typedef int (*setitimer_ptr) (int which, const struct itimerval *value, struct itimerval *ovalue);
+    typedef sighandler_t (*signal_ptr) (int signum, sighandler_t handler);
+    typedef int (*pthread_join_ptr)(pthread_t th, void **thread_return);    
+        
     typedef struct 
     {
 	PthreadHandlerRoutine startRoutine;
@@ -39,22 +52,30 @@ extern "C"
 
     void *__igprof_magic_wrapperRoutine (HandlerArgs *args)
     {
+	static pthread_sigmask_ptr realPthreadSigMask = 0;
+	if (!realPthreadSigMask)
+	{
+	    realPthreadSigMask = (pthread_sigmask_ptr)
+				 dlsym (RTLD_NEXT, 
+					"pthread_sigmask");
+	}
+	
 	sigset_t newset;
 	sigemptyset (&newset);
 	
 	sigaddset (&newset, SIGPROF);
-	pthread_sigmask (SIG_UNBLOCK, &newset, NULL);
+	realPthreadSigMask (SIG_UNBLOCK, &newset, NULL);
 	
 	PthreadHandlerRoutine startRoutine = args->startRoutine;
 	
-	fprintf (stderr, "IgProf: pthread_create being called!"
-		 "IgProf enabled SIGPROF for thread %d as well.", (int) pthread_self ());
-	
-	fflush (NULL);
-	
-	if (__igprof_magic_lastThread < pthread_self ())
-	    __igprof_magic_lastThread = pthread_self ();
-	
+	//	std::cerr << "IgProf: pthread_create being called!"
+	//	  << "IgProf enabled SIGPROF for thread"
+	//	  << (int) pthread_self () 
+	//	  << " as well." << std::endl;
+		
+	__igprof_magic_threadArray[__igprof_magic_lastThread++] 
+	    = pthread_self ();
+		
 	return startRoutine(args->arg);		
     }
     
@@ -63,9 +84,16 @@ extern "C"
 			void *(*__start_routine) (void *),
 			void * __arg) __THROW
     {
-	pthread_create_ptr realPthreadCreate = (pthread_create_ptr)
-					       dlsym (RTLD_NEXT, 
-						      "pthread_create");
+	static pthread_create_ptr realPthreadCreate = 0;
+	fprintf (stderr, "pthread_create_called\n");
+	fflush (NULL);
+	
+	if (!realPthreadCreate)
+	{
+	    realPthreadCreate = (pthread_create_ptr) dlsym (RTLD_NEXT, 
+							    "pthread_create");
+	}
+	
 	HandlerArgs args;
 	args.startRoutine = __start_routine;
 	args.arg = __arg;
@@ -75,4 +103,127 @@ extern "C"
 				  (PthreadHandlerRoutine) __igprof_magic_wrapperRoutine, 
 				  (void *) &args);	
     }
+
+//     int pthread_sigmask(int how, 
+// 			const sigset_t *newmask, 
+// 			sigset_t *oldmask) __THROW
+//     {
+// 	static pthread_sigmask_ptr realPthreadSigMask = 0;
+	
+// 	fprintf (stderr, "pthread_sigmask\n");
+// 	fflush (NULL);
+// 	// Reimplementing pthread_sigmask as well. We ALWAYS enable
+// 	// SIGPROF handling...
+// 	if (!realPthreadSigMask) 
+// 	{
+// 	    realPthreadSigMask = (pthread_sigmask_ptr) dlsym (RTLD_NEXT, 
+// 							      "pthread_sigmask");
+// 	}
+	
+// 	//std::cerr << "IgProf: pthread_sigmask called!"
+// 	//	  << "IgProf will enable SIGPROF ANYWAY!\n"
+// 	//	  << std::endl;
+		
+// 	sigset_t newset;
+// 	sigemptyset (&newset);
+// 	sigaddset (&newset, SIGPROF);
+// 	int result = realPthreadSigMask (how, newmask, NULL);
+// 	if (!__igprof_magic_inPthreadLock)
+// 	    pthread_sigmask (SIG_UNBLOCK, &newset, oldmask);
+// 	return result;	
+//     }
+    
+//     int pthread_mutex_lock(pthread_mutex_t *mutex) __THROW	
+//     {	
+// 	int result;
+// 	static pthread_mutex_lock_ptr realPthreadMutexLock = 0;
+	
+//     	if (__igprof_magic_inPthreadLock == false)
+// 	{
+// 	    //fprintf (stderr, "pthread_mutex_lock called\n");
+// 	    //fflush (NULL);
+	
+// 	    __igprof_magic_inPthreadLock = true;
+// 	    if (!realPthreadMutexLock)
+// 		realPthreadMutexLock = (pthread_mutex_lock_ptr) dlsym (RTLD_NEXT, 
+// 								       "pthread_mutex_lock");       
+
+// 	     result = realPthreadMutexLock (mutex);
+// 	    __igprof_magic_inPthreadLock = false;
+// 	}
+	
+// 	return result;	
+//     }
+
+//     int pthread_mutex_unlock(pthread_mutex_t *mutex) __THROW	
+//     {	
+// 	int result;
+// 	static pthread_mutex_unlock_ptr realPthreadMutexUnlock = 0;
+	
+//     	if (__igprof_magic_inPthreadLock == false)
+// 	{
+// 	    //	    fprintf (stderr, "pthread_mutex_unlock called\n");
+// 	    //fflush (NULL);
+	
+// 	    __igprof_magic_inPthreadLock = true;
+// 	    if (!realPthreadMutexUnlock)
+// 		realPthreadMutexUnlock = (pthread_mutex_unlock_ptr) dlsym (RTLD_NEXT, 
+// 									   "pthread_mutex_unlock");       
+
+// 	     result = realPthreadMutexUnlock (mutex);
+// 	    __igprof_magic_inPthreadLock = false;
+// 	}
+	
+// 	return result;	
+//     }
+
+    int setitimer(int which, 
+		  const struct itimerval *value, 
+		  struct itimerval *ovalue) 
+    {
+	fprintf (stderr, "setitimer called\n");
+	fflush (NULL);
+
+	int result;
+	static setitimer_ptr realSetITimer = 0;
+	if (!realSetITimer)
+	{
+	    realSetITimer = (setitimer_ptr) dlsym (RTLD_NEXT, "setitimer");	    
+	}
+	result = realSetITimer (which, value, ovalue);
+	
+	return result;	
+    }
+
+
+    sighandler_t signal(int signum, sighandler_t handler) __THROW	
+    {
+	fprintf (stderr, "signal called\n");
+	fflush (stderr);
+	sighandler_t result;
+	static signal_ptr realSignal = 0;
+	
+	if (!realSignal)
+	{
+	    realSignal = (signal_ptr) dlsym (RTLD_NEXT, "signal");	    
+	}
+	result = realSignal (signum, handler);
+	return result;	
+    }
+    
+    int pthread_join(pthread_t th, void **thread_return) __THROW
+    {
+	fprintf (stderr, "pthread_join called\n");
+	fflush (stderr);
+	int result;
+	static pthread_join_ptr real_pthread_join = 0;
+	
+	if (!real_pthread_join)
+	{
+	    real_pthread_join = (pthread_join_ptr) dlsym (RTLD_NEXT, "pthread_join");	    
+	}
+	result = real_pthread_join (th, thread_return);
+	return result;	
+    }
 }
+

@@ -35,14 +35,14 @@ b (void *)
 }
 
 int
-main (int /*argc*/, char **/*argv*/)
+main (int /*argc*/, char ** /*argv*/)
 {
     int pid = 0;
     
     pthread_t thread;
     
     pthread_create (&thread, 0, b, 0);
-    //    pid = fork ();
+//    pid = fork ();
 
     if (pid)
     {

@@ -24,7 +24,6 @@ IgMProfSymbolFilter::IgMProfSymbolFilter (void)
     const char *homepath = getenv ("HOME");
     assert (homepath!=0);    
     std::cerr << std::string (homepath)+"/.memproflibrc" << std::endl;
-	    
     configFile.open((std::string (homepath)+"/.memproflibrc").c_str ());
 
     if (IgMProfConfigurationSingleton::instance ()->m_mallocProfiler == true)
