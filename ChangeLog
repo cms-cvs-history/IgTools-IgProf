@@ -1,3 +1,18 @@
+2004-02-04  Giulio Eulisse  <giulio.eulisse@cern.ch>
+
+	* test_forking.cc: test for pthreads profiling... 
+
+	* IgSProfPThreadCreateHooks.cc: workaround to enable SIGPROF also
+	for spawned threads... It shouldn't be necessary, but it looks
+	like it is...
+
+	* IgMProfTreeTextBrowser.cc (dump): "MemProfLib:" references in
+	output substituted with "IgProf:".
+
+	* IgSProfTimerHooks.cc (IGUANA_sprof_sigprof_hook): rebroadcasting
+	signal to other threads to overcome linux strange behavior when
+	using pthreads and signals.
+
 2004-02-03  Giulio Eulisse  <giulio.eulisse@cern.ch>
 
 	* test/BuildFile, test_forking.cc: added test for multithreading support.

@@ -175,7 +175,7 @@ IgMProfTreeTextBrowser::dump(void)
 
     if(IgMProfConfigurationSingleton::instance()->m_treeOutput)
     {		
-	std::cerr << "MemProfLib: Dumping tree information into: " 
+	std::cerr << "IgProf: Dumping tree information into: " 
 		  << m_treeFilename 
 		  << "...Please wait, this might take a while...";	    
 	m_treeout.open(m_treeFilename.c_str ());		
@@ -191,7 +191,7 @@ IgMProfTreeTextBrowser::dump(void)
 
     if(IgMProfConfigurationSingleton::instance()->m_flatOutput)
     {		
-	std::cerr << "MemProfLib: Dumping flat information into: " 
+	std::cerr << "IgProf: Dumping flat information into: " 
 		  << m_flatFilename 
 		  << "...Please wait, this might take a while...";	    
 	m_flatout.open (m_flatFilename.c_str() );	    
