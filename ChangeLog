@@ -1,5 +1,13 @@
 2004-05-15  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProf.cc, IgProfPerf.cc: Wise up.  The pthreads locking stuff
+	does not work with asynchronous signals.  So make each thread keep
+	its own tree roots so the (performance) profiling module can add
+	add entries to private tree without interlocking threads.  For
+	locks go back to regular pthreads mutexes, the are required so
+	that concurrent lock attempts (e.g. calls to malloc in several
+	threads simultaneously) continue to work.
+
 	* igprof-analyse: Sort parents and callers too.
 
 	* igprof-analyse: Improve by-caller sorting.

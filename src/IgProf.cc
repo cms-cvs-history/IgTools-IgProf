@@ -45,63 +45,34 @@ IGPROF_DUAL_HOOK (2, int,  dokill, _main, _libc,
 static int		s_enabled	= 0;
 static bool		s_initialized	= false;
 static bool		s_pthreads	= false;
-static unsigned long	s_guard		= 0;
 static pthread_t	s_mainthread;
+static pthread_key_t	s_troot;
+static pthread_mutex_t	s_lock;
 
 // Static data that needs to be constructed lazily on demand
 static LiveMaps &livemaps (void) { static LiveMaps s; return s; }
 static ActivationList &activations (void) { static ActivationList s; return s; }
 static ActivationList &deactivations (void) { static ActivationList s; return s; }
 
-// Locking primitives
-static inline unsigned long
-compare_and_swap (unsigned long *value, unsigned long oldval, unsigned long newval)
-{
-#if __i386
-    unsigned long prev;
-    asm __volatile__ (
-	"lock; cmpxchgl %1, %2"
-	: "=a" (prev)
-	: "q" (newval), "m" (*value), "0" (oldval)
-	: "memory");
-    return prev;
-#else
-# error your platform is not supported!
-#endif
-}
-
-// static bool
-// test_and_set (unsigned long *value)
-// { return compare_and_swap (value, 0, 1) == 0; }
-
-static void
-release_guard (unsigned long *value)
-{ *value = 0; __asm __volatile ("" : : : "memory"); }
-
 //<<<<<< PUBLIC FUNCTION DEFINITIONS                                    >>>>>>
 //<<<<<< MEMBER FUNCTION DEFINITIONS                                    >>>>>>
 
 /** Lock profiling system and grab the value of @a enabled.
     Later calls to #enabled() will indicate if the calling
-    module has already been disabled by someone else.  */
+    module has already been disabled by someone else.
+    Never call this from asynchronous signals! */
 IgProfLock::IgProfLock (int &enabled)
 {
-    // See comments in/on IgProf::lock() to understand this.
-    m_locked = IgProf::lock (this);
+    m_locked = IgProf::lock ();
     m_enabled = enabled;
-    if (m_locked)
-        IgProf::deactivate ();
+    IgProf::deactivate ();
 }
 
 /** Release the lock on the profiling system.  */
 IgProfLock::~IgProfLock (void)
 {
-    // See comments in/on IgProf::lock() to understand this.
-    if (m_locked)
-    {
-        IgProf::activate ();
-	IgProf::unlock (this);
-    }
+    IgProf::activate ();
+    IgProf::unlock ();
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -120,6 +91,11 @@ IgProf::initialize (void)
     if (program && dlsym (program, "pthread_create"))
     {
 	s_pthreads = true;
+	pthread_mutexattr_t attrs;
+	pthread_mutexattr_init (&attrs);
+	pthread_mutexattr_settype (&attrs, PTHREAD_MUTEX_RECURSIVE);
+	pthread_mutex_init (&s_lock, &attrs);
+	pthread_key_create (&s_troot, 0);
 	initThread ();
     }
     dlclose (program);
@@ -148,7 +124,24 @@ IgProf::isMultiThreaded (void)
     called for every thread that will participate in profiling.  */
 void
 IgProf::initThread (void)
-{}
+{ threadRoot (); }
+
+/** Finalise a thread.  */
+void
+IgProf::exitThread (void)
+{
+    if (! s_pthreads)
+	return;
+
+    IgHookTrace *troot = (IgHookTrace *) pthread_getspecific (s_troot);
+    if (! troot)
+	return;
+
+    pthread_setspecific (s_troot, 0);
+    pthread_mutex_lock (&s_lock);
+    root ()->merge (troot);
+    pthread_mutex_unlock (&s_lock);
+}
 
 /** Acquire a lock on the profiler system.  All profiling modules
     should call this method (through use of #IgProfLock) before
@@ -162,67 +155,23 @@ IgProf::initThread (void)
     happen if profiler modules "stop on each other" through signal
     handlers.  */
 bool
-IgProf::lock (void *owner)
+IgProf::lock (void)
 {
-    // Ok, this code is funky.  Initially it was a simple mutex op
-    // the pthread_mutex_lock(&s_lock).  On GNU/Linux (CERN RH 7.3,
-    // GLIBC 2.2.x), one can not re-enter pthread_mutex_{,un}lock()
-    // in the same thread twice.  It can only handle non-concurrent
-    // locking attempts in the same thread with recursive mutexes.
-    // The performance profiler triggers this condition: we get the
-    // SIGPROF signal while some other profiling module in the same
-    // thread is already trying to obtain or release the lock.  The
-    // result is a dead-lock.
-    //
-    // So we don't do that.  Instead, we use global lock and just
-    // IgProfLock "sorry, you can't have the lock now"; it will then
-    // do the right thing.  The cost: you have to define assembler
-    // sequence or some other function that can do compare-and-swap.
-    //
-    // A previous version of this code had thread-local storage for
-    // the guard, which was tested with compare_and_swap to see
-    // if thread already holds the lock, and then proceeded to use
-    // the mutex if it was safe.  That worked admirably well until
-    // the thread exits, memory is freed -- and memory profiler's
-    // free routine tries to use the lock, and now-invalid thread
-    // local storage.  Again, result: dead-lock.
-    //
-    // The function returns "false" to tell IgProfLock we failed to
-    // grab the lock.  This in turn causes it pretend to the caller
-    // that the profiler module is disabled (whether it was or not).
-    // In reality, it really makes no difference whether we use a
-    // mutex or the simple global guard -- once the profiler is off,
-    // it's off.  We might as well make IgProfLock lie.
-    //
-    // Note that this also handles getting *two* different signals
-    // in the *same* thread quickly in succession, e.g. if the
-    // profiled program allocates memory or uses files in signal
-    // handlers.
-    if (s_pthreads && compare_and_swap (&s_guard, 0, (unsigned long) owner))
-	// The lock is already held.
-	return false;
+    if (s_pthreads)
+    {
+	pthread_mutex_lock (&s_lock);
+	return true;
+    }
 
     return s_initialized;
 }
 
 /** Release profiling system lock after successful call to #lock().  */
 void
-IgProf::unlock (void *owner)
+IgProf::unlock (void)
 {
-    // See lock() for description on what's going on.
     if (s_pthreads)
-    {
-	if (s_guard != (unsigned long) owner)
-	{
-	    debug ("%lu[%lu] guard owner mismatch %p %p\n",
-		   (unsigned long) getpid (),
-		   (unsigned long) pthread_self (),
-		   owner, (void *) s_guard);
-	    IGPROF_ASSERT (! "lock mismatch");
-	}
-
-	release_guard (&s_guard);
-    }
+	pthread_mutex_unlock (&s_lock);
 }
 
 /** Enable this profiling module.  Only call within #IgProfLock.
@@ -294,12 +243,42 @@ IgProf::options (void)
 /** Get the root of the profiling counter tree.  Only access the the
     tree within an #IgProfLock.  In general, only call this method
     when the profiler module is constructed; if necessary within
-    #IgProfLock.  */
+    #IgProfLock.  Note that this means you should not call this
+    method from places where #IgProfLock cannot be called from,
+    such as in asynchronous signal handlers.  */
 IgHookTrace *
 IgProf::root (void)
 {
     static IgHookTrace *s_root = new IgHookTrace;
     return s_root;
+}
+
+/** Get thread-specific stack trace root.  Use this instead of #root()
+    in asynchronous signals.  However you must then not use #IgProfLock
+    or call anything that might call it.  Thread-specific trace trees
+    are automatically merged to the main tree when the thread exits.  */
+IgHookTrace *
+IgProf::threadRoot (void)
+{
+    // It is unsafe to use pthread primitives in asynchronous signals.
+    // The only allowed operation is sem_post(), and in fact experience
+    // shows that using pthread locks with the performance profiler in
+    // fact does break sooner or later.  So provide profiler modules
+    // traces they can modify with interlocking with the rest of the
+    // system.
+    if (s_pthreads)
+    {
+	IgHookTrace *troot = (IgHookTrace *) pthread_getspecific (s_troot);
+	if (! troot)
+	{
+	    troot = new IgHookTrace;
+	    pthread_setspecific (s_troot, troot);
+	}
+
+	return troot;
+    }
+
+    return root ();
 }
 
 /** Get leak/live tracking map named @a label.  The argument must be
@@ -485,6 +464,7 @@ doexit (IgHook::SafeData<igprof_doexit_t> &hook, int code)
         if (lock.enabled () > 0 && thread == s_mainthread)
         {
             IgProf::debug ("%s() called, dumping state\n", hook.function);
+	    IgProf::exitThread ();
 	    IgProf::dump ();
             IgProf::debug ("igprof quitting\n");
 
@@ -493,8 +473,11 @@ doexit (IgHook::SafeData<igprof_doexit_t> &hook, int code)
             s_pthreads = false; // make sure we no longer use threads stuff
 	}
 	else if (s_pthreads && thread != s_mainthread)
+	{
 	    IgProf::debug ("thread %lu %s(), continuing\n",
 			   (unsigned long) thread, hook.function);
+	    IgProf::exitThread ();
+	}
     }
     hook.chain (code);
 }

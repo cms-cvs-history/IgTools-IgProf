@@ -27,6 +27,7 @@ public:
     static void			debug (const char *format, ...);
     static const char *		options (void);
     static IgHookTrace *	root (void);
+    static IgHookTrace *	threadRoot (void);
     static IgHookLiveMap *	liveMap (const char *label);
 
     static void			initialize (void);
@@ -39,12 +40,13 @@ public:
     static void			deactivate (void);
 
     static void			initThread (void);
+    static void			exitThread (void);
     static bool			isMultiThreaded (void);
 
 private:
     friend class IgProfLock;
-    static bool			lock (void *);
-    static void			unlock (void *);
+    static bool			lock (void);
+    static void			unlock (void);
 
     static void			enable (void);
     static void			disable (void);

@@ -68,12 +68,12 @@ static void
 add (void)
 {
     int		drop = 2; // one for stacktrace, one for me
-    IgHookTrace	*node = IgProf::root ();
+    IgHookTrace	*node = IgProf::threadRoot ();
     void	*addresses [128];
     int		depth = IgHookTrace::stacktrace (addresses, 128);
 
     // Walk the tree
-    for (int i = depth-2; i >= drop; --i)
+    for (int i = depth-2; node && i >= drop; --i)
 	node = node->child (IgHookTrace::tosymbol (addresses [i]));
 
     // Increment counters for this node
@@ -89,23 +89,19 @@ add (void)
 static void
 profileSignalHandler (void)
 {
-    if (IgProf::isMultiThreaded ())
-    {
-	IgProfLock lock (s_enabled);
+    if (s_enabled <= 0)
+	return;
 
 #if __linux
-	if (lock.enabled () > 0 && pthread_self () == s_profthread)
-	{
-	    pthread_mutex_lock (&s_lock);
-	    for (int i = 0; i < s_nthreads; ++i)
-		pthread_kill (s_threads [i], SIGPROF);
-	    pthread_mutex_unlock (&s_lock);
-	}
-	else if (lock.enabled () > 0)
-#endif
-	    add ();
+    if (IgProf::isMultiThreaded () && pthread_self () == s_profthread)
+    {
+	pthread_mutex_lock (&s_lock);
+	for (int i = 0; i < s_nthreads; ++i)
+	    pthread_kill (s_threads [i], SIGPROF);
+	pthread_mutex_unlock (&s_lock);
     }
-    else if (s_enabled > 0)
+    else
+#endif
 	add ();
 }
 
@@ -186,6 +182,7 @@ static void *
 threadWrapper (void *arg)
 {
     IgProf::initThread ();
+
 #if __linux
     // Old GNU/Linux system hack: make sure signal worker sends the
     // signal to this thread too.
@@ -265,6 +262,9 @@ IgProfPerf::initialize (void)
 #endif
 	IgProf::onactivate (&IgProfPerf::enable);
 	IgProf::ondeactivate (&IgProfPerf::disable);
+
+	IgProf::root ();
+	IgProf::threadRoot ();
 
 	enableSignalHandler ();
 	enableTimer ();
