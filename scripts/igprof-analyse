@@ -289,9 +289,9 @@ sub callcheck
 {
     # check if a calls b; return 1 if it does (= should come before)
     my ($flat, $a, $b, $seen) = @_;
-    return 0 if $b eq $a;
-    return 0 if exists $seen->{$b};
+    $seen->{$a} = 1;
     foreach my $callee (keys %{$flat->{$a}{CALLS}}) {
+	next if $seen->{$callee} || $callee eq $a;
 	return -1 if $b eq $callee;
 	return -1 if &callcheck ($flat, $callee, $b, $seen) < 0;
     }
