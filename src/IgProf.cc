@@ -351,19 +351,19 @@ static void ig_exit (int code)
 
 static int igkill (pid_t pid, int sig)
 {
+    if ((pid == 0 || pid == getpid ())
+	&& (sig == SIGHUP || sig == SIGINT || sig == SIGQUIT
+	    || sig == SIGILL || sig == SIGABRT || sig == SIGFPE
+	    || sig == SIGKILL || sig == SIGSEGV || sig == SIGPIPE
+	    || sig == SIGALRM || sig == SIGTERM || sig == SIGUSR1
+	    || sig == SIGUSR2 || sig == SIGBUS || sig == SIGIOT))
     {
         IgProfLock lock (s_enabled);
-        if (lock.enabled () > 0
-	    && (pid == 0 || pid == getpid ())
-	    && (sig == SIGHUP || sig == SIGINT || sig == SIGQUIT
-	        || sig == SIGILL || sig == SIGABRT || sig == SIGFPE
-	        || sig == SIGKILL || sig == SIGSEGV || sig == SIGPIPE
-	        || sig == SIGALRM || sig == SIGTERM || sig == SIGUSR1
-	        || sig == SIGUSR2 || sig == SIGBUS || sig == SIGIOT))
-        {
+	if (lock.enabled () > 0)
+	{
 	    IgProf::debug ("kill(%d,%d) called, dumping state\n", (int) pid, sig);
 	    IgProf::dump ();
-        }
+	}
     }
     return (*igkill_hook.typed.chain) (pid, sig);
 }
