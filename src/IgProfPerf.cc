@@ -39,7 +39,6 @@ IGPROF_HOOK (int (pthread_t *thread, pthread_attr_t *attr,
 	     pthread_create, igpthread_create);
 
 static IgHookTrace::Counter	s_ct_ticks	= { "PERF_TICKS" };
-static IgHookTrace::Counter	s_ct_cumticks	= { "PERF_CUM_TICKS" };
 static int			s_enabled	= 0;
 static bool			s_initialized	= false;
 #if __linux
@@ -59,12 +58,9 @@ add (void)
     void	*addresses [128];
     int		depth = IgHookTrace::stacktrace (addresses, 128);
 
-    // Increment cumulative counters for higher in the tree
+    // Walk the tree
     for (int i = depth-2; i >= drop; --i)
-    {
-	node->counter (&s_ct_cumticks)->tick ();
 	node = node->child (IgHookTrace::tosymbol (addresses [i]));
-    }
 
     // Increment counters for this node
     node->counter (&s_ct_ticks)->tick ();

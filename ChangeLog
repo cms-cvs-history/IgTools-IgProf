@@ -1,3 +1,8 @@
+2004-05-12  Lassi A. Tuura  <lat@iki.fi>
+
+	* IgProfMem.cc, IgProfPerf.cc, IgProfFileDesc.cc: Remove
+	cumulative counters, they are handled in the analyser.
+
 2004-05-11  Lassi A. Tuura  <lat@iki.fi>
 
 	* scripts/igprof, IgProf.cc, IgProfPerf.cc: Fixes for OS X.

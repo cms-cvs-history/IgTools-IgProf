@@ -17,9 +17,7 @@
 //<<<<<< PRIVATE FUNCTION DEFINITIONS                                   >>>>>>
 
 static IgHookTrace::Counter	s_ct_used	= { "FD_USED" };
-static IgHookTrace::Counter	s_ct_cumused	= { "FD_CUM_USED" };
 static IgHookTrace::Counter	s_ct_live	= { "FD_LIVE" };
-static IgHookTrace::Counter	s_ct_cumlive	= { "FD_CUM_LIVE" };
 static bool			s_count_used	= 0;
 static bool			s_count_live	= 0;
 static bool			s_count_leaks	= 0;
@@ -36,13 +34,9 @@ add (int fd)
     void	*addresses [128];
     int		depth = IgHookTrace::stacktrace (addresses, 128);
 
-    // Increment cumulative counters for higher in the tree
+    // Walk the tree
     for (int i = depth-2; i >= drop; --i)
-    {
-	if (s_count_used) node->counter (&s_ct_cumused)->tick ();
-	if (s_count_live) node->counter (&s_ct_cumlive)->tick ();
 	node = node->child (IgHookTrace::tosymbol (addresses [i]));
-    }
 
     // Increment counters for this node
     if (s_count_used)  node->counter (&s_ct_used)->tick ();
@@ -61,17 +55,11 @@ remove (int fd)
 	IgHookLiveMap::Iterator	info = s_live->find (fd);
 	assert (info != s_live->end ());
 
-	IgHookTrace::Counter	*id = &s_ct_live;
-	IgHookTrace		*node = info->second.first;
+	IgHookTrace	*node = info->second.first;
+	size_t		size = info->second.second;
 
-	while (node)
-	{
-	    IgHookTrace::CounterValue *val = node->counter (id);
-	    assert (val->value () > 0);
-	    val->untick ();
-	    node = node->parent ();
-	    id = &s_ct_cumlive;
-	}
+	assert (node->counter (&s_ct_live)->value () >= size);
+	node->counter (&s_ct_live)->sub (size);
 
 	s_live->remove (info);
     }

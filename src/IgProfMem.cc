@@ -32,13 +32,9 @@ IGPROF_HOOK (void * (size_t), valloc, igvalloc);
 IGPROF_HOOK (void (void *), free, igfree);
 
 static IgHookTrace::Counter	s_ct_allocs	= { "MEM_ALLOCS" };
-static IgHookTrace::Counter	s_ct_cumallocs	= { "MEM_CUM_ALLOCS" };
 static IgHookTrace::Counter	s_ct_total	= { "MEM_TOTAL" };
-static IgHookTrace::Counter	s_ct_cumtotal	= { "MEM_CUM_TOTAL" };
 static IgHookTrace::Counter	s_ct_largest	= { "MEM_MAX" };
-static IgHookTrace::Counter	s_ct_cumlargest	= { "MEM_CUM_MAX" };
 static IgHookTrace::Counter	s_ct_live	= { "MEM_LIVE" };
-static IgHookTrace::Counter	s_ct_cumlive	= { "MEM_CUM_LIVE" };
 static bool			s_count_allocs	= 0;
 static bool			s_count_total	= 0;
 static bool			s_count_largest	= 0;
@@ -59,15 +55,9 @@ add (void *ptr, size_t size)
     void	*addresses [128];
     int		depth = IgHookTrace::stacktrace (addresses, 128);
 
-    // Increment cumulative counters for higher in the tree
+    // Walk the tree
     for (int i = depth-2; i >= drop; --i)
-    {
-	if (s_count_allocs)  node->counter (&s_ct_cumallocs)->tick ();
-	if (s_count_total)   node->counter (&s_ct_cumtotal)->add (size);
-	if (s_count_largest) node->counter (&s_ct_cumlargest)->max (size);
-	if (s_count_live)    node->counter (&s_ct_cumlive)->add (size);
 	node = node->child (IgHookTrace::tosymbol (addresses [i]));
-    }
 
     // Increment counters for this node
     if (s_count_allocs)  node->counter (&s_ct_allocs)->tick ();
@@ -88,18 +78,11 @@ remove (void *ptr)
 	IgHookLiveMap::Iterator	info = s_live->find ((unsigned long) ptr);
 	assert (info != s_live->end ());
 
-	IgHookTrace::Counter	*id = &s_ct_live;
-	IgHookTrace		*node = info->second.first;
-	size_t			size = info->second.second;
+	IgHookTrace	*node = info->second.first;
+	size_t		size = info->second.second;
 
-	while (node)
-	{
-	    IgHookTrace::CounterValue *val = node->counter (id);
-	    assert (val->value () >= size);
-	    val->sub (size);
-	    node = node->parent ();
-	    id = &s_ct_cumlive;
-	}
+	assert (node->counter (&s_ct_live)->value () >= size);
+	node->counter (&s_ct_live)->sub (size);
 
 	s_live->remove (info);
     }
