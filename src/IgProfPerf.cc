@@ -10,6 +10,7 @@
 #include <pthread.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <dlfcn.h>
 
 //<<<<<< PRIVATE DEFINES                                                >>>>>>
 //<<<<<< PRIVATE CONSTANTS                                              >>>>>>
@@ -31,12 +32,26 @@ typedef sig_t sighandler_t;
 //<<<<<< CLASS STRUCTURE INITIALIZATION                                 >>>>>>
 //<<<<<< PRIVATE FUNCTION DEFINITIONS                                   >>>>>>
 
-static int igpthread_create (pthread_t *thread, pthread_attr_t *attr,
-			     void * (*start_routine) (void *), void *arg);
-IGPROF_HOOK (int (pthread_t *thread, pthread_attr_t *attr,
-		  void * (*start_routine) (void *), void *arg),
-	     pthread_create, igpthread_create);
+// Traps for this profiler module
+IGPROF_LIBHOOK (4, int, dopthread_create, _main,
+	        (pthread_t *thread, const pthread_attr_t *attr,
+		 void * (*start_routine)(void *), void *arg),
+		(thread, attr, start_routine, arg),
+	        "pthread_create", 0, 0);
 
+IGPROF_LIBHOOK (4, int, dopthread_create, _pthread20,
+	        (pthread_t *thread, const pthread_attr_t *attr,
+		 void * (*start_routine)(void *), void *arg),
+		(thread, attr, start_routine, arg),
+	        "pthread_create", "GLIBC_2.0", 0);
+
+IGPROF_LIBHOOK (4, int, dopthread_create, _pthread21,
+	        (pthread_t *thread, const pthread_attr_t *attr,
+		 void * (*start_routine)(void *), void *arg),
+		(thread, attr, start_routine, arg),
+	        "pthread_create", "GLIBC_2.1", 0);
+
+// Data for this profiler module
 static IgHookTrace::Counter	s_ct_ticks	= { "PERF_TICKS" };
 static int			s_enabled	= 0;
 static bool			s_initialized	= false;
@@ -82,10 +97,6 @@ profileSignalHandler (void)
 	if (lock.enabled () > 0 && pthread_self () == s_profthread)
 	{
 	    pthread_mutex_lock (&s_lock);
-	    static int sigs = 0;
-	    if (sigs++ % 1000 == 0)
-		IgProf::debug ("%d profiling signals received\n", sigs);
-
 	    for (int i = 0; i < s_nthreads; ++i)
 		pthread_kill (s_threads [i], SIGPROF);
 	    pthread_mutex_unlock (&s_lock);
@@ -99,7 +110,8 @@ profileSignalHandler (void)
 }
 
 /** Enable profiling timer.  You should have called
-    #enableSignalHandler() before calling this function.  */
+    #enableSignalHandler() before calling this function.
+    This needs to be executed in every thread to be profiled. */
 static void
 enableTimer (void)
 {
@@ -107,23 +119,10 @@ enableTimer (void)
     setitimer (ITIMER_PROF, &interval, 0);
 }
 
-/** Disable profiling timer.  */
-static void
-disableTimer (void)
-{
-    itimerval interval = { { 0, 0 }, { 0, 0 } };
-    setitimer (ITIMER_PROF, &interval, 0);
-}
-
 /** Enable SIGPROF signal handler.  */
 static void
 enableSignalHandler (void)
 { signal (SIGPROF, (sighandler_t) &profileSignalHandler); }
-
-/** Disable SIGPROF signal handler.  */
-static void
-disableSignalHandler (void)
-{ signal (SIGPROF, SIG_IGN); }
 
 #if __linux
 /** Old GNU/Linux system hack.  Make sure the signal handling thread
@@ -140,6 +139,7 @@ profileSignalThreadFork (void)
 static void *
 profileSignalThread (void *)
 {
+    IgProf::initThread ();
     IgProf::debug ("Perf: starting signal handler thread %lu\n",
 		   (unsigned long) pthread_self ());
     pthread_atfork (0, 0, &profileSignalThreadFork);
@@ -161,6 +161,7 @@ enableSignalThread (void)
 {
     if (IgProf::isMultiThreaded ())
     {
+	// Start the thread and wait until it's running.
 	pthread_mutex_lock (&s_sigstart);
 	pthread_create (&s_profthread, 0, &profileSignalThread, 0);
 	pthread_mutex_lock (&s_sigstart);
@@ -180,10 +181,11 @@ registerThisThread (void)
 }
 #endif
 
-/** A wrapper for starting user threads to enable SIGPROF signal handling.  */
+/** A wrapper for starting user threads to enable profiling.  */
 static void *
 threadWrapper (void *arg)
 {
+    IgProf::initThread ();
 #if __linux
     // Old GNU/Linux system hack: make sure signal worker sends the
     // signal to this thread too.
@@ -199,10 +201,13 @@ threadWrapper (void *arg)
     // Enable profiling in this thread.
     enableTimer ();
 
+    // Get arguments
     IgProfPerfWrappedArg *wrapped = (IgProfPerfWrappedArg *) arg;
     void *(*start_routine) (void*) = wrapped->start_routine;
     void *start_arg = wrapped->arg;
     delete wrapped;
+
+    // Start the user thread
     IgProf::debug ("Perf: captured thread %lu for profiling (%p, %p)\n",
 		   (unsigned long) pthread_self (),
 		   (void *) start_routine,
@@ -253,8 +258,11 @@ IgProfPerf::initialize (void)
 	registerThisThread ();
 	enableSignalThread ();
 #endif
-        IgHook::hook (igpthread_create_hook.raw);
-
+	IgHook::hook (dopthread_create_hook_main.raw);
+#if __linux
+	IgHook::hook (dopthread_create_hook_pthread20.raw);
+	IgHook::hook (dopthread_create_hook_pthread21.raw);
+#endif
 	IgProf::onactivate (&IgProfPerf::enable);
 	IgProf::ondeactivate (&IgProfPerf::disable);
 
@@ -265,30 +273,35 @@ IgProfPerf::initialize (void)
     }
 }
 
-/** Enable performance profiler.  */
+/** Enable this profiling module.  Only call within #IgProfLock.
+    Normally called automatically through activation by #IgProfLock.
+    Allows recursive enable/disable.  */
 void
 IgProfPerf::enable (void)
-{ s_enabled++; enableSignalHandler (); enableTimer (); }
+{ s_enabled++; }
 
-/** Disable performance profiler.  */
+/** Disable this profiling module.  Only call within #IgProfLock.
+    Normally called automatically through activation by #IgProfLock.
+    Allows recursive enable/disable.  */
 void
 IgProfPerf::disable (void)
-{ disableTimer (); disableSignalHandler (); s_enabled--; }
+{ s_enabled--; }
 
-/** Override for user thread creation to make sure SIGPROF signal is
-    also sent and handled in the user thread.  */
+//////////////////////////////////////////////////////////////////////
+// Trap thread creation to enable profiling timers and signal handling.
 static int
-igpthread_create (pthread_t *thread,
-		  pthread_attr_t *attr,
+dopthread_create (IgHook::SafeData<igprof_dopthread_create_t> &hook,
+		  pthread_t *thread,
+		  const pthread_attr_t *attr,
 		  void * (*start_routine) (void *),
 		  void *arg)
 {
     IgProfPerfWrappedArg *wrapped = new IgProfPerfWrappedArg;
     wrapped->start_routine = start_routine;
     wrapped->arg = arg;
-    return (*igpthread_create_hook.typed.chain)
-	(thread, attr, &threadWrapper, wrapped);
+    int ret = hook.chain (thread, attr, &threadWrapper, wrapped);
+    return ret;
 }
 
-// Auto start this profiling module
+//////////////////////////////////////////////////////////////////////
 static bool autoboot = (IgProfPerf::initialize (), true);

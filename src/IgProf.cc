@@ -30,52 +30,86 @@ typedef std::list<void (*) (void)>		ActivationList;
 //<<<<<< CLASS STRUCTURE INITIALIZATION                                 >>>>>>
 //<<<<<< PRIVATE FUNCTION DEFINITIONS                                   >>>>>>
 
-static void igexit (int);
-static void ig_exit (int);
-static int  igkill (pid_t pid, int sig);
+// Traps for this profiling module
+IGPROF_DUAL_HOOK (1, void, doexit, _main, _libc,
+		  (int code), (code),
+		  "exit", 0, "libc.so.6");
+IGPROF_DUAL_HOOK (1, void, doexit, _main2, _libc2,
+		  (int code), (code),
+		  "_exit", 0, "libc.so.6");
+IGPROF_DUAL_HOOK (2, int,  dokill, _main, _libc,
+		  (pid_t pid, int sig), (pid, sig),
+		  "kill", 0, "libc.so.6");
 
-#if __linux
-static void igcexit (int);
-static void igc_exit (int);
-static int  igckill (pid_t pid, int sig);
-#endif
-
-IGPROF_HOOK (void (int),			exit,	igexit);
-IGPROF_HOOK (void (int),			_exit,	ig_exit);
-IGPROF_HOOK (int (pid_t, int),			kill,	igkill);
-
-#if __linux
-IGPROF_LIBHOOK ("libc.so.6", void (int),	exit,	igcexit);
-IGPROF_LIBHOOK ("libc.so.6", void (int),	_exit,	igc_exit);
-IGPROF_LIBHOOK ("libc.so.6", int (pid_t, int),	kill,	igckill);
-#endif
-
+// Data for this profiler module
 static int		s_enabled	= 0;
 static bool		s_initialized	= false;
 static bool		s_pthreads	= false;
-static pthread_mutex_t	s_lock;
+static unsigned long	s_guard		= 0;
+static pthread_t	s_mainthread;
 
+// Static data that needs to be constructed lazily on demand
 static LiveMaps &livemaps (void) { static LiveMaps s; return s; }
 static ActivationList &activations (void) { static ActivationList s; return s; }
 static ActivationList &deactivations (void) { static ActivationList s; return s; }
 
+// Locking primitives
+static inline unsigned long
+compare_and_swap (unsigned long *value, unsigned long oldval, unsigned long newval)
+{
+#if __i386
+    unsigned long prev;
+    asm __volatile__ (
+	"lock; cmpxchgl %1, %2"
+	: "=a" (prev)
+	: "q" (newval), "m" (*value), "0" (oldval)
+	: "memory");
+    return prev;
+#else
+# error your platform is not supported!
+#endif
+}
+
+// static bool
+// test_and_set (unsigned long *value)
+// { return compare_and_swap (value, 0, 1) == 0; }
+
+static void
+release_guard (unsigned long *value)
+{ *value = 0; __asm __volatile ("" : : : "memory"); }
+
 //<<<<<< PUBLIC FUNCTION DEFINITIONS                                    >>>>>>
 //<<<<<< MEMBER FUNCTION DEFINITIONS                                    >>>>>>
 
+/** Lock profiling system and grab the value of @a enabled.
+    Later calls to #enabled() will indicate if the calling
+    module has already been disabled by someone else.  */
 IgProfLock::IgProfLock (int &enabled)
 {
-    IgProf::lock ();
+    // See comments in/on IgProf::lock() to understand this.
+    m_locked = IgProf::lock (this);
     m_enabled = enabled;
-    IgProf::deactivate ();
+    if (m_locked)
+        IgProf::deactivate ();
 }
 
+/** Release the lock on the profiling system.  */
 IgProfLock::~IgProfLock (void)
 {
-    IgProf::activate ();
-    IgProf::unlock ();
+    // See comments in/on IgProf::lock() to understand this.
+    if (m_locked)
+    {
+        IgProf::activate ();
+	IgProf::unlock (this);
+    }
 }
 
 //////////////////////////////////////////////////////////////////////
+/** Initialise the profiler core itself.  Prepares the the program
+    for profiling.  Captures various exit points so we generate a
+    dump before the program goes "out".  Automatically triggered
+    to run on library load.  All profiler modules should invoke
+    this method before doing their own initialisation.  */
 void
 IgProf::initialize (void)
 {
@@ -86,55 +120,142 @@ IgProf::initialize (void)
     if (program && dlsym (program, "pthread_create"))
     {
 	s_pthreads = true;
-        pthread_mutexattr_t attrs;
-        pthread_mutexattr_init (&attrs);
-        pthread_mutexattr_settype (&attrs, PTHREAD_MUTEX_RECURSIVE);
-        pthread_mutex_init (&s_lock, &attrs);
+	initThread ();
     }
     dlclose (program);
 
+    s_mainthread = pthread_self ();
     IgProf::debug ("Profiler core loaded\n");
-    IgHook::hook (igexit_hook.raw);
-    IgHook::hook (ig_exit_hook.raw);
-    IgHook::hook (igkill_hook.raw);
+    IgHook::hook (doexit_hook_main.raw);
+    IgHook::hook (doexit_hook_main2.raw);
+    IgHook::hook (dokill_hook_main.raw);
 #if __linux
-    IgHook::hook (igcexit_hook.raw);
-    IgHook::hook (igc_exit_hook.raw);
-    IgHook::hook (igckill_hook.raw);
+    if (doexit_hook_main.raw.chain)  IgHook::hook (doexit_hook_libc.raw);
+    if (doexit_hook_main2.raw.chain) IgHook::hook (doexit_hook_libc2.raw);
+    if (dokill_hook_main.raw.chain)  IgHook::hook (dokill_hook_libc.raw);
 #endif
     IgProf::onactivate (&IgProf::enable);
     IgProf::ondeactivate (&IgProf::disable);
     IgProf::enable ();
 }
 
+/** Return @c true if the process was linked against threading package.  */
 bool
 IgProf::isMultiThreaded (void)
 { return s_pthreads; }
 
+/** Setup a thread so it can be used in profiling.  This should be
+    called for every thread that will participate in profiling.  */
 void
-IgProf::lock (void)
-{ if (s_pthreads) pthread_mutex_lock (&s_lock); }
+IgProf::initThread (void)
+{}
 
+/** Acquire a lock on the profiler system.  All profiling modules
+    should call this method (through use of #IgProfLock) before
+    messing with global state, such as recording call traces.
+
+    Returns @c true to indicate that a lock was successfully acquired.
+    May return @c false for some systems in some rather obscure (but
+    frequently occuring) circumstances to indicate that the calling
+    thread is already in the process of trying to obtain the lock
+    and trying to re-acquire it might cause dead-lock.  This can
+    happen if profiler modules "stop on each other" through signal
+    handlers.  */
+bool
+IgProf::lock (void *owner)
+{
+    // Ok, this code is funky.  Initially it was a simple mutex op
+    // the pthread_mutex_lock(&s_lock).  On GNU/Linux (CERN RH 7.3,
+    // GLIBC 2.2.x), one can not re-enter pthread_mutex_{,un}lock()
+    // in the same thread twice.  It can only handle non-concurrent
+    // locking attempts in the same thread with recursive mutexes.
+    // The performance profiler triggers this condition: we get the
+    // SIGPROF signal while some other profiling module in the same
+    // thread is already trying to obtain or release the lock.  The
+    // result is a dead-lock.
+    //
+    // So we don't do that.  Instead, we use global lock and just
+    // IgProfLock "sorry, you can't have the lock now"; it will then
+    // do the right thing.  The cost: you have to define assembler
+    // sequence or some other function that can do compare-and-swap.
+    //
+    // A previous version of this code had thread-local storage for
+    // the guard, which was tested with compare_and_swap to see
+    // if thread already holds the lock, and then proceeded to use
+    // the mutex if it was safe.  That worked admirably well until
+    // the thread exits, memory is freed -- and memory profiler's
+    // free routine tries to use the lock, and now-invalid thread
+    // local storage.  Again, result: dead-lock.
+    //
+    // The function returns "false" to tell IgProfLock we failed to
+    // grab the lock.  This in turn causes it pretend to the caller
+    // that the profiler module is disabled (whether it was or not).
+    // In reality, it really makes no difference whether we use a
+    // mutex or the simple global guard -- once the profiler is off,
+    // it's off.  We might as well make IgProfLock lie.
+    //
+    // Note that this also handles getting *two* different signals
+    // in the *same* thread quickly in succession, e.g. if the
+    // profiled program allocates memory or uses files in signal
+    // handlers.
+    if (s_pthreads && compare_and_swap (&s_guard, 0, (unsigned long) owner))
+	// The lock is already held.
+	return false;
+
+    return s_initialized;
+}
+
+/** Release profiling system lock after successful call to #lock().  */
 void
-IgProf::unlock (void)
-{ if (s_pthreads) pthread_mutex_unlock (&s_lock); }
+IgProf::unlock (void *owner)
+{
+    // See lock() for description on what's going on.
+    if (s_pthreads)
+    {
+	if (s_guard != (unsigned long) owner)
+	{
+	    debug ("%lu[%lu] guard owner mismatch %p %p\n",
+		   (unsigned long) getpid (),
+		   (unsigned long) pthread_self (),
+		   owner, (void *) s_guard);
+	    IGPROF_ASSERT (! "lock mismatch");
+	}
 
+	release_guard (&s_guard);
+    }
+}
+
+/** Enable this profiling module.  Only call within #IgProfLock.
+    Normally called automatically through activation by #IgProfLock.
+    Allows recursive enable/disable.  */
 void
 IgProf::enable (void)
 { s_enabled++; }
 
+/** Disable this profiling module.  Only call within #IgProfLock.
+    Normally called automatically through activation by #IgProfLock.
+    Allows recursive enable/disable.  */
 void
 IgProf::disable (void)
 { s_enabled--; }
 
+/** Register @a func to be run when a lock on the profiling system
+    is about to be released and all all profiling modules need to
+    be reactivated.  Note that the activation functions must support
+    recursive activation; incrementing an @c int is sufficient.  */
 void
 IgProf::onactivate (void (*func) (void))
 { activations ().push_back (func); }
 
+/** Register @a func to be run when a lock on the profiling system
+    has just been acquired and all all profiling modules need to
+    be deactivated.  Note that the deactivation functions must support
+    recursive deactivation; decrementing an @c int is sufficient.  */
 void
 IgProf::ondeactivate (void (*func) (void))
 { deactivations ().push_back (func); }
 
+/** Activate all profiler modules.  Only use through #IgProfLock.  */
 void
 IgProf::activate (void)
 {
@@ -148,19 +269,21 @@ IgProf::activate (void)
 	(*i) ();
 }
 
+/** Deactivate all profiler modules.  Only use through #IgProfLock.  */
 void
 IgProf::deactivate (void)
 {
     if (! s_initialized)
 	return;
 
-    ActivationList		&l = deactivations ();
-    ActivationList::iterator	i = l.begin ();
-    ActivationList::iterator	end = l.end ();
+    ActivationList			&l = deactivations ();
+    ActivationList::reverse_iterator	i = l.rbegin ();
+    ActivationList::reverse_iterator	end = l.rend ();
     for ( ; i != end; ++i)
 	(*i) ();
 }
 
+/** Get user-provided profiling options.  */
 const char *
 IgProf::options (void)
 {
@@ -168,6 +291,10 @@ IgProf::options (void)
      return s_options;
 }
 
+/** Get the root of the profiling counter tree.  Only access the the
+    tree within an #IgProfLock.  In general, only call this method
+    when the profiler module is constructed; if necessary within
+    #IgProfLock.  */
 IgHookTrace *
 IgProf::root (void)
 {
@@ -175,6 +302,10 @@ IgProf::root (void)
     return s_root;
 }
 
+/** Get leak/live tracking map named @a label.  The argument must be
+    statically allocated (a string literal will do).  Returns pointer
+    to the named map.  In general, only call this method when the
+    profiler module is constructed; if necessary within #IgProfLock.  */
 IgHookLiveMap *
 IgProf::liveMap (const char *label)
 {
@@ -198,7 +329,7 @@ IgProf::panic (const char *file, int line, const char *func, const char *expr)
 
     void *trace [128];
     int levels = IgHookTrace::stacktrace (trace, 128);
-    for (int i = 0; i < levels; ++i)
+    for (int i = 2; i < levels; ++i)
     {
 	const char	*sym = 0;
 	const char	*lib = 0;
@@ -230,6 +361,7 @@ IgProf::debug (const char *format, ...)
     }
 }
 
+/** Dump out all unique symbols.  */
 static void
 dumpSymbols (FILE *output, IgHookTrace *node, std::set<void *> &addresses)
 {
@@ -253,6 +385,7 @@ dumpSymbols (FILE *output, IgHookTrace *node, std::set<void *> &addresses)
 	dumpSymbols (output, kid, addresses);
 }
 
+/** Dump out the trace tree.  */
 static void
 dumpTrace (FILE *output, IgHookTrace *node, int depth)
 {
@@ -284,6 +417,7 @@ dumpTrace (FILE *output, IgHookTrace *node, int depth)
     }
 }
 
+/** Dump out the profiler data: trace tree and live maps.  */
 void
 IgProf::dump (void)
 {
@@ -304,7 +438,12 @@ IgProf::dump (void)
 
     IgProf::debug ("dumping state to %s\n", filename);
     std::set<void *> addresses;
-    fprintf (output, "<igprof>\n");
+#if __linux
+    fprintf (output, "<igprof program=\"%s\" pid=\"%lu\">\n",
+	     program_invocation_name, (unsigned long) getpid ());
+#else
+    fprintf (output, "<igprof pid=\"%lu\">\n", (unsigned long) getpid ());
+#endif
     fprintf (output, " <symbols>\n");
     dumpSymbols (output, IgProf::root (), addresses);
     fprintf (output, " </symbols>\n");
@@ -331,24 +470,39 @@ IgProf::dump (void)
 
 
 //////////////////////////////////////////////////////////////////////
+/** Trapped calls to exit() and _exit().  Dump out profiler data.  */
 static void
-doexit (void)
+doexit (IgHook::SafeData<igprof_doexit_t> &hook, int code)
 {
-    IgProfLock lock (s_enabled);
-    if (lock.enabled () > 0)
     {
-        IgProf::debug ("exit() called, dumping state\n");
-	IgProf::dump ();
-        IgProf::debug ("igprof quitting\n");
-    }
+	// Disable if we were already enabled.  Note that on
+	// Linux, end of thread calls into __pthread_do_exit()
+	// which actually calls exit() and lands here.  So be
+	// sure not to disable the system unnecessarily.
 
-    IgProf::deactivate (); // twice disabled!
-    s_initialized = false; // signal local data is unsafe to use
-    s_pthreads = false; // make sure we no longer use threads stuff
+        IgProfLock lock (s_enabled);
+	pthread_t thread = pthread_self ();
+        if (lock.enabled () > 0 && thread == s_mainthread)
+        {
+            IgProf::debug ("%s() called, dumping state\n", hook.function);
+	    IgProf::dump ();
+            IgProf::debug ("igprof quitting\n");
+
+            IgProf::deactivate (); // twice disabled!
+            s_initialized = false; // signal local data is unsafe to use
+            s_pthreads = false; // make sure we no longer use threads stuff
+	}
+	else if (s_pthreads && thread != s_mainthread)
+	    IgProf::debug ("thread %lu %s(), continuing\n",
+			   (unsigned long) thread, hook.function);
+    }
+    hook.chain (code);
 }
 
-static void
-dokill (pid_t pid, int sig)
+/** Trapped calls to kill().  Dump out profiler data if the signal
+    looks dangerous.  Mostly really to trap calls to abort().  */
+static int
+dokill (IgHook::SafeData<igprof_dokill_t> &hook, pid_t pid, int sig)
 {
     if ((pid == 0 || pid == getpid ())
 	&& (sig == SIGHUP || sig == SIGINT || sig == SIGQUIT
@@ -364,17 +518,8 @@ dokill (pid_t pid, int sig)
 	    IgProf::dump ();
 	}
     }
+    return hook.chain (pid, sig);
 }
-
-static void igexit (int code) { doexit (); (*igexit_hook.typed.chain) (code); }
-static void ig_exit (int code) { doexit (); (*ig_exit_hook.typed.chain) (code); }
-static int igkill (pid_t pid, int sig) { dokill (pid, sig); return (*igkill_hook.typed.chain) (pid, sig); }
-
-#if __linux
-static void igcexit (int code) { doexit (); (*igcexit_hook.typed.chain) (code); }
-static void igc_exit (int code) { doexit (); (*igc_exit_hook.typed.chain) (code); }
-static int igckill (pid_t pid, int sig) { dokill (pid, sig); return (*igckill_hook.typed.chain) (pid, sig); }
-#endif
 
 //////////////////////////////////////////////////////////////////////
 static bool autoboot = (IgProf::initialize (), true);

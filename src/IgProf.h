@@ -4,26 +4,9 @@
 //<<<<<< INCLUDES                                                       >>>>>>
 
 # include "Ig_Tools/IgHook/interface/IgHook.h"
+# include "Ig_Tools/IgProf/src/IgProfMacros.h"
 
 //<<<<<< PUBLIC DEFINES                                                 >>>>>>
-
-// #define IGPROF_VERBOSE 1
-
-#define IGPROF_HOOK(type, fun, myfun) \
-    static IgHook::TypedData<type> myfun##_hook = { { 0, #fun, 0, &myfun, 0, 0, 0 } }
-
-#define IGPROF_LIBHOOK(lib, type, fun, myfun) \
-    static IgHook::TypedData<type> myfun##_hook = { { 0, #fun, lib, &myfun, 0, 0, 0 } }
-
-#define IGPROF_ASSERT(expr) \
-    ((void)((expr) ? 1 : IgProf::panic(__FILE__,__LINE__,__PRETTY_FUNCTION__,#expr)))
-
-#if IGPROF_VERBOSE
-# define IGPROF_TRACE(expr) do { IgProf::debug expr; } while (0)
-#else
-# define IGPROF_TRACE(expr) do { ; } while (0)
-#endif
-
 //<<<<<< PUBLIC CONSTANTS                                               >>>>>>
 //<<<<<< PUBLIC TYPES                                                   >>>>>>
 
@@ -34,6 +17,8 @@ class IgHookLiveMap;
 //<<<<<< PUBLIC FUNCTIONS                                               >>>>>>
 //<<<<<< CLASS DECLARATIONS                                             >>>>>>
 
+/** Core profiling implementation.  Implements utilities needed
+    to implement actual profiler modules as well as final dumps. */
 class IgProf
 {
 public:
@@ -53,17 +38,20 @@ public:
     static void			activate (void);
     static void			deactivate (void);
 
+    static void			initThread (void);
     static bool			isMultiThreaded (void);
 
 private:
     friend class IgProfLock;
-    static void			lock (void);
-    static void			unlock (void);
+    static bool			lock (void *);
+    static void			unlock (void *);
 
     static void			enable (void);
     static void			disable (void);
 };
 
+/** Acquire a lock on the profiling system.  Obtains the
+    lock and deactivates all profiler modules.  */
 class IgProfLock
 {
 public:
@@ -76,14 +64,21 @@ private:
     IgProfLock (const IgProfLock &);
     IgProfLock &operator= (const IgProfLock &);
 
+    bool	m_locked;
     int		m_enabled;
 };
 
 //<<<<<< INLINE PUBLIC FUNCTIONS                                        >>>>>>
 //<<<<<< INLINE MEMBER FUNCTIONS                                        >>>>>>
 
+/** Return the state of this profiler module after the lock has been
+    acquired.  Value greater than zero indicates the module was active
+    before the lock was obtained and the caller can proceed to record
+    information.  If the return value is zero or less, caller should
+    only do whatever is minimally required to mimic what ever function
+    it trapped, or ignore the request.  */
 inline int
 IgProfLock::enabled (void)
-{ return m_enabled; }
+{ return m_locked ? m_enabled : 0; }
 
 #endif // IG_PROF_IG_PROF_H

@@ -5,3 +5,4 @@
 <bin file=test_overriddenNew.cc>Test for overridden new operator</bin>
 <bin file=test_liveAllocations.cc>Test for live allocations</bin>
 <bin file=test_forking.cc>Test fork ()</bin>
+<bin file=test_load.cc>Test profile mixing</bin>

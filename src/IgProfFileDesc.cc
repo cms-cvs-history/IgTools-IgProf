@@ -17,42 +17,30 @@
 //<<<<<< CLASS STRUCTURE INITIALIZATION                                 >>>>>>
 //<<<<<< PRIVATE FUNCTION DEFINITIONS                                   >>>>>>
 
-static int igopen (const char *fn, int flags, int mode);
-static int igopen64 (const char *fn, int flags, int mode);
-static int igclose (int fd);
-static int igdup (int fd);
-static int igdup2 (int fd, int newfd);
-static int igsocket (int domain, int type, int proto);
-static int igaccept (int fd, struct sockaddr *addr, socklen_t *len);
+// Traps for this profiling module
+IGPROF_DUAL_HOOK (3, int, doopen, _main, _libc,
+		  (const char *fn, int flags, int mode), (fn, flags, mode),
+		  "open", 0, "libc.so.6");
+IGPROF_DUAL_HOOK (3, int, doopen64, _main, _libc,
+		  (const char *fn, int flags, int mode), (fn, flags, mode),
+		  "__open64", 0, "libc.so.6");
+IGPROF_DUAL_HOOK (1, int, doclose, _main, _libc,
+		  (int fd), (fd),
+		  "close", 0, "libc.so.6");
+IGPROF_DUAL_HOOK (1, int, dodup, _main, _libc,
+		  (int fd), (fd),
+		  "dup", 0, "libc.so.6");
+IGPROF_DUAL_HOOK (2, int, dodup2, _main, _libc,
+		  (int fd, int newfd), (fd, newfd),
+		  "dup2", 0, "libc.so.6");
+IGPROF_DUAL_HOOK (3, int, dosocket, _main, _libc,
+		  (int domain, int type, int proto), (domain, type, proto),
+		  "socket", 0, "libc.so.6");
+IGPROF_DUAL_HOOK (3, int, doaccept, _main, _libc,
+		  (int fd, sockaddr *addr, socklen_t *len), (fd, addr, len),
+		  "accept", 0, "libc.so.6");
 
-#if __linux
-static int igcopen (const char *fn, int flags, int mode);
-static int igcopen64 (const char *fn, int flags, int mode);
-static int igcclose (int fd);
-static int igcdup (int fd);
-static int igcdup2 (int fd, int newfd);
-static int igcsocket (int domain, int type, int proto);
-static int igcaccept (int fd, struct sockaddr *addr, socklen_t *len);
-#endif
-
-IGPROF_HOOK (int (const char *, int, int),	open,		igopen);
-IGPROF_HOOK (int (const char *, int, int),	__open64,	igopen64);
-IGPROF_HOOK (int (int),				close,		igclose);
-IGPROF_HOOK (int (int),				dup,		igdup);
-IGPROF_HOOK (int (int, int),			dup2,		igdup2);
-IGPROF_HOOK (int (int, int, int),		socket,		igsocket);
-IGPROF_HOOK (int (int, sockaddr *,socklen_t *),	accept,		igaccept);
-
-#if __linux
-IGPROF_LIBHOOK ("libc.so.6", int (const char *, int, int),	open,		igcopen);
-IGPROF_LIBHOOK ("libc.so.6", int (const char *, int, int),	__open64,	igcopen64);
-IGPROF_LIBHOOK ("libc.so.6", int (int),				close,		igcclose);
-IGPROF_LIBHOOK ("libc.so.6", int (int),				dup,		igcdup);
-IGPROF_LIBHOOK ("libc.so.6", int (int, int),			dup2,		igcdup2);
-IGPROF_LIBHOOK ("libc.so.6", int (int, int, int),		socket,		igcsocket);
-IGPROF_LIBHOOK ("libc.so.6", int (int, sockaddr *,socklen_t *),	accept,		igcaccept);
-#endif
-
+// Data for this profiling module
 static IgHookTrace::Counter	s_ct_used	= { "FD_USED" };
 static IgHookTrace::Counter	s_ct_live	= { "FD_LIVE" };
 static bool			s_count_used	= 0;
@@ -107,6 +95,8 @@ remove (int fd)
 //<<<<<< PUBLIC FUNCTION DEFINITIONS                                    >>>>>>
 //<<<<<< MEMBER FUNCTION DEFINITIONS                                    >>>>>>
 
+/** Initialise file descriptor profiling.  Traps various system
+    calls to keep track of usage, and if requested, leaks.  */
 void
 IgProfFileDesc::initialize (void)
 {
@@ -174,21 +164,21 @@ IgProfFileDesc::initialize (void)
         if (s_count_leaks)
 	    s_live = IgProf::liveMap ("File Descriptor Leaks");
 
-        IgHook::hook (igopen_hook.raw);
-        IgHook::hook (igopen64_hook.raw);
-        IgHook::hook (igclose_hook.raw);
-        IgHook::hook (igdup_hook.raw);
-        IgHook::hook (igdup2_hook.raw);
-        IgHook::hook (igsocket_hook.raw);
-        IgHook::hook (igaccept_hook.raw);
+        IgHook::hook (doopen_hook_main.raw);
+        IgHook::hook (doopen64_hook_main.raw);
+        IgHook::hook (doclose_hook_main.raw);
+        IgHook::hook (dodup_hook_main.raw);
+        IgHook::hook (dodup2_hook_main.raw);
+        IgHook::hook (dosocket_hook_main.raw);
+        IgHook::hook (doaccept_hook_main.raw);
 #if __linux
-        IgHook::hook (igcopen_hook.raw);
-        IgHook::hook (igcopen64_hook.raw);
-        IgHook::hook (igcclose_hook.raw);
-        IgHook::hook (igcdup_hook.raw);
-        IgHook::hook (igcdup2_hook.raw);
-        IgHook::hook (igcsocket_hook.raw);
-        IgHook::hook (igcaccept_hook.raw);
+        if (doopen_hook_main.raw.chain)   IgHook::hook (doopen_hook_libc.raw);
+        if (doopen64_hook_main.raw.chain) IgHook::hook (doopen64_hook_libc.raw);
+        if (doclose_hook_main.raw.chain)  IgHook::hook (doclose_hook_libc.raw);
+        if (dodup_hook_main.raw.chain)    IgHook::hook (dodup_hook_libc.raw);
+        if (dodup2_hook_main.raw.chain)   IgHook::hook (dodup2_hook_libc.raw);
+        if (dosocket_hook_main.raw.chain) IgHook::hook (dosocket_hook_libc.raw);
+        if (doaccept_hook_main.raw.chain) IgHook::hook (doaccept_hook_libc.raw);
 #endif
         IgProf::debug ("File descriptor profiler enabled\n");
         IgProf::onactivate (&IgProfFileDesc::enable);
@@ -197,17 +187,24 @@ IgProfFileDesc::initialize (void)
     }
 }
 
+/** Enable this profiling module.  Only call within #IgProfLock.
+    Normally called automatically through activation by #IgProfLock.
+    Allows recursive enable/disable.  */
 void
 IgProfFileDesc::enable (void)
 { s_enabled++; }
 
+/** Disable this profiling module.  Only call within #IgProfLock.
+    Normally called automatically through activation by #IgProfLock.
+    Allows recursive enable/disable.  */
 void
 IgProfFileDesc::disable (void)
 { s_enabled--; }
 
+//////////////////////////////////////////////////////////////////////
+// Trapped system calls.  Track live file descriptor usage.
 static int
-doopen (IgHook::SafeData<int(const char *, int, int)> &hook,
-	const char *fn, int flags, int mode)
+doopen (IgHook::SafeData<igprof_doopen_t> &hook, const char *fn, int flags, int mode)
 {
     IGPROF_TRACE (("(%d igopen %s %d %d\n", s_enabled, fn, flags, mode));
     IgProfLock lock (s_enabled);
@@ -221,8 +218,7 @@ doopen (IgHook::SafeData<int(const char *, int, int)> &hook,
 }
 
 static int
-doopen64 (IgHook::SafeData<int(const char *, int, int)> &hook,
-	  const char *fn, int flags, int mode)
+doopen64 (IgHook::SafeData<igprof_doopen64_t> &hook, const char *fn, int flags, int mode)
 {
     IGPROF_TRACE (("(%d igopen64 %s %d %d\n", s_enabled, fn, flags, mode));
     IgProfLock lock (s_enabled);
@@ -236,7 +232,7 @@ doopen64 (IgHook::SafeData<int(const char *, int, int)> &hook,
 }
 
 static int
-doclose (IgHook::SafeData<int (int)> &hook, int fd)
+doclose (IgHook::SafeData<igprof_doclose_t> &hook, int fd)
 {
     IGPROF_TRACE (("(%d igclose %d\n", s_enabled, fd));
     IgProfLock lock (s_enabled);
@@ -251,7 +247,7 @@ doclose (IgHook::SafeData<int (int)> &hook, int fd)
 
 
 static int
-dodup (IgHook::SafeData<int (int)> &hook, int fd)
+dodup (IgHook::SafeData<igprof_dodup_t> &hook, int fd)
 {
     IGPROF_TRACE (("(%d igdup %d\n", s_enabled, fd));
     IgProfLock lock (s_enabled);
@@ -265,7 +261,7 @@ dodup (IgHook::SafeData<int (int)> &hook, int fd)
 }
 
 static int
-dodup2 (IgHook::SafeData<int (int, int)> &hook, int fd, int newfd)
+dodup2 (IgHook::SafeData<igprof_dodup2_t> &hook, int fd, int newfd)
 {
     IGPROF_TRACE (("(%d igdup2 %d %d\n", s_enabled, fd, newfd));
     IgProfLock lock (s_enabled);
@@ -282,8 +278,7 @@ dodup2 (IgHook::SafeData<int (int, int)> &hook, int fd, int newfd)
 }
 
 static int
-dosocket (IgHook::SafeData<int(int, int, int)> &hook,
-	  int domain, int type, int proto)
+dosocket (IgHook::SafeData<igprof_dosocket_t> &hook, int domain, int type, int proto)
 {
     IGPROF_TRACE (("(%d igsocket %d %d %d\n", s_enabled, domain, type, proto));
     IgProfLock lock (s_enabled);
@@ -297,7 +292,7 @@ dosocket (IgHook::SafeData<int(int, int, int)> &hook,
 }
 
 static int
-doaccept (IgHook::SafeData<int(int,struct sockaddr *, socklen_t *)> &hook,
+doaccept (IgHook::SafeData<igprof_doaccept_t> &hook,
 	  int fd, struct sockaddr *addr, socklen_t *len)
 {
     IGPROF_TRACE (("(%d igaccept %d %p %p\n", s_enabled,
@@ -312,22 +307,5 @@ doaccept (IgHook::SafeData<int(int,struct sockaddr *, socklen_t *)> &hook,
     return result;
 }
 
-static int igopen (const char *fn, int flags, int mode) { return doopen (igopen_hook.typed, fn, flags, mode); } 
-static int igopen64 (const char *fn, int flags, int mode) { return doopen64 (igopen64_hook.typed, fn, flags, mode); }
-static int igclose (int fd) { return doclose (igclose_hook.typed, fd); }
-static int igdup (int fd) { return dodup (igdup_hook.typed, fd); }
-static int igdup2 (int fd, int newfd) { return dodup2 (igdup2_hook.typed, fd, newfd); }
-static int igsocket (int domain, int type, int proto) { return dosocket (igsocket_hook.typed, domain, type, proto); }
-static int igaccept (int fd, struct sockaddr *addr, socklen_t *len) { return doaccept (igaccept_hook.typed, fd, addr, len); }
-
-#if __linux
-static int igcopen (const char *fn, int flags, int mode) { return doopen (igcopen_hook.typed, fn, flags, mode); } 
-static int igcopen64 (const char *fn, int flags, int mode) { return doopen64 (igcopen64_hook.typed, fn, flags, mode); }
-static int igcclose (int fd) { return doclose (igcclose_hook.typed, fd); }
-static int igcdup (int fd) { return dodup (igcdup_hook.typed, fd); }
-static int igcdup2 (int fd, int newfd) { return dodup2 (igcdup2_hook.typed, fd, newfd); }
-static int igcsocket (int domain, int type, int proto) { return dosocket (igcsocket_hook.typed, domain, type, proto); }
-static int igcaccept (int fd, struct sockaddr *addr, socklen_t *len) { return doaccept (igcaccept_hook.typed, fd, addr, len); }
-#endif
-
+//////////////////////////////////////////////////////////////////////
 static bool autoboot = (IgProfFileDesc::initialize (), true);

@@ -1,3 +1,18 @@
+2004-05-15  Lassi A. Tuura  <lat@iki.fi>
+
+	* IgProf.h, IgProfMacros.h: Split macros off to another header.
+	Provide easier interface to registering hooks, provide trampolines
+	directly and support dual hooks for binaries that have symbols in
+	themselves in addition to being defined in system libraries.
+	Heavy work on multi-thread profiling issues.  Add documentation.
+	Include program name and process-id into the dump if possible.
+	* IgProfFileDesc.cc: New hook definition scheme.  Document.
+	* IgProfMem.cc: New hook definition scheme.  Document.
+	* IgProfPerf.cc: New hook definition scheme.  Document.
+	Heavy work on multi-threaded program profiling.
+	* test/test_load.cc: New multi-threaded stress test.
+	* src/.gdbinit: New.
+
 2004-05-14  Lassi A. Tuura  <lat@iki.fi>
 
 	* IgProf.h: Restore old interface.
