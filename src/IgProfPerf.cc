@@ -47,7 +47,6 @@ static int			s_nthreads	= 0;
 static pthread_t		s_threads [1024];
 static pthread_t		s_profthread;
 #endif
-static itimerval		s_interval;
 
 /** Record a tick.  Increments counters in the tree for ticks.  */
 static void 
@@ -66,11 +65,6 @@ add (void)
     node->counter (&s_ct_ticks)->tick ();
 }
 
-/** Check if the program we are running on was linked against pthreads.  */
-static bool
-isMultiThreaded (void)
-{ return igpthread_create_hook.typed.chain != 0; }
-
 /** SIGPROF signal handler.  Record a tick for the current program
     location.  For POSIX-conforming systems assumes the signal handler
     is registered for the correct thread.  For non-conforming old
@@ -80,7 +74,7 @@ isMultiThreaded (void)
 static void
 profileSignalHandler (void)
 {
-    if (isMultiThreaded ())
+    if (IgProf::isMultiThreaded ())
     {
 	IgProfLock lock (s_enabled);
 
@@ -109,22 +103,27 @@ profileSignalHandler (void)
 static void
 enableTimer (void)
 {
-    IgProf::debug ("Perf: timer started\n");
-    s_interval.it_interval.tv_sec = 0;
-    s_interval.it_interval.tv_usec = 1000;
-    s_interval.it_value.tv_sec = 0;
-    s_interval.it_value.tv_usec = 1000;
-    setitimer (ITIMER_PROF, &s_interval, 0);
+    itimerval interval = { { 0, 1000 }, { 0, 1000 } };
+    setitimer (ITIMER_PROF, &interval, 0);
 }
 
-/** Enable SIGPROF signal handler in the current thread.  */
+/** Disable profiling timer.  */
+static void
+disableTimer (void)
+{
+    itimerval interval = { { 0, 0 }, { 0, 0 } };
+    setitimer (ITIMER_PROF, &interval, 0);
+}
+
+/** Enable SIGPROF signal handler.  */
 static void
 enableSignalHandler (void)
-{
-    IgProf::debug ("Perf: signal handler enabled in thread %lu\n",
-		   (unsigned long) pthread_self ());
-    signal (SIGPROF, (sighandler_t) &profileSignalHandler);
-}
+{ signal (SIGPROF, (sighandler_t) &profileSignalHandler); }
+
+/** Disable SIGPROF signal handler.  */
+static void
+disableSignalHandler (void)
+{ signal (SIGPROF, SIG_IGN); }
 
 #if __linux
 /** Old GNU/Linux system hack.  Make sure the signal handling thread
@@ -160,11 +159,10 @@ profileSignalThread (void *)
 static void
 enableSignalThread (void)
 {
-    if (isMultiThreaded ())
+    if (IgProf::isMultiThreaded ())
     {
 	pthread_mutex_lock (&s_sigstart);
-	(*igpthread_create_hook.typed.chain)
-	    (&s_profthread, 0, &profileSignalThread, 0);
+	pthread_create (&s_profthread, 0, &profileSignalThread, 0);
 	pthread_mutex_lock (&s_sigstart);
     }
 }
@@ -190,6 +188,7 @@ threadWrapper (void *arg)
     // Old GNU/Linux system hack: make sure signal worker sends the
     // signal to this thread too.
     registerThisThread ();
+    enableSignalHandler ();
 #endif
 
     sigset_t profset;
@@ -207,7 +206,7 @@ threadWrapper (void *arg)
     IgProf::debug ("Perf: captured thread %lu for profiling (%p, %p)\n",
 		   (unsigned long) pthread_self (),
 		   (void *) start_routine,
-		   arg);
+		   start_arg);
     return (*start_routine) (start_arg);
 }
 
@@ -249,29 +248,32 @@ IgProfPerf::initialize (void)
 	// Enable profiler.  On old GNU/Linux systems, also start a
 	// signal handling worker thread that mirrors the SIGPROF
 	// signal to all real user-threads.
-        IgHook::hook (igpthread_create_hook.raw);
 	IgProf::debug ("Performance profiler enabled\n");
-	IgProf::onactivate (&IgProfPerf::enable);
-	IgProf::ondeactivate (&IgProfPerf::disable);
-	IgProfPerf::enable ();
 #if __linux
 	registerThisThread ();
 	enableSignalThread ();
 #endif
+        IgHook::hook (igpthread_create_hook.raw);
+
+	IgProf::onactivate (&IgProfPerf::enable);
+	IgProf::ondeactivate (&IgProfPerf::disable);
+
 	enableSignalHandler ();
 	enableTimer ();
+
+	IgProfPerf::enable ();
     }
 }
 
 /** Enable performance profiler.  */
 void
 IgProfPerf::enable (void)
-{ s_enabled++; }
+{ s_enabled++; enableSignalHandler (); enableTimer (); }
 
 /** Disable performance profiler.  */
 void
 IgProfPerf::disable (void)
-{ s_enabled--; }
+{ disableTimer (); disableSignalHandler (); s_enabled--; }
 
 /** Override for user thread creation to make sure SIGPROF signal is
     also sent and handled in the user thread.  */
@@ -281,7 +283,6 @@ igpthread_create (pthread_t *thread,
 		  void * (*start_routine) (void *),
 		  void *arg)
 {
-    IgProfLock lock (s_enabled);
     IgProfPerfWrappedArg *wrapped = new IgProfPerfWrappedArg;
     wrapped->start_routine = start_routine;
     wrapped->arg = arg;

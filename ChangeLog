@@ -1,5 +1,9 @@
 2004-05-14  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProfPerf.cc: Disable/enable timer and signal handler when
+	the module is disabled/enabled.  Rearrange init sequence so
+	we can call system pthread_create().
+
 	* IgProf.cc: Remove messing with thread-specific data, it just
 	creates problems -- it allocates memory and we are sometimes
 	unable to capture all threads.  Just make sure the performance
