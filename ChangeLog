@@ -1,3 +1,8 @@
+2004-06-04  Lassi A. Tuura  <lat@iki.fi>
+
+	* IgProfMem.cc: Make "live" memory track both final live memory
+	(= leaked memory) and maximum live memory in each call context.
+
 2004-05-16  Lassi A. Tuura  <lat@iki.fi>
 
 	* igprof-analyse: Optionally demangle symbols.  Sanitise symbol

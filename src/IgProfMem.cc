@@ -42,6 +42,7 @@ IGPROF_DUAL_HOOK (1, void, dofree, _main, _libc,
 static IgHookTrace::Counter	s_ct_total	= { "MEM_TOTAL" };
 static IgHookTrace::Counter	s_ct_largest	= { "MEM_MAX" };
 static IgHookTrace::Counter	s_ct_live	= { "MEM_LIVE" };
+static IgHookTrace::Counter	s_ct_maxlive	= { "MEM_LIVE_MAX" };
 static bool			s_count_total	= 0;
 static bool			s_count_largest	= 0;
 static bool			s_count_live	= 0;
@@ -70,7 +71,12 @@ add (void *ptr, size_t size)
     // Increment counters for this node
     if (s_count_total)   node->counter (&s_ct_total)->add (size);
     if (s_count_largest) node->counter (&s_ct_largest)->max (size);
-    if (s_count_live)    node->counter (&s_ct_live)->add (size);
+    if (s_count_live)
+    {
+	IgHookTrace::CounterValue *ctr = node->counter (&s_ct_live);
+	ctr->add (size);
+	node->counter (&s_ct_maxlive)->max (ctr->value ());
+    }
     if (s_count_leaks)
     {
 	IGPROF_ASSERT (s_live->find ((unsigned long) ptr) == s_live->end ());
