@@ -7,12 +7,6 @@
 #include <cassert>
 #include <cstdlib>
 
-// #include "config.h"
-// #include "IgMProfTreeSingleton.h"
-// #include "IgMProfMallocHooks.h"
-// #include "IgMProfConfiguration.h"
-// #include <unistd.h>
-
 //<<<<<< PRIVATE DEFINES                                                >>>>>>
 //<<<<<< PRIVATE CONSTANTS                                              >>>>>>
 //<<<<<< PRIVATE TYPES                                                  >>>>>>

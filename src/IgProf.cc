@@ -31,10 +31,12 @@ typedef std::list<void (*) (void)>		ActivationList;
 //<<<<<< PRIVATE FUNCTION DEFINITIONS                                   >>>>>>
 
 static void igexit (int);
+static void igcexit (int);
 static void ig_exit (int);
 static int  igkill (pid_t pid, int sig);
 
 IGPROF_HOOK (void (int), exit, igexit);
+IGPROF_LIBHOOK (void (int), exit, "libc.so.6", igcexit);
 IGPROF_HOOK (void (int), _exit, ig_exit);
 IGPROF_HOOK (int (pid_t, int), kill, igkill);
 
@@ -64,6 +66,7 @@ IgProf::initialize (void)
 
     IgProf::debug ("Profiler core loaded\n");
     IgHook::hook (igexit_hook.raw);
+    IgHook::hook (igcexit_hook.raw);
     IgHook::hook (ig_exit_hook.raw);
     IgHook::hook (igkill_hook.raw);
     IgProf::onactivate (&IgProf::enable);
@@ -274,6 +277,23 @@ static void igexit (int code)
 	s_initialized = false; // signal local data is unsafe to use
     }
     (*igexit_hook.typed.chain) (code);
+}
+
+static void igcexit (int code)
+{
+    {
+        IgProfLock lock (s_enabled);
+        if (lock.enabled () > 0)
+        {
+            IgProf::debug ("exit() called, dumping state\n");
+	    IgProf::dump ();
+            IgProf::debug ("igprof quitting\n");
+        }
+
+        IgProf::deactivate (); // twice disabled!
+	s_initialized = false; // signal local data is unsafe to use
+    }
+    (*igcexit_hook.typed.chain) (code);
 }
 
 static void ig_exit (int code)

@@ -10,6 +10,9 @@
 #define IGPROF_HOOK(type, fun, myfun) \
     static IgHook::TypedData<type> myfun##_hook = { { 0, #fun, 0, &myfun, 0, 0, 0 } }
 
+#define IGPROF_LIBHOOK(type, fun, lib, myfun) \
+    static IgHook::TypedData<type> myfun##_hook = { { 0, #fun, lib, &myfun, 0, 0, 0 } }
+
 //<<<<<< PUBLIC CONSTANTS                                               >>>>>>
 //<<<<<< PUBLIC TYPES                                                   >>>>>>
 
