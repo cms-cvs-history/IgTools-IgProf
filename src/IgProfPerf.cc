@@ -201,11 +201,14 @@ threadWrapper (void *arg)
     enableTimer ();
 
     IgProfPerfWrappedArg *wrapped = (IgProfPerfWrappedArg *) arg;
+    void *(*start_routine) (void*) = wrapped->start_routine;
+    void *start_arg = wrapped->arg;
+    delete wrapped;
     IgProf::debug ("Perf: captured thread %lu for profiling (%p, %p)\n",
 		   (unsigned long) pthread_self (),
-		   (void *) wrapped->start_routine,
-		   wrapped->arg);
-    return (*wrapped->start_routine) (wrapped->arg);
+		   (void *) start_routine,
+		   arg);
+    return (*start_routine) (start_arg);
 }
 
 //<<<<<< PUBLIC FUNCTION DEFINITIONS                                    >>>>>>
@@ -279,9 +282,11 @@ igpthread_create (pthread_t *thread,
 		  void *arg)
 {
     IgProfLock lock (s_enabled);
-    IgProfPerfWrappedArg wrapped = { start_routine, arg };
+    IgProfPerfWrappedArg *wrapped = new IgProfPerfWrappedArg;
+    wrapped->start_routine = start_routine;
+    wrapped->arg = arg;
     return (*igpthread_create_hook.typed.chain)
-	(thread, attr, &threadWrapper, &wrapped);
+	(thread, attr, &threadWrapper, wrapped);
 }
 
 // Auto start this profiling module

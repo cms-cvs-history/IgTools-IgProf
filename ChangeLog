@@ -1,5 +1,7 @@
 2004-05-14  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProfPerf.cc: Pass valid memory to thread start routine.
+
 	* IgProf.cc: Properly check if the program is multi-threaded and
 	remember that in all decisions.  Mark program non-threaded when we
 	are quitting to avoid invoking into pthreads in destructors
