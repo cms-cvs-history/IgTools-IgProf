@@ -1,5 +1,7 @@
 2004-05-13  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProf.h: Turn off verbosity for proper usage.
+
 	* IgProf.h, IgProf.cc (IGPROF_ASSERT, IGPROF_TRACE, panic): New
 	profiler tool debugging utilities.
 
