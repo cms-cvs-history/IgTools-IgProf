@@ -1,4 +1,4 @@
-<external ref=sockets>
+<use name=Ig_Tools/IgProf>
 <bin file=test_leaks.cc>Test for leaks</bin>
 <bin file=test_performance.cc>Test for performance</bin>
 <bin file=test_instrumentation.cc>Test for instrumentation API</bin>

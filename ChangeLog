@@ -1,3 +1,7 @@
+2004-06-21  Shahzad Muzaffar <Shahzad.Muzaffar@cern.ch>
+
+	* BuildFile: updated for new SCRAM V1.
+
 2004-06-15  Lassi A. Tuura  <lat@iki.fi>
 
 	* scripts/igprof-analyse: Don't make GDB resolution the default.
