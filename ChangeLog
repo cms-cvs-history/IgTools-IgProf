@@ -1,3 +1,8 @@
+2004-06-05  Lassi A. Tuura  <lat@iki.fi>
+
+	* IgProfPerf.cc (add): Increase and document the number of stack
+	frames to drop.  Need to drop off signal delivery stack frames.
+
 2004-06-04  Lassi A. Tuura  <lat@iki.fi>
 
 	* igprof: Only support profiling.  Clean up option handling and

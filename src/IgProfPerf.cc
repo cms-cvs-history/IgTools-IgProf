@@ -69,10 +69,12 @@ static pthread_t		s_profthread;
 static void 
 add (void)
 {
-    int		drop = 2; // one for stacktrace, one for me
     IgHookTrace	*node = IgProf::threadRoot ();
     void	*addresses [128];
     int		depth = IgHookTrace::stacktrace (addresses, 128);
+    // one for stacktrace, one for me, one for signal frame, one for
+    // pthreads signal handler wrapper (on linux only?).
+    int		drop = 3 + (IgProf::isMultiThreaded () ? 1 : 0);
 
     // Walk the tree
     for (int i = depth-2; node && i >= drop; --i)
