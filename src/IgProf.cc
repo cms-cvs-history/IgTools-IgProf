@@ -42,7 +42,7 @@ IGPROF_HOOK (int (pid_t, int), kill, igkill);
 
 static int		s_enabled	= 0;
 static bool		s_initialized	= false;
-static pthread_mutex_t	s_lock		= PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
+static pthread_mutex_t	s_lock		= PTHREAD_MUTEX_INITIALIZER;
 
 static LiveMaps &livemaps (void) { static LiveMaps s; return s; }
 static ActivationList &activations (void) { static ActivationList s; return s; }
@@ -63,6 +63,11 @@ IgProf::initialize (void)
 {
     if (s_initialized) return;
     s_initialized = true;
+
+    pthread_mutexattr_t attrs;
+    pthread_mutexattr_init (&attrs);
+    pthread_mutexattr_settype (&attrs, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init (&s_lock, &attrs);
 
     IgProf::debug ("Profiler core loaded\n");
     IgHook::hook (igexit_hook.raw);

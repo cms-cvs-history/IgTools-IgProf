@@ -23,6 +23,10 @@ struct IgProfPerfWrappedArg
     void *arg;
 };
 
+#ifdef __APPLE__
+typedef sig_t sighandler_t;
+#endif
+
 //<<<<<< PRIVATE VARIABLE DEFINITIONS                                   >>>>>>
 //<<<<<< PUBLIC VARIABLE DEFINITIONS                                    >>>>>>
 //<<<<<< CLASS STRUCTURE INITIALIZATION                                 >>>>>>
