@@ -1,5 +1,7 @@
 2004-05-10  Lassi A. Tuura  <lat@iki.fi>
 
+	* scripts/igprof-analyse: Preliminary analysis.
+
 	* IgProfMem.cc, IgProfPerf.cc, IgProfFileDesc.cc (initialize):
 	Make progress in the option string when unrecognised input is found.
 

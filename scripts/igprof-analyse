@@ -54,19 +54,66 @@ sub readDump
 	}
    }
    close (DUMP);
-   return { SYMS => $syms, LEAKS => $leaks, NODES => $nodes };
+   return { SYMS => $syms, LEAKS => $leaks, NODES => [ $nodes ] };
 }
 
 sub keysof
 {
     my ($dump) = @_;
+    my @keys = ();
+    foreach my $node (@{$dump->{NODES}}) {
+	@keys = &checkkeys ($node, @keys);
+    }
+    return @keys;
+}
+
+sub checkkeys
+{
+    my ($node, @keys) = @_;
+    foreach my $key (map { $_->{NAME} } @{$node->{COUNTERS}}) {
+	push (@keys, $key) if ! grep ($_ eq $key, @keys);
+    }
+    foreach my $kid (@{$node->{CHILDREN}}) {
+	@keys = &checkkeys ($kid, @keys);
+    }
+    return @keys;
 }
 
 sub analyse
 {
     my ($dump, $keys) = @_;
+    print "keys = ", join (", ", @$keys), "\n";
+
+    my $syms = $dump->{SYMS};
+    my $flat = { "spontaneous" => { PARENTS => [], SELF => [], CHILDREN => [] } };
+    foreach my $node (@{$dump->{NODES}}) {
+	foreach my $node (@{$node->{CHILDREN}}) {
+	    &analysenode ("spontaneous", $node, $flat);
+        }
+    }
+
+    # FIXME: sort table by keys
+    foreach my $sym (sort keys %$flat) {
+	use Data::Dumper;
+	print "$sym => ", Dumper ($flat->{$sym});
+	# print parents
+	# print row
+	# print children
+    }
 }
 
+sub analysenode
+{
+    my ($parent, $node, $result) = @_;
+    my $sym = $node->{SYMADDR};
+    my $symnode = $result->{$sym}; # ||= { PARENTS => [], SELF => [], CHILDREN => [] };
+    push (@{$result->{$parent}{CHILDREN}}, $sym);
+    push (@{$symnode->{PARENTS}}, $parent);
+    push (@{$symnode->{SELF}}, $node->{COUNTERS});
+    foreach my $kid (@{$node->{CHILDREN}}) {
+	&analysenode ($sym, $kid, $result);
+    }
+}
 
 while ($#ARGV != 0)
 {
