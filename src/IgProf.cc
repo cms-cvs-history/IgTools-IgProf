@@ -201,11 +201,15 @@ dumpTrace (FILE *output, IgHookTrace *node, int depth)
 	for (int i = 0; i <= depth; ++i)
 	    fputc (' ', output);
 
-	fprintf (output, "<node id=\"%p\" symaddr=\"%p\">", (void *) node, node->address ());
+	fprintf (output, "<node id=\"%p\" symaddr=\"%p\">\n", (void *) node, node->address ());
 	for (IgHookTrace::CounterValue *val = node->counters (); val; val = val->next ())
-	    fprintf (output, "<counter name=\"%s\" value=\"%lu\"/>",
-		     val->counter ()->m_name, val->value ());
-	fputc ('\n', output);
+	{
+	    for (int i = 0; i <= depth+1; ++i)
+	        fputc (' ', output);
+
+	    fprintf (output, "<counter name=\"%s\" value=\"%lu\" count=\"%lu\"/>\n",
+		     val->counter ()->m_name, val->value (), val->count ());
+	}
     }
 
     for (IgHookTrace *kid = node->children (); kid; kid = kid->next ())
