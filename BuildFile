@@ -1,4 +1,6 @@
+<use name=Ig_Tools/IgHook>
+
 <export>
+ <use name=Ig_Tools/IgHook>
  <lib name=IgProf>
- <use name=IgHook>
 </export>
