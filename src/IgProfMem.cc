@@ -119,6 +119,9 @@ IgProfMem::initialize (void)
 
     while (options && *options)
     {
+	while (*options == ' ' || *options == ',')
+	    ++options;
+
 	if (! strncmp (options, "mem", 3))
 	{
 	    enable = true;

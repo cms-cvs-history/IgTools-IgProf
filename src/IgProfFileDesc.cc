@@ -82,6 +82,9 @@ IgProfFileDesc::initialize (void)
 
     while (options && *options)
     {
+	while (*options == ' ' || *options == ',')
+	    ++options;
+
 	if (! strncmp (options, "fd", 2))
 	{
 	    enable = true;

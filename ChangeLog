@@ -1,5 +1,8 @@
 2004-05-13  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProfMem.cc, IgProfPerf.cc, IgProfFileDesc.cc: Fix option
+	parsing.
+
 	* IgProf.cc (igkill): Lock only once we know we will handle this
 	signal to avoid dead-locking problems (e.g. with SIGPROF).
 

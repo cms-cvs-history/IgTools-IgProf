@@ -221,6 +221,9 @@ IgProfPerf::initialize (void)
 
     while (options && *options)
     {
+	while (*options == ' ' || *options == ',')
+	    ++options;
+
 	if (! strncmp (options, "perf", 4))
 	{
 	    enable = true;
