@@ -1,3 +1,7 @@
+2004-06-07  Giulio Eulisse  <giulio.eulisse@cern.ch>
+
+	* IgProfPerf.cc (add): Drop profileSignalHandlerFrame ().
+
 2004-06-05  Lassi A. Tuura  <lat@iki.fi>
 
 	* IgProfPerf.cc (add): Increase and document the number of stack

@@ -72,9 +72,9 @@ add (void)
     IgHookTrace	*node = IgProf::threadRoot ();
     void	*addresses [128];
     int		depth = IgHookTrace::stacktrace (addresses, 128);
-    // one for stacktrace, one for me, one for signal frame, one for
+    // one for stacktrace, one for me, one for signal frame, one for profileSignalHandler(), one for
     // pthreads signal handler wrapper (on linux only?).
-    int		drop = 3 + (IgProf::isMultiThreaded () ? 1 : 0);
+    int		drop = 4 + (IgProf::isMultiThreaded () ? 1 : 0);
 
     // Walk the tree
     for (int i = depth-2; node && i >= drop; --i)
