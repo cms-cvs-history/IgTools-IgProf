@@ -1,5 +1,7 @@
 2004-05-15  Lassi A. Tuura  <lat@iki.fi>
 
+	* igprof-analyse: Take short options. Output text, html and xml.
+
 	* test/test_load.cc: Reduce loop counts, we now do real locking
 	so programs run much slower.
 

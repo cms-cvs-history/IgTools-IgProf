@@ -2,6 +2,7 @@
 
 BEGIN { use strict; $^W = 1; }
 
+my $output = "text";
 my $showlibs = 0;
 my @keys;
 my @allkeys;
@@ -121,12 +122,15 @@ sub analyse
     }
 
     # Output result table
-    print "keys = ", join (", ", @keyorder), "\n";
+    my @table = ();
     foreach my $sym (@sorted) {
-	# print parents
-	print "\n", "-" x 78, "\n";
+	my $row = { CALLERS => [], SYM => [], CALLS => [] };
+	push (@table, $row);
+
 	my @parents = sort keys %{$flat->{$sym}{CALLERS}};
-	if (scalar @keyorder == 1) {
+	my @children = sort keys %{$flat->{$sym}{CALLS}};
+	if (scalar @keyorder == 1)
+	{
 	    @parents = sort { ($sortkey eq "SELF_KEY"
 			       ? ($flat->{$a}{CALLS}{$sym}{$keyorder[0]}[0]
 			          <=> $flat->{$b}{CALLS}{$sym}{$keyorder[0]}[0])
@@ -134,31 +138,7 @@ sub analyse
 			      || ($flat->{$a}{CUM_KEY}{$keyorder[0]}[0]
 			          <=> $flat->{$b}{CUM_KEY}{$keyorder[0]}[0]) }
 			@parents;
-	}
-	foreach my $caller (@parents)
-	{
-	    my $thiscall = $flat->{$caller}{CALLS}{$sym};
-	    print "\t";
-	    foreach my $key (@keyorder)
-	    {
-		print $flat->{$caller}{CUM_KEY}{$key}[0], "/", $thiscall->{$key}[0], "\t",
-		      $flat->{$caller}{$sortkey}{$key}[1], "/", $thiscall->{$key}[1], "\t";
-	    }
-	    print "$dump->{SYMS}{$caller}{NAME} [$flat->{$caller}{RANK}]";
-	    print " ($dump->{SYMS}{$caller}{LIB})" if $showlibs;
-	    print "\n";
-	}
 
-	# print row
-	print join("\t", "[$flat->{$sym}{RANK}]",
-		   (map { (@{$flat->{$sym}{$sortkey}{$_}}) } @keyorder),
-   		   "$dump->{SYMS}{$sym}{NAME}");
-	print " ($dump->{SYMS}{$sym}{LIB})" if $showlibs;
-	print "\n";
-
-	# print children
-	my @children = sort keys %{$flat->{$sym}{CALLS}};
-	if (scalar @keyorder == 1) {
 	    @children = sort { ($sortkey eq "SELF_KEY"
 				?  ($flat->{$sym}{CALLS}{$b}{$keyorder[0]}[0]
 			            <=> $flat->{$sym}{CALLS}{$a}{$keyorder[0]}[0])
@@ -167,19 +147,187 @@ sub analyse
 			           <=> $flat->{$a}{CUM_KEY}{$keyorder[0]}[0]) }
 			@children;
 	}
+
+	# parents
+	foreach my $caller (@parents)
+	{
+	    my $thiscall = $flat->{$caller}{CALLS}{$sym};
+	    my $callrow = [ $flat->{$caller}{RANK},
+			    $dump->{SYMS}{$caller}{NAME},
+			    $dump->{SYMS}{$caller}{LIB} ];
+	    foreach my $key (@keyorder)
+	    {
+		push (@$callrow,
+		      [ [ $flat->{$caller}{CUM_KEY}{$key}[0], $thiscall->{$key}[0] ],
+			[ $flat->{$caller}{$sortkey}{$key}[1], $thiscall->{$key}[1] ] ]);
+	    }
+	    push (@{$row->{CALLERS}}, $callrow);
+	}
+
+	# row
+	push (@{$row->{SYM}}, $flat->{$sym}{RANK});
+	push (@{$row->{SYM}}, $dump->{SYMS}{$sym}{NAME});
+	push (@{$row->{SYM}}, $dump->{SYMS}{$sym}{LIB});
+	push (@{$row->{SYM}}, map { $flat->{$sym}{$sortkey}{$_} } @keyorder);
+
+	# children
 	foreach my $callee (@children)
 	{
 	    my $thiscall = $flat->{$sym}{CALLS}{$callee};
-	    print "\t";
+	    my $callrow = [ $flat->{$callee}{RANK},
+			    $dump->{SYMS}{$callee}{NAME},
+			    $dump->{SYMS}{$callee}{LIB} ];
 	    foreach my $key (@keyorder)
 	    {
-		print $flat->{$callee}{CUM_KEY}{$key}[0], "/", $thiscall->{$key}[0], "\t",
-		      $flat->{$callee}{$sortkey}{$key}[1], "/", $thiscall->{$key}[1], "\t";
+		push (@$callrow,
+		      [ [ $flat->{$callee}{CUM_KEY}{$key}[0], $thiscall->{$key}[0] ],
+			[ $flat->{$callee}{$sortkey}{$key}[1], $thiscall->{$key}[1] ] ]);
 	    }
-	    print "$dump->{SYMS}{$callee}{NAME} [$flat->{$callee}{RANK}]";
-	    print " ($dump->{SYMS}{$callee}{LIB})" if $showlibs;
-	    print "\n";
+
+	    push (@{$row->{CALLS}}, $callrow);
 	}
+    }
+
+    if ($output eq 'text')
+    {
+        print "counters: ", join (", ", @keyorder), "\n";
+	foreach my $entry (@table)
+	{
+	    my ($rank, $name, $lib, @keys);
+	    print "\n", "-" x 70, "\n";
+	    foreach my $caller (@{$entry->{CALLERS}})
+	    {
+		($rank, $name, $lib, @keys) = @$caller;
+		print join("\t", "", map { "$_->[0]/$_->[1]" } map { @$_ } @keys);
+		print "\t$name [$rank]";
+		print " ($lib)" if $showlibs;
+		print "\n";
+	    }
+
+	    ($rank, $name, $lib, @keys) = @{$entry->{SYM}};
+	    print join("\t", "[$rank]", map { @$_ } @keys);
+	    print "\t$name";
+	    print " ($lib)" if $showlibs;
+	    print "\n";
+
+	    foreach my $callee (@{$entry->{CALLS}})
+	    {
+		($rank, $name, $lib, @keys) = @$callee;
+		print join("\t", "", map { "$_->[0]/$_->[1]" } map { @$_ } @keys);
+		print "\t$name [$rank]";
+		print " ($lib)" if $showlibs;
+		print "\n";
+	    }
+	}
+    }
+    elsif ($output eq 'html')
+    {
+	sub htmlcounter {
+	    my ($span, $value, $count) = @_;
+	    my $spanarg = $span == 1 ? "" : " colspan=\"$span\"";
+	    print "    <td$spanarg>$value</td>\n";
+	    print "    <td$spanarg>$count</td>\n";
+	}
+	    
+	sub htmlrow {
+	    my ($keyorder, $type, $rank, $name, $lib, @keys) = @_;
+	    print "  <tr>\n";
+	    if ($type eq 0) {
+		print "    <td><a name=\"R$rank\">[$rank]</a></td>\n";
+	    } else {
+		print "    <td>&nbsp;</td>\n";
+	    }
+	    foreach my $key (@$keyorder) {
+		my $val = shift(@keys);
+		if (ref($val) eq 'ARRAY' and ref($val->[0]) eq 'ARRAY') {
+		    # caller/call syntax
+		    &htmlcounter (1, $val->[0][0], $val->[1][0]);
+		    &htmlcounter (1, $val->[0][1], $val->[1][1]);
+		} else {
+		    # symbol syntax
+		    &htmlcounter (2, @$val);
+		}
+	    }
+	    print "    <td><a href=\"#R$rank\">$name</a>";
+	    if ($type eq 0) {
+		print "</td>\n";
+	    } else {
+		print "&nbsp;[$rank]</td>\n";
+	    }
+	    print "    <td>$lib</td>\n" if $showlibs;
+	    print "    <td>&nbsp;</td>\n" if ! $showlibs;
+	    print "  </tr>\n";
+	}
+
+        print "<table width='100%' border='0'>\n";
+	print "  <tr>\n";
+	print "    <th>Order</th>\n";
+	foreach my $key (@keyorder) {
+	    print "    <th colspan='4'>$key</td>\n";
+	}
+	print "    <th>Symbol</th>\n";
+	print "    <th>Library</th>\n";
+	print "  </tr>\n";
+
+	foreach my $entry (@table)
+	{
+	    print "  <tr><td colspan='" . (scalar(@keyorder) * 4 + 3) . "'><hr /></tr>\n";
+	    foreach my $caller (@{$entry->{CALLERS}}) {
+		&htmlrow (\@keyorder, 1, @$caller);
+	    }
+
+	    my $rank = $entry->{SYM}[0];
+	    &htmlrow (\@keyorder, 0, @{$entry->{SYM}});
+
+	    foreach my $callee (@{$entry->{CALLS}}) {
+		&htmlrow (\@keyorder, 1, @$callee);
+	    }
+	}
+        print "</table>\n";
+    }
+    elsif ($output eq 'xml')
+    {
+	sub xmlcounter {
+	    my ($prefix, $type, $key, $value, $count) = @_;
+	    print "    $prefix<value type=\"$type\" counter=\"$key\" ",
+		  "value=\"$value\" count=\"$count\"/>\n";
+	}
+	    
+	sub xmlrow {
+	    my ($keyorder, $prefix, $rank, $name, $lib, @keys) = @_;
+	    my $keytype = $sortkey eq 'CUM_KEY' ? "cumulative" : "self";
+	    print "  $prefix<entry rank=\"$rank\" symbol=\"$name\" module=\"$lib\">\n";
+	    foreach my $key (@$keyorder) {
+		my $val = shift(@keys);
+		if (ref($val) eq 'ARRAY' and ref($val->[0]) eq 'ARRAY') {
+		    # caller/call syntax
+		    &xmlcounter ($prefix, "cumulative", $key, $val->[0][0], $val->[1][0]);
+		    &xmlcounter ($prefix, "call$keytype", $key, $val->[0][1], $val->[1][1]);
+		} else {
+		    # symbol syntax
+		    &xmlcounter ($prefix, $keytype, $key, @$val);
+		}
+	    }
+	}
+
+        print "<igprof-analysis>\n";
+	foreach my $key (@keyorder) {
+	    print "  <counter name=\"$key\"/>\n";
+	}
+	foreach my $entry (@table)
+	{
+	    &xmlrow (\@keyorder, "", @{$entry->{SYM}});
+	    foreach my $caller (@{$entry->{CALLERS}}) {
+		&xmlrow (\@keyorder, "  ", @$caller);
+	        print "       </entry>\n";
+	    }
+	    foreach my $callee (@{$entry->{CALLS}}) {
+		&xmlrow (\@keyorder, "  ", @$callee);
+	        print "       </entry>\n";
+	    }
+	    print "   </entry>\n";
+	}
+        print "</igprof-analysis>\n";
     }
 }
 
@@ -378,32 +526,40 @@ sub analysenode
 
 sub usage
 {
-    print STDERR "igprof-analyse [--report KEY[,KEY]...]\n",
-    		 "  [--sort KEY[,KEY]...] [--order ORDER]\n",
-		 "  [--filter FILE] [--no-filter] [--]\n",
-		 "  [FILE]...\n";
+    print STDERR "igprof-analyse [-r/--report KEY[,KEY]...]\n",
+    		 "  [-s/--sort KEY[,KEY]...] [-o/--order ORDER]\n",
+		 "  [-f/--filter FILE] [-F/--no-filter]\n",
+		 "  { [-e/--self] | [-c/--cumulative] }\n",
+		 "  { [-x/--xml] | [-h/--html] | [-t/--text]\n",
+		 "  [--] [FILE]...\n";
 }
 
 while ($#ARGV != 0)
 {
     if ($ARGV[0] eq '--help')
     { &usage(); exit (1); }
-    elsif ($ARGV[0] eq '--report')
+    elsif ($ARGV[0] eq '--report' || $ARGV[0] eq '-r')
     { @keys = split(',', $ARGV[1]); shift (@ARGV); shift (@ARGV); }
-    elsif ($ARGV[0] eq '--sort')
+    elsif ($ARGV[0] eq '--sort' || $ARGV[0] eq '-s')
     { @sort = split(',', $ARGV[1]); shift (@ARGV); shift (@ARGV); }
-    elsif ($ARGV[0] eq '--order')
+    elsif ($ARGV[0] eq '--order' || $ARGV[0] eq '-o')
     { $order = $ARGV[1] eq 'ascending' ? -1 : 1; shift (@ARGV); shift (@ARGV); }
-    elsif ($ARGV[0] eq '--filter')
+    elsif ($ARGV[0] eq '--filter' || $ARGV[0] eq '-f')
     { push (@filterfiles, $ARGV[1]); shift (@ARGV); shift (@ARGV); }
-    elsif ($ARGV[0] eq '--no-filter')
+    elsif ($ARGV[0] eq '--no-filter' || $ARGV[0] eq '-F')
     { @builtinfilter = (); shift (@ARGV); }
-    elsif ($ARGV[0] eq '--self')
+    elsif ($ARGV[0] eq '--self' || $ARGV[0] eq '-e')
     { $sortkey = "SELF_KEY"; shift (@ARGV); }
-    elsif ($ARGV[0] eq '--cumulative')
+    elsif ($ARGV[0] eq '--cumulative' || $ARGV[0] eq '-c')
     { $sortkey = "CUM_KEY"; shift (@ARGV); }
-    elsif ($ARGV[0] eq '--libs')
+    elsif ($ARGV[0] eq '--libs' || $ARGV[0] eq '-l')
     { $showlibs = 1; shift (@ARGV); }
+    elsif ($ARGV[0] eq '--xml' || $ARGV[0] eq '-x')
+    { $output = "xml"; shift (@ARGV); }
+    elsif ($ARGV[0] eq '--html' || $ARGV[0] eq '-h')
+    { $output = "html"; shift (@ARGV); }
+    elsif ($ARGV[0] eq '--text' || $ARGV[0] eq '-t')
+    { $output = "text"; shift (@ARGV); }
     elsif ($ARGV[0] eq '--')
     { last; }
     elsif ($ARGV[0] =~ /^-/)
