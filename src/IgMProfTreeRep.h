@@ -7,15 +7,16 @@
 # include "IgMProfTypedefs.h"
 # include "IgMProfAllocator.h"
 # include <ext/hash_map>
+# include <map>
 
 //<<<<<< PUBLIC DEFINES                                                 >>>>>>
 //<<<<<< PUBLIC CONSTANTS                                               >>>>>>
 //<<<<<< PUBLIC TYPES                                                   >>>>>>
-
 class IgMProfTreeLeafFactory;
 class IgMProfTreeLeaf;
 class IgMProfSymbolMap;
 class IgMProfSymbolFilter;
+class IgMProfAllocation;
 
 //<<<<<< PUBLIC VARIABLES                                               >>>>>>
 //<<<<<< PUBLIC FUNCTIONS                                               >>>>>>
@@ -40,15 +41,31 @@ public:
 
     dladdrMap_t m_dladdrmap;
 
-    IgMProfTreeRep(IgMProfSymbolFilter *filter);
-    void addCurrentStacktrace(allocationSize_t count, unsigned int frames);
+    IgMProfTreeRep (IgMProfSymbolFilter *filter);
+    void addCurrentStacktrace (allocationSize_t count, 
+			       unsigned int frames,
+			       memAddress_t allocationPosition);
+    
+    /** Removes an allocation from the tree, by looking up the last
+	node in the endNodeTable which did the allocation and walking
+	the three backward
+    */
+    void removeAllocation (memAddress_t allocation);
+    
 private:    
-    IgMProfTreeLeafFactory *m_leafFactory;
-    void *m_backtraceLog[1024];    
-    IgMProfSymbolMap *m_symbolMap;    
-    IgMProfSymbolFilter *m_filter;    
-    bool m_allSymbolsDone;
-    bool m_filtering;    
+    typedef std::map<memAddress_t,
+	IgMProfAllocation,
+	std::less<memAddress_t>, 
+	IgMProfAllocator<IgMProfAllocation> > EndNodeMap;    
+
+    IgMProfTreeLeafFactory 	*m_leafFactory;
+    void 			*m_backtraceLog[1024];    
+    IgMProfSymbolMap 		*m_symbolMap;    
+    IgMProfSymbolFilter 	*m_filter;    
+    bool 			m_allSymbolsDone;
+    bool 			m_filtering;    
+    bool			m_totalSum;    
+    EndNodeMap 			m_endNodeMap;    
 };
 
 //<<<<<< INLINE PUBLIC FUNCTIONS                                        >>>>>>

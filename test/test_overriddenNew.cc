@@ -13,7 +13,7 @@ public:
 };
 
 int
-main (int argc, char **argv)
+main (int /*argc*/, char **/*argv*/)
 {
 	new A;
 }

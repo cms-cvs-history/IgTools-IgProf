@@ -10,6 +10,7 @@
 //<<<<<< PUBLIC TYPES                                                   >>>>>>
 class IgMProfTreeTextBrowser;
 class IgMProfLinearBrowser;
+
 //<<<<<< PUBLIC VARIABLES                                               >>>>>>
 //<<<<<< PUBLIC FUNCTIONS                                               >>>>>>
 //<<<<<< CLASS DECLARATIONS                                             >>>>>>
@@ -25,7 +26,7 @@ private:
     static sighandler_t m_oldAbortSigHandler;    
     static IgMProfTreeTextBrowser *m_mallocBrowser;
     static IgMProfTreeTextBrowser *m_profileBrowser;
-    static IgMProfLinearBrowser *m_leaksBrowser;    
+    static IgMProfTreeTextBrowser *m_leaksBrowser;    
 };
 
 static IgMProfBootstrap bootstrap;

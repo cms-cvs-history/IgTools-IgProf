@@ -23,6 +23,8 @@
  *    	- verbose: show debug informations.
  *    	- leaks: enables the possible leaks checker.
  *	- nofiltering: does not filter any symbol from the output.
+ *	- totalsum: keeps track of the total allocations performed by an 
+ *        function, rather than the max live heap size for that function.
  */
 class IG_PROF_API IgMProfConfiguration
 {
@@ -36,7 +38,8 @@ public:
 	 m_verbose (false),
 	 m_reverse (false),
 	 m_checkLeaks (false),
-	 m_filtering (true)
+	 m_filtering (true),
+	 m_totalSum (false)
 	{
 	    char *env = getenv("MEMPROF");
 	    if (env != NULL)
@@ -69,6 +72,9 @@ public:
 
 		if (m_memprofEnv.find ("nofiltering") != std::string::npos) 
 		    m_filtering = false;		
+
+		if (m_memprofEnv.find ("totalsum") != std::string::npos) 
+		    m_totalSum = true;		
 	    }	    
 	}        
 
@@ -81,6 +87,7 @@ public:
     bool m_reverse;    
     bool m_checkLeaks;
     bool m_filtering;    
+    bool m_totalSum;
     
     // implicit copy constructor
     // implicit assignment operator

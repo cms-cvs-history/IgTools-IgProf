@@ -7,6 +7,7 @@
 #include "IgMProfSymbolMap.h"
 #include "IgMProfSymbolFilter.h"
 #include "Ig_Tools/IgProf/src/IgMProfConfiguration.h"
+#include "Ig_Tools/IgProf/src/IgMProfAllocation.h"
 #include <dlfcn.h>
 #include <execinfo.h>
 
@@ -26,7 +27,8 @@ IgMProfTreeRep::IgMProfTreeRep (IgMProfSymbolFilter *filter)
      m_symbolMap (new IgMProfSymbolMap),
      m_filter (filter),
      m_allSymbolsDone (false),
-     m_filtering (IgMProfConfigurationSingleton::instance ()->m_filtering)
+     m_filtering (IgMProfConfigurationSingleton::instance ()->m_filtering),
+     m_totalSum (IgMProfConfigurationSingleton::instance ()->m_totalSum)
 {    
     if (m_filter == 0)
     {
@@ -36,8 +38,10 @@ IgMProfTreeRep::IgMProfTreeRep (IgMProfSymbolFilter *filter)
     
 void 
 IgMProfTreeRep::addCurrentStacktrace (allocationSize_t count, 
-				      unsigned int frames)
+				      unsigned int frames,
+				      memAddress_t allocationPosition)
 {
+    
     size_t symbolsSize;
 
     if (m_allSymbolsDone == false)
@@ -55,30 +59,37 @@ IgMProfTreeRep::addCurrentStacktrace (allocationSize_t count,
     {
 	currentLeaf->m_count += count;
 	currentLeaf->m_num++;
-	
+
+	if (m_totalSum)
+	    // If we are in totalsum mode, m_maxCount is the
+	    // cumulative sum of all the sizes of the allocation
+	    // performed.
+	    currentLeaf->m_maxCount += count;	
+	else if (currentLeaf->m_count > currentLeaf->m_maxCount)
+	    // If we are in max live allocation mode, let's keep
+	    // m_maxCount updated with the maximal live.
+	    currentLeaf->m_maxCount = currentLeaf->m_count;
+
 	memAddress_t address = (memAddress_t) m_backtraceLog[i];
 	address = m_symbolMap->closerSymbol (address);
 	
-	//If filtering is active (m_filtering == true) stop if the
-	//symbols belongs to the filtering list. 
-
-	// FIXME: there is some strange behavior of the first entry in
-	//the stacktrace: sometimes dlsym maps it to _Znwj (new
-	//operator) which is then filtered if the filtering is
-	//active. Now I've patched the code so that it is never
-	//filtered for such an entry, would be nice to understand why
-	//it fails to be mapped correctly, though.
+	// If filtering is active (m_filtering == true) stop if the
+	// symbols belongs to the filtering list.
 	if (m_filtering == true && 
 	    m_filter->filter (address))
 	    break;
 
 	// Insert address into the tree
 	IgMProfTreeLeaf::leafIterator_t currentLeafIterator = currentLeaf->find (address);
-		
+		       
 	if (currentLeafIterator == currentLeaf->end ())
 	{
+	    // If the address is not found among children, create a
+	    // new node in the tree and set its parent to the current
+	    // one.
 	    IgMProfTreeLeaf *newLeaf = m_leafFactory->create ();
 	    currentLeaf->insert (address, newLeaf);
+	    newLeaf->setParent (currentLeaf);	    
 	    currentLeaf = newLeaf;
 	}
 	else
@@ -86,4 +97,25 @@ IgMProfTreeRep::addCurrentStacktrace (allocationSize_t count,
 	    currentLeaf = currentLeafIterator->second;		   
 	}
     }
+    
+    // Add the last node to the map off end nodes.
+    m_endNodeMap[allocationPosition].m_node = currentLeaf;
+    m_endNodeMap[allocationPosition].m_size = count;
+}
+
+void 
+IgMProfTreeRep::removeAllocation (memAddress_t allocation)
+{
+    IgMProfAllocation &alloc = m_endNodeMap [allocation];
+    
+    IgMProfTreeLeaf *currentLeaf = alloc.m_node;
+    allocationSize_t count = alloc.m_size;
+        
+    // Go up in the callback tree.
+    while (currentLeaf)
+    {
+	currentLeaf->m_count -= count;
+	currentLeaf = currentLeaf->getParent ();	
+    }    
+    m_endNodeMap.erase (allocation);    
 }

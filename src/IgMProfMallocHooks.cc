@@ -1,7 +1,6 @@
 //<<<<<< INCLUDES                                                       >>>>>>
 #include "config.h"
 #include "IgMProfTreeSingleton.h"
-#include "IgMProfLinearRep.h"
 #include "IgMProfMallocHooks.h"
 #include "IgMProfConfiguration.h"
 #include <cassert>
@@ -21,8 +20,6 @@
 //<<<<<< PUBLIC FUNCTION DEFINITIONS                                    >>>>>>
 //<<<<<< MEMBER FUNCTION DEFINITIONS                                    >>>>>>
 
-bool checkLeaks;
-
 void *(*old_malloc_hook)(size_t, const void *);
 void *(*old_realloc_hook)(void *ptr, size_t size, const void *caller);
 void *(*old_memalign_hook)(size_t alignment, size_t size, const void *caller);
@@ -35,10 +32,8 @@ void
         
     IGUANA_memdebug_disable_hooks();    
     
-    result = malloc(size);
-    IgMProfMallocTreeSingleton::instance()->addCurrentStacktrace(size, 2);    
-    if (checkLeaks)
-	IgMProfLinearSingleton::instance ()->addAllocation (size, result);    
+    result = malloc (size);
+    IgMProfMallocTreeSingleton::instance()->addCurrentStacktrace(size, 2, (memAddress_t) result);    
     IGUANA_memdebug_enable_hooks();    
 
     return result;    
@@ -53,14 +48,7 @@ void
 
     result = realloc (ptr, size);    
 
-    //FIXME: does realloc call malloc? If yes, these should be unneded.
-
-    if (checkLeaks)
-    {	
-	IgMProfLinearSingleton::instance ()->deleteAllocation (ptr);    
-	IgMProfLinearSingleton::instance ()->addAllocation (size, result);    
-    }
-
+    // FIXME: does realloc call malloc? How do we handle it?
 
     IGUANA_memdebug_enable_hooks ();    
 
@@ -74,12 +62,8 @@ void
 
     IGUANA_memdebug_disable_hooks ();    
     result = memalign (alignment,size);
-    //FIXME: should we get the memory allocated with memalign?
 
-    if (checkLeaks)
-    {	
-	IgMProfLinearSingleton::instance ()->addAllocation (size, result);    
-    }
+    //FIXME: should we get the memory allocated with memalign?
 
     IGUANA_memdebug_enable_hooks();    
     
@@ -91,8 +75,8 @@ IGUANA_memdebug_free_hook (void *ptr, const void * /* caller */)
 { 
     IGUANA_memdebug_disable_hooks();    
 
-    if (checkLeaks)
-	IgMProfLinearSingleton::instance ()->deleteAllocation (ptr);    
+    
+    IgMProfMallocTreeSingleton::instance()->removeAllocation ((memAddress_t) ptr);    
 
     free(ptr);    
     IGUANA_memdebug_enable_hooks();    
@@ -115,8 +99,6 @@ IGUANA_memdebug_initialize_hook (void)
     __realloc_hook = IGUANA_memdebug_realloc_hook;    
     __memalign_hook = IGUANA_memdebug_memalign_hook;    
     __free_hook = IGUANA_memdebug_free_hook;    
-
-    checkLeaks = IgMProfConfigurationSingleton::instance ()->m_checkLeaks;
 }
 
 void 

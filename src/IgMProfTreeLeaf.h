@@ -15,9 +15,12 @@
 //<<<<<< PUBLIC FUNCTIONS                                               >>>>>>
 //<<<<<< CLASS DECLARATIONS                                             >>>>>>
 
-/** This is a leaf of the callback tree. It keeps the cumulative information about the memory allocated
-    under this this branch of the tree.
-    All the information relative to children of this node are stored in the m_leafMap map.
+/** This is a leaf of the callback tree.  According to different
+    values of the totalsum env variable (-ts option with igprof) it
+    keeps the cumulative information about the memory allocated under
+    this this branch of the tree or the total max heap size for it.
+    All the information relative to children of this node are stored
+    in the m_leafMap map.
  */
 
 class IG_PROF_API IgMProfTreeLeaf
@@ -27,9 +30,13 @@ public:
 	std::equal_to<int>, IgMProfAllocator<IgMProfTreeLeaf *> > leafMap_t;    
     typedef leafMap_t::iterator leafIterator_t;    
 
-    /** Cumulative sum of all the allocation performed under this node.
-     */
+    /** Current allocation under this node. In the end, this results
+     * in the possible leaked memory.*/
     allocationSize_t 	m_count;
+    /** Max live heap size for this function and its children or the
+     * cumulative sum of all the allocations, according wether or not
+     * totalsum has been specified in MPROF env variable. */
+    allocationSize_t	m_maxCount;    
     /** Number of allocation performed*/
     int 		m_num;    
     /** begin() of the iteration on the children nodes*/
@@ -40,14 +47,24 @@ public:
     void insert (int key, IgMProfTreeLeaf *leaf) { m_leafMap.insert (std::pair<int,IgMProfTreeLeaf*> (key,leaf)); }    
     /**return the number of children nodes*/
     int size (void) { return m_leafMap.size (); }
+
     /**cumulative memory sum is set to zero at construction of the node*/
     IgMProfTreeLeaf (void)
 	: m_count (0),
-	  m_num (1)
+	  m_maxCount (0),
+	  m_num (1),
+	  m_parent (0)
 	{
 	}        
+    
+    /**@return the parent for this node*/
+    IgMProfTreeLeaf *getParent (void) {return m_parent;}
+    /**Sets the parent of this node*/
+    void setParent (IgMProfTreeLeaf *parent) {m_parent = parent;}    
 private:	
     leafMap_t m_leafMap; 
+    
+    IgMProfTreeLeaf *m_parent;    
 };
 
 

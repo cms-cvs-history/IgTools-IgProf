@@ -1,3 +1,61 @@
+2003-11-17  Giulio Eulisse  <giulio.eulisse@cern.ch>
+
+	* IgMProfAllocation.h (struct IgMProfAllocation): this structure
+	is used to keep track of the size of a live allocation and to
+	which branch (by storing the end node of the branch) it belongs.
+
+	* test_liveAllocations.cc: new test for live allocations.
+
+	* test/BuildFile: new test for live allocations added.
+	
+	* IgSProfTimerHooks.cc (IGUANA_sprof_sigprof_hook): now it
+	uses the new addCurrentStacktrace API.
+
+	* IgMProfTreeTextBrowser.cc: now supports the use of
+	IgMProfTreeRep to keep track of leaks. New filenames:
+	memoryPID.flat for the memory profiler, leaksPID.flat for the leak
+	report and performancePID.flat for the performance
+	profiler. Cosmetic fixes.
+
+	* IgMProfTreeRep.cc, IgMProfTreeRep.h: now the tree can keep track
+	of the information about max live heap size. When a new allocation
+	is performed, the current allocated memory (in m_count) is
+	compared with the maximum found in m_maxCount. If it is bigger,
+	m_maxCount is upgraded to the new value. Moreover each live
+	allocation is tracked in m_endNodeMap. When a free () occurs, the
+	pointer to the branch relative at such an allocation is searched
+	in such a map and the branch is walked backward removing the
+	amount of memory freed from m_count.
+
+	* IgMProfTreeLeaf.h (IgMProfTreeLeaf): new structure to allow to
+	keep the information about max live heap size. Also it now has an
+	m_parent field which olds the pointer to the parent node in the
+	tree.
+
+	* IgMProfMallocHooks.cc: now passing also the allocated memory
+	address to addCurrentStacktrace, as it is needed for max live heap
+	size tracking. Removing old leak checking code. Cosmetic fixes.
+
+	* IgMProfConfiguration.h (IgMProfConfiguration): new totalsum
+	parameter which makes the profiler keep track of the total
+	allocation performed by a function, rather than the max live heap
+	size for that function.
+
+	* IgMProfBootstrap.cc, IgMProfBootstrap.h: cosmetic fixes. Now
+	the leak information is kept in the same tree structure of the
+	memory profiler, so that IgMProfLinearSingleton (the linear
+	structure used for the leaks) is not necessary anymore. Renamed
+	the output file names to a better layout. 
+
+	* scripts/igprof: new --total-sum (or -ts) option to obtain the
+	cumulative allocation size performed by a function. By default the
+	output is now the max live heap size per function.
+
+2003-11-10  Giulio Eulisse  <giulio.eulisse@cern.ch>
+
+	* test/test_overriddenNew.cc (main): removed unused arguments from
+	main.
+
 2003-10-07  Giulio Eulisse  <giulio.eulisse@cern.ch>
 
 	* (all files): renamed Ig_Imports/MemProfLib to Ig_Tools/IgProf.

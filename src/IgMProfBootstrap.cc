@@ -1,5 +1,4 @@
 //<<<<<< INCLUDES                                                       >>>>>>
-
 #include "IgMProfBootstrap.h"
 #include "IgMProfTreeTextBrowser.h"
 #include "IgMProfLinearBrowser.h"
@@ -25,24 +24,31 @@
     in the constructor is executed at load time. 
  */
 
-IgMProfBootstrap::IgMProfBootstrap(void)
+IgMProfBootstrap::IgMProfBootstrap (void)
 {
-    if (IgMProfConfigurationSingleton::instance()->m_mallocProfiler == true )
+    if (IgMProfConfigurationSingleton::instance ()->m_mallocProfiler == true )
     {	
-	m_mallocBrowser = new IgMProfTreeTextBrowser (IgMProfMallocTreeSingleton::instance (), "memdebug");    
+	m_mallocBrowser = new IgMProfTreeTextBrowser (IgMProfMallocTreeSingleton::instance (), 
+						      "allocation",
+						      true);    
 	if (IgMProfConfigurationSingleton::instance ()->m_checkLeaks)
-	    m_leaksBrowser = new IgMProfLinearBrowser (IgMProfLinearSingleton::instance (), "memdebug");	
+	    m_leaksBrowser = new IgMProfTreeTextBrowser (IgMProfMallocTreeSingleton::instance (),
+							 "leaks",
+							 false);	
         IGUANA_memdebug_initialize_hook ();
     }
     else 
     {
-	m_profileBrowser = new IgMProfTreeTextBrowser(IgMProfProfileTreeSingleton::instance (), "profile");    
+	m_profileBrowser = new IgMProfTreeTextBrowser (IgMProfProfileTreeSingleton::instance (), 
+						       "performance", 
+						       true);    
 	IGUANA_sprof_initialize_hook ();
     }
-    m_oldAbortSigHandler = signal (SIGABRT, (sighandler_t) IgMProfBootstrap::abortSigHandler);
+    m_oldAbortSigHandler = signal (SIGABRT, 
+				   (sighandler_t) IgMProfBootstrap::abortSigHandler);
 }
 
-IgMProfBootstrap::~IgMProfBootstrap(void)
+IgMProfBootstrap::~IgMProfBootstrap (void)
 {
     IgMProfBootstrap::dumpStatus ();    
 }   
@@ -85,4 +91,4 @@ IgMProfBootstrap::abortSigHandler (int t)
 sighandler_t IgMProfBootstrap::m_oldAbortSigHandler = 0;
 IgMProfTreeTextBrowser *IgMProfBootstrap::m_mallocBrowser = 0;
 IgMProfTreeTextBrowser *IgMProfBootstrap::m_profileBrowser = 0;
-IgMProfLinearBrowser *IgMProfBootstrap::m_leaksBrowser = 0;    
+IgMProfTreeTextBrowser *IgMProfBootstrap::m_leaksBrowser = 0;    

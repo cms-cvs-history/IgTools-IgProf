@@ -21,7 +21,7 @@
 void 
 IGUANA_sprof_sigprof_hook (void)
 {
-    IgMProfProfileTreeSingleton::instance()->addCurrentStacktrace(1,3);    
+    IgMProfProfileTreeSingleton::instance()->addCurrentStacktrace (1, 3, 0);    
 }
 
 void

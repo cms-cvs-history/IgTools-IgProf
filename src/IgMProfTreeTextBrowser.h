@@ -23,18 +23,15 @@ class IgMProfTreeLeaf;
 
 class IG_PROF_API IgMProfTreeTextBrowser
 {
-private:
-    typedef std::map<int,IgMProfFlatNode *, std::less<int>, IgMProfAllocator<IgMProfFlatNode *> > FlatMap;
-    IgMProfTreeRep	*m_representable;
-    FlatMap		m_flat;
-    std::ofstream	m_treeout;
-    std::ofstream	m_flatout;
-    std::string 	m_treeFilename;
-    std::string 	m_flatFilename;
-    std::string 	m_filename;    
 public:
-    
-    IgMProfTreeTextBrowser (IgMProfTreeRep *representable, const char *filename);
+    typedef std::map<int,
+	IgMProfFlatNode *, 
+	std::less<int>, 
+	IgMProfAllocator<IgMProfFlatNode *> > FlatMap;
+
+    IgMProfTreeTextBrowser (IgMProfTreeRep *representable, 
+			    const char *filename,
+			    bool dumpMax);
     void dumpTreeLeaf (IgMProfTreeLeaf *leaf, int level, int caller);
     
     struct SortFlatByAllocs 
@@ -50,7 +47,7 @@ public:
 	    {		
 	    }
 
-	bool operator() (int a1, int a2) 
+	bool operator () (int a1, int a2) 
 	    {
 		IgMProfFlatNode *a1node = (*m_map)[a1];
 		IgMProfFlatNode *a2node = (*m_map)[a2];
@@ -73,6 +70,18 @@ public:
 
     void dumpFlatProfile (void);
     void dump (void);
+
+private:
+
+    IgMProfTreeRep	*m_representable;
+    FlatMap		m_flat;
+    std::ofstream	m_treeout;
+    std::ofstream	m_flatout;
+    std::string 	m_treeFilename;
+    std::string 	m_flatFilename;
+    std::string 	m_filename;    
+    bool		m_dumpMax;
+    bool		m_density;        
 };
 
 //<<<<<< INLINE PUBLIC FUNCTIONS                                        >>>>>>

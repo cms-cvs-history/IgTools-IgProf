@@ -27,27 +27,29 @@
 //<<<<<< PUBLIC FUNCTION DEFINITIONS                                    >>>>>>
 //<<<<<< MEMBER FUNCTION DEFINITIONS                                    >>>>>>
 
-IgMProfTreeTextBrowser::IgMProfTreeTextBrowser( IgMProfTreeRep *representable, const char * filename )
-    :m_representable(representable),
+IgMProfTreeTextBrowser::IgMProfTreeTextBrowser( IgMProfTreeRep *representable, const char * filename, bool dumpMax)
+    :m_representable (representable),
      m_treeout (),
      m_flatout (),
-     m_filename (filename)
+     m_filename (filename),
+     m_dumpMax (dumpMax),
+     m_density (IgMProfConfigurationSingleton::instance ()->m_density)
 {
     std::ostringstream converter;
     converter << getpid ();
-    m_treeFilename = m_filename+converter.str()+".tree";
-    m_flatFilename = m_filename+converter.str()+".flat";
+    m_treeFilename = m_filename+converter.str () + ".tree";
+    m_flatFilename = m_filename+converter.str () + ".flat";
 }
 
 void 
-IgMProfTreeTextBrowser::dumpTreeLeaf( IgMProfTreeLeaf *leaf, int level, int caller) 
+IgMProfTreeTextBrowser::dumpTreeLeaf (IgMProfTreeLeaf *leaf, int level, int caller) 
 {    
-    for ( IgMProfTreeLeaf::leafIterator_t i = leaf->begin() ; i != leaf->end() ; i++ )
+    for (IgMProfTreeLeaf::leafIterator_t i = leaf->begin () ; i != leaf->end () ; i++)
     {
 	// Dump out the tree part
 	IgMProfTreeLeaf &currentLeaf = *(i->second);
        
-	int divider = IgMProfConfigurationSingleton::instance ()->m_density ? currentLeaf.m_num : 1;
+	int divider = m_density ? currentLeaf.m_num : 1;
 
 	memAddress_t address = i->first;
 	memAddress_t symaddr = address;
@@ -67,25 +69,35 @@ IgMProfTreeTextBrowser::dumpTreeLeaf( IgMProfTreeLeaf *leaf, int level, int call
 	{		
 	    m_treeout << std::hex << address << "/" << symaddr << " " << libname << " "  << symname
 		      << "+" << (address-symaddr) << " "
-		      << std::dec << currentLeaf.m_count/divider << std::endl;	   
+		      << std::dec << currentLeaf.m_maxCount/divider << std::endl;	   
 	}
 	
 
-	// Accumulate flat profile data
+	// Dump the m_maxCount or m_count field of the node according
+	// to m_dumpMaxCount (this is done because leak information
+	// are in m_count, whereas allocation information are in
+	// m_maxCount (both max live allocation and allocation sum).
+	if (m_dumpMax)	  
+	    m_flat [caller]->addChild (symaddr, currentLeaf.m_maxCount/divider);
+	else
+	    m_flat [caller]->addChild (symaddr, currentLeaf.m_count/divider);
 
-	
-	m_flat [caller]->addChild (symaddr, currentLeaf.m_count/divider);
-
-	IgMProfFlatNode *&flat = m_flat [symaddr];
+	IgMProfFlatNode *&flat = m_flat[symaddr];
 	if (! flat)
 	    flat = new IgMProfFlatNode (libname, symname);
 		
 	flat->addCaller (caller);
-	flat->m_allocs += currentLeaf.m_count/divider;
+
+	if (m_dumpMax)	  
+	    flat->m_allocs += currentLeaf.m_maxCount/divider;
+	else
+	    flat->m_allocs += currentLeaf.m_count/divider;
+
 	flat->m_calls++;
 
 	// Recurse
-	if ( currentLeaf.size() != 0  ) dumpTreeLeaf(i->second, level+1, symaddr);		
+	if ( currentLeaf.size() != 0  )
+	    dumpTreeLeaf (i->second, level+1, symaddr);		
     }
 }
 
@@ -161,7 +173,7 @@ IgMProfTreeTextBrowser::dump(void)
 	std::cerr << "MemProfLib: Dumping tree information into: " 
 		  << m_treeFilename 
 		  << "...Please wait, this might take a while...";	    
-	m_treeout.open(m_treeFilename.c_str() );		
+	m_treeout.open(m_treeFilename.c_str ());		
     }
     
     dumpTreeLeaf(m_representable->m_rootLeaf,0,0);
@@ -177,7 +189,7 @@ IgMProfTreeTextBrowser::dump(void)
 	std::cerr << "MemProfLib: Dumping flat information into: " 
 		  << m_flatFilename 
 		  << "...Please wait, this might take a while...";	    
-	m_flatout.open(m_flatFilename.c_str() );	    
+	m_flatout.open (m_flatFilename.c_str() );	    
 	dumpFlatProfile ();
 	m_flatout.close();		
 	std::cerr << "Done" << std::endl;	    

@@ -14,6 +14,7 @@ igprofhelp () {
         echo -e "                      \tchildren functions."
 	echo -e "--reverse-sorting     \tsort by from smaller to bigger rather then bigger to smaller."
 	echo -e "--no-filtering        \tdoes not filter out any simbol from the output."
+	echo -e "--total-sum           \treports the total amount of allocation done within a symbol, rather than the max live heap size for it."
 }
 
 while [ $# != 0 ]
@@ -27,6 +28,7 @@ do
 	    --sort-by-self|-sbs)	OPTIONS="$OPTIONS byselfsorting";;
 	    --reverse-sorting|-r)	OPTIONS="$OPTIONS reverse";;
 	    --no-filtering|-nf)         OPTIONS="$OPTIONS nofiltering";;
+	    --total-sum|-ts)            OPTIONS="$OPTIONS totalsum";;
 	    *)                      	break;;
   	esac
 	shift
