@@ -1,0 +1,109 @@
+#!/usr/bin/env perl
+
+BEGIN { use strict; $^W = 1; }
+
+my @keys;
+my @sort;
+my $order;
+my @filters;
+my @filterfiles;
+my @builtinfilter = qw(malloc calloc realloc memalign posix_memalign valloc _Znwj _Znaj
+		       _ZNSt24__default_alloc_templateILb1ELi0EE14_S_chunk_allocEjRi
+		       _ZNSt24__default_alloc_templateILb1ELi0EE9_S_refillEj
+		       _ZNSt24__default_alloc_templateILb1ELi0EE8allocateEj);
+
+sub readDump
+{
+    my ($file) = @_;
+    my $syms = {};
+    my $nodes = { CHILDREN => [] };
+    my $leaks = {};
+    my $leaktable = undef;
+    my @nodestack = ($nodes);
+
+    open (DUMP, "< $file") || die "$file: $!\n";
+    while (<DUMP>)
+    {
+        chomp;
+	if (m|<sym addr="(.*)" offset="(.*)" name="(.*)" lib="(.*)"/>|)
+	{
+	    $syms->{$1}{OFFSET} = $2;
+	    $syms->{$1}{NAME} = $3;
+	    $syms->{$1}{LIB} = $4;
+	}
+	elsif (/(\s+)<node id="([^"]*)" symaddr="([^"]*)">(.*)/)
+	{
+	    $#nodestack = length($1)-2;
+	    my $node = { ID => $2, SYMADDR => $3, COUNTERS => [], CHILDREN => [] };
+	    my $rest = $4;
+	    while ($rest && $rest =~ /<counter name="([^"]*)" value="([^"]*)"\/>(.*)/)
+	    {
+		push (@{$node->{COUNTERS}}, { NAME => $1, VALUE => $2 });
+		$rest = $3;
+	    }
+	    push (@{$nodestack[$#nodestack-1]{CHILDREN}}, $node);
+	    push (@nodestack, $node);
+	}
+	elsif (m|<live map="(.*)" size=".*">|)
+	{
+	    $leaktable = $1;
+	}
+	elsif (m|<leak node="(.*)" resource="(.*)" extra="(.*)"/>|)
+	{
+	    push(@{$leaks->{$leaktable}}, [ $1, $2, $3 ]);
+	}
+   }
+   close (DUMP);
+   return { SYMS => $syms, LEAKS => $leaks, NODES => $nodes };
+}
+
+sub keysof
+{
+    my ($dump) = @_;
+}
+
+sub analyse
+{
+    my ($dump, $keys) = @_;
+}
+
+
+while ($#ARGV != 0)
+{
+    if ($ARGV[0] eq '--report')
+    { @keys = split(',', $ARGV[1]); shift (@ARGV); shift (@ARGV); }
+    elsif ($ARGV[0] eq '--sort')
+    { @sort = split(',', $ARGV[1]); shift (@ARGV); shift (@ARGV); }
+    elsif ($ARGV[0] eq '--order')
+    { $order = $ARGV[1]; shift (@ARGV); shift (@ARGV); }
+    elsif ($ARGV[0] eq '--filter')
+    { push (@filterfiles, $ARGV[1]); shift (@ARGV); shift (@ARGV); }
+    elsif ($ARGV[0] eq '--no-filter')
+    { @builtinfilter = (); shift (@ARGV); }
+    elsif ($ARGV[0] eq '--')
+    { last; }
+    elsif ($ARGV[0] =~ /^-/)
+    { print STDERR "unknown option $ARGV[0]"; &usage(); exit (1); }
+    else
+    { last; }
+}
+
+# read in lists of filter symbols
+@filters = @builtinfilter;
+foreach my $file (@filterfiles)
+{
+    open (FILTER, "< $file") || die "$file: $!\n";
+    while (<FILTER>)
+    {
+  	chomp;
+	push (@filters, split(/s+/, $_));
+    }
+    close (FILTER);
+}
+
+foreach my $file (@ARGV)
+{
+    my $prof = &readDump ($file);
+    my @sortkeys = scalar @keys ? @keys : &keysof ($prof);
+    &analyse ($prof, \@sortkeys);
+}

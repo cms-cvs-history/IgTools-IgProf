@@ -1,43 +1,104 @@
-#!/bin/bash
-# Collect up args for Valgrind.  Only --version and --skin are intercepted
-# here;  the rest are passed to vg_main.c.
+#!/bin/sh
+# Collect up args for igprof.
 
-igprofhelp () {
-	echo -e "--help                \tthis help message"
-	echo -e "--memory-profiler     \tstart the memory profiler"
-	echo -e "--performance-profiler\tstart the performance profile"
-	echo -e "--check-leaks         \tstart the leaks checker"
-	echo -e "--sort-by-self        \tsort the profiler output by the amount of"
-	echo -e "                      \tmemory/ticks allocated/occurred in the "
-	echo -e "                      \tsame function, rather then using the"
-	echo -e "                      \tcumulative sum of all a parent and all its"
-        echo -e "                      \tchildren functions."
-	echo -e "--reverse-sorting     \tsort by from smaller to bigger rather then bigger to smaller."
-	echo -e "--no-filtering        \tdoes not filter out any simbol from the output."
-	echo -e "--total-sum           \treports the total amount of allocation done within a symbol, rather than the max live heap size for it."
+usage() {
+  echo -e "--help                \tthis help message"
+  echo 
+  echo -e "Options for profiling"
+  echo -e "--mode profile        \tforce profile mode"
+  echo -e "--memory-profiler     \tstart the memory profiler"
+  echo -e "--performance-profiler\tstart the performance profile"
+  echo -e "--file-descriptor     \tstart the file descriptor profile"
+  echo -e "--check-leaks         \tenable leak tracking"
+  echo -e "cmd [args...]         \tcommand arguments to execute"
+  echo
+  echo -e "Options for analysis"
+  echo -e "--mode analyse        \tforce analysis mode"
+  echo -e "--report C1[,C2...]   \treport counters C1, C2, ..."
+  echo -e "--sort C1[,C2...]     \tsort by counters C1, C2, ..."
+  echo -e "--order ORDER         \torder 'ascending' or 'descending'"
+  echo -e "--filter FILE         \tsuppress symbols mentioned in FILE"
+  echo -e "--no-filtering        \tdon't suppress default symbols"
+  echo -e "file [...]            \tfiles to analyse"
 }
 
-while [ $# != 0 ]
-do
-	arg=$1
-  	case "$arg" in
-	    --help|-h)			igprofhelp;;
-	    --memory-profiler|-mp)	;;
-	    --performance-profiler|-pp) OPTIONS="$OPTIONS profilespeed";;
-	    --check-leaks|-cl)		OPTIONS="$OPTIONS leaks";;
-	    --sort-by-self|-sbs)	OPTIONS="$OPTIONS byselfsorting";;
-	    --reverse-sorting|-r)	OPTIONS="$OPTIONS reverse";;
-	    --no-filtering|-nf)         OPTIONS="$OPTIONS nofiltering";;
-	    --total-sum|-ts)            OPTIONS="$OPTIONS totalsum";;
-	    *)                      	break;;
-  	esac
-	shift
+append() { eval "if [ -z \"\$$1\" ]; then $1=\"\$2\"; else $1=\"\$$1 \$2\"; fi"; }
+
+SORT= MEM= FD= PERF= ALL= MODE=profile
+while [ "$#" != 0 ]; do
+  case "$1" in
+    --help | -h )
+      usage; exit 1;;
+
+    --debug )
+      IGPROF_DEBUGGING=1; export IGPROF_DEBUGGING; shift ;;
+
+    --mode )
+      MODE="$2"; shift; shift ;;
+
+    --full )
+      MEM="mem" FD="fd" PERF="perf" ALL=":all" MODE=profile; shift ;;
+
+    --memory-profiler | --memory | -m | -mp )
+      [ -z "$MEM" ] && MEM=mem
+      MEM="$MEM:allocs:total:largest:live" MODE=profile; shift;;
+
+    --file-descriptor | --fd | -f | -fd )
+      [ -z "$FD" ] && FD=fd
+      FD="$FD:used:live" MODE=profile; shift ;;
+
+    --check-leaks | --leaks | -l | -cl )
+      ALL="$ALL:leaks" MODE=profile; shift ;;
+
+    --performance-profiler | --performance | -p | -pp )
+      PERF="perf" MODE=profile; shift ;;
+
+    --analyse )
+      MODE=report ;;
+    --report | -R )
+      SORT="$SORT --report $2"; MODE=report; shift; shift ;;
+    --sort | -s )
+      SORT="$SORT --sort $2"; MODE=report; shift; shift ;;
+    --order )
+      SORT="$SORT --order $2"; shift; shift ;;
+    --filter )
+      SORT="$SORT --filter $2"; shift; shift ;;
+    --no-filtering )
+      SORT="$SORT --no-filter"; shift ;;
+
+    -- )
+      shift; break ;;
+
+    -* )
+      echo "$0: unrecognised option $1"
+      usage 
+      exit 1 ;;
+
+    * )
+      break ;;
+  esac
 done
 
-while [ $# != 0 ]
-do
-	COMMAND="$COMMAND $1"
-	shift
-done
+if [ MODE=profile -a X"$MEM" = X -a X"$FD" = X -a X"$PERF" = X ]; then
+  PERF=perf
+fi
 
-LD_PRELOAD=libIgProf.so MEMPROF=$OPTIONS $COMMAND
+if [ -z "$ALL" ]; then :; else
+  [ -z "$MEM"  ] || MEM="$MEM:all"
+  [ -z "$FD"   ] || FD="$FD:all"
+  [ -z "$PERF" ] || PERF="$PERF:all"
+fi
+
+if [ X$MODE = Xprofile ]; then
+
+  [ X"$MEM" = X ]  || append IGPROF "$MEM"
+  [ X"$FD" = X ]   || append IGPROF "$FD"
+  [ X"$PERF" = X ] || append IGPROF "$PERF"
+
+  LD_PRELOAD=libIgProf.so
+  export LD_PRELOAD IGPROF
+  exec "$@"
+
+else
+  igprof-analyse $SORT ${1+"$@"}
+fi

@@ -1,5 +1,8 @@
 2004-05-10  Lassi A. Tuura  <lat@iki.fi>
 
+	* scripts/igprof: Adapt to new profiler core.
+	* scripts/igprof-analyse: New, analyse output files.
+
 	* IgProf.h (IGPROF_LIBHOOK): New, for library-targeted hooks.
 	* IgProf.cc: Use it to capture exit() from libc directly in
 	non-dynamic programs such as "ls".
