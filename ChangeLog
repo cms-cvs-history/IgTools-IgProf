@@ -6,6 +6,12 @@
 	(e.g. from late-delivered profile signal).  Try to work around
 	bugs in linux recursive mutex handling within signals.
 
+	* IgProfPerf.cc: Synchronise profiling signal thread startup.
+	Correctly check whether profiling module is enabled.  Make sure
+	profiling signal is not sent before we are ready for it in
+	captured threads (may still not work correctly -- sometimes COBRA
+	seems to catch SIGSEGV the minute we capture the thread?).
+
 	* IgProfMem.cc (add): Live counter is cumulative, not maxed.
 
 	* IgProf.cc, IgProfMem.cc, IgProfFileDesc.cc: Trap all functions

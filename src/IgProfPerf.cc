@@ -42,6 +42,7 @@ static int			s_enabled	= 0;
 static bool			s_initialized	= false;
 #if __linux
 static pthread_mutex_t		s_lock		= PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t		s_sigstart	= PTHREAD_MUTEX_INITIALIZER;
 static int			s_nthreads	= 0;
 static pthread_t		s_threads [1024];
 static pthread_t		s_profthread;
@@ -84,19 +85,18 @@ profileSignalHandler (void)
 	IgProfLock lock (s_enabled);
 
 #if __linux
-	if (igpthread_create_hook.typed.chain && pthread_self () == s_profthread)
+	if (lock.enabled () > 0 && pthread_self () == s_profthread)
 	{
 	    pthread_mutex_lock (&s_lock);
 	    static int sigs = 0;
 	    if (sigs++ % 1000 == 0)
-		IgProf::debug ("%d profiling signals received", sigs);
+		IgProf::debug ("%d profiling signals received\n", sigs);
 
 	    for (int i = 0; i < s_nthreads; ++i)
 		pthread_kill (s_threads [i], SIGPROF);
-
 	    pthread_mutex_unlock (&s_lock);
 	}
-	else if (lock.enabled ())
+	else if (lock.enabled () > 0)
 #endif
 	    add ();
     }
@@ -146,6 +146,7 @@ profileSignalThread (void *)
     pthread_atfork (0, 0, &profileSignalThreadFork);
     enableSignalHandler ();
     enableTimer ();
+    pthread_mutex_unlock (&s_sigstart);
     
     while (true)
 	sleep (1);
@@ -160,8 +161,12 @@ static void
 enableSignalThread (void)
 {
     if (isMultiThreaded ())
+    {
+	pthread_mutex_lock (&s_sigstart);
 	(*igpthread_create_hook.typed.chain)
 	    (&s_profthread, 0, &profileSignalThread, 0);
+	pthread_mutex_lock (&s_sigstart);
+    }
 }
 
 /** Old GNU/Linux system hack.  Record this thread to the table of
@@ -187,13 +192,13 @@ threadWrapper (void *arg)
     registerThisThread ();
 #endif
 
-    // Enable profiling in this thread.
-    enableTimer ();
-
     sigset_t profset;
     sigemptyset (&profset);
     sigaddset (&profset, SIGPROF);
     pthread_sigmask (SIG_UNBLOCK, &profset, 0);
+
+    // Enable profiling in this thread.
+    enableTimer ();
 
     IgProfPerfWrappedArg *wrapped = (IgProfPerfWrappedArg *) arg;
     IgProf::debug ("Perf: captured thread %lu for profiling (%p, %p)\n",
