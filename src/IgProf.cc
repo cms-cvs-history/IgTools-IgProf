@@ -400,7 +400,7 @@ dumpTrace (FILE *output, IgHookTrace *node, int depth)
 	    for (int i = 0; i <= depth+1; ++i)
 	        fputc (' ', output);
 
-	    fprintf (output, "<counter name=\"%s\" value=\"%lu\" count=\"%lu\"/>\n",
+	    fprintf (output, "<counter name=\"%s\" value=\"%llu\" count=\"%llu\"/>\n",
 		     val->counter ()->m_name, val->value (), val->count ());
 	}
     }

@@ -1,5 +1,7 @@
 2004-05-15  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProf.cc: Counters are now large numbers.
+
 	* igprof-analyse: Optionally output libraries.  Sort by caller.
 
 42004-05-15  Lassi A. Tuura  <lat@iki.fi>
