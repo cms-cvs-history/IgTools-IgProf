@@ -7,11 +7,22 @@
 
 //<<<<<< PUBLIC DEFINES                                                 >>>>>>
 
+#define IGPROF_VERBOSE 1
+
 #define IGPROF_HOOK(type, fun, myfun) \
     static IgHook::TypedData<type> myfun##_hook = { { 0, #fun, 0, &myfun, 0, 0, 0 } }
 
 #define IGPROF_LIBHOOK(type, fun, lib, myfun) \
     static IgHook::TypedData<type> myfun##_hook = { { 0, #fun, lib, &myfun, 0, 0, 0 } }
+
+#define IGPROF_ASSERT(expr) \
+    ((void)((expr) ? 1 : IgProf::panic(__FILE__,__LINE__,__PRETTY_FUNCTION__,#expr)))
+
+#if IGPROF_VERBOSE
+# define IGPROF_TRACE(expr) do { IgProf::debug expr; } while (0)
+#else
+# define IGPROF_TRACE(expr) do { ; } while (0)
+#endif
 
 //<<<<<< PUBLIC CONSTANTS                                               >>>>>>
 //<<<<<< PUBLIC TYPES                                                   >>>>>>
@@ -26,6 +37,8 @@ class IgHookLiveMap;
 class IgProf
 {
 public:
+    static int			panic (const char *file, int line,
+	    			       const char *func, const char *expr);
     static void			debug (const char *format, ...);
     static const char *		options (void);
     static IgHookTrace *	root (void);

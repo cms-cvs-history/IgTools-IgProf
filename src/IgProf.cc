@@ -6,7 +6,6 @@
 #include "Ig_Tools/IgHook/interface/IgHookTrace.h"
 #include "Ig_Tools/IgHook/interface/IgHookLiveMap.h"
 #include <sys/types.h>
-#include <cassert>
 #include <cstdlib>
 #include <cstdio>
 #include <cstdarg>
@@ -151,6 +150,34 @@ IgProf::liveMap (const char *label)
 	map = new IgHookLiveMap;
 
     return map;
+}
+
+/** Internal assertion helper routine.  */
+int
+IgProf::panic (const char *file, int line, const char *func, const char *expr)
+{
+    IgProf::deactivate ();
+
+#if __linux
+    fprintf (stderr, "%s: ", program_invocation_name);
+#endif
+    fprintf (stderr, "%s:%d: %s: assertion failure: %s\n", file, line, func, expr);
+
+    void *trace [128];
+    int levels = IgHookTrace::stacktrace (trace, 128);
+    for (int i = 0; i < levels; ++i)
+    {
+	const char	*sym = 0;
+	const char	*lib = 0;
+	int		offset = 0;
+	bool		nonheap = IgHookTrace::symbol (trace [i], sym, lib, offset);
+	fprintf (stderr, "  %p %s + %d [%s]\n", trace [i], sym, offset, lib);
+	if (! nonheap) delete [] sym;
+    }
+
+    // abort ();
+    IgProf::activate ();
+    return 1;
 }
 
 /** Internal printf()-like debugging utility.  Produces output if
