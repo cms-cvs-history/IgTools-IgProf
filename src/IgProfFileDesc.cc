@@ -76,7 +76,6 @@ remove (int fd)
 	    return;
 
 	IgHookTrace	*node = info->second.first;
-	size_t		size = info->second.second;
 
 	IGPROF_ASSERT (node->counter (&s_ct_live)->value () >= 1);
 	node->counter (&s_ct_live)->untick ();
@@ -130,7 +129,17 @@ IgProfFileDesc::initialize (void)
 		{
 		    IgProf::debug ("FD: enabling leak table\n");
 		    s_count_leaks = 1;
+		    s_count_live = 1;
 		    options += 6;
+		    opts = true;
+		}
+		else if (! strncmp (options, ":all", 4))
+		{
+		    IgProf::debug ("FD: enabling everything\n");
+		    s_count_used = 1;
+		    s_count_leaks = 1;
+		    s_count_live = 1;
+		    options += 4;
 		    opts = true;
 		}
 		else
