@@ -16,6 +16,7 @@
 #include <unistd.h>
 #include <sys/signal.h>
 #include <pthread.h>
+#include <dlfcn.h>
 
 //<<<<<< PRIVATE DEFINES                                                >>>>>>
 //<<<<<< PRIVATE CONSTANTS                                              >>>>>>
@@ -49,21 +50,16 @@ IGPROF_LIBHOOK ("libc.so.6", void (int),	_exit,	igc_exit);
 IGPROF_LIBHOOK ("libc.so.6", int (pid_t, int),	kill,	igckill);
 #endif
 
-#ifdef PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP
-# define MUTEX_STATIC_INIT PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP
-# define MUTEX_DYNAMIC_INIT(lock)
-#else
-# define MUTEX_STATIC_INIT PTHREAD_MUTEX_INITIALIZER
-# define MUTEX_DYNAMIC_INIT(lock) \
-    do { pthread_mutexattr_t attrs; \
-         pthread_mutexattr_init (&attrs); \
-         pthread_mutexattr_settype (&attrs, PTHREAD_MUTEX_RECURSIVE); \
-         pthread_mutex_init (lock, &attrs); } while (0)
-#endif
-
 static int		s_enabled	= 0;
 static bool		s_initialized	= false;
-static pthread_mutex_t	s_lock		= MUTEX_STATIC_INIT;
+static bool		s_pthreads	= false;
+static pthread_mutex_t	s_lock;
+// There is an odd bug in linux pthread mutex handling where if
+// we re-enter recursive mutex locking in the same *thread* twice,
+// e.g. through signal handling, it dead-locks.  So try to avoid
+// that.
+static pthread_key_t	s_thread_locked;
+
 
 static LiveMaps &livemaps (void) { static LiveMaps s; return s; }
 static ActivationList &activations (void) { static ActivationList s; return s; }
@@ -73,10 +69,17 @@ static ActivationList &deactivations (void) { static ActivationList s; return s;
 //<<<<<< MEMBER FUNCTION DEFINITIONS                                    >>>>>>
 
 IgProfLock::IgProfLock (int &enabled)
-{ IgProf::lock (); m_enabled = enabled; IgProf::deactivate (); }
+{
+    m_locked = IgProf::lock ();
+    m_enabled = enabled;
+    IgProf::deactivate ();
+}
 
 IgProfLock::~IgProfLock (void)
-{ IgProf::activate (); IgProf::unlock (); }
+{
+    IgProf::activate ();
+    if (m_locked) IgProf::unlock ();
+}
 
 //////////////////////////////////////////////////////////////////////
 void
@@ -85,7 +88,17 @@ IgProf::initialize (void)
     if (s_initialized) return;
     s_initialized = true;
 
-    MUTEX_DYNAMIC_INIT (&s_lock);
+    void *program = dlopen (0, RTLD_NOW);
+    if (program && dlsym (program, "pthread_create"))
+    {
+	s_pthreads = true;
+        pthread_mutexattr_t attrs;
+        pthread_mutexattr_init (&attrs);
+        pthread_mutexattr_settype (&attrs, PTHREAD_MUTEX_RECURSIVE);
+        pthread_mutex_init (&s_lock, &attrs);
+        pthread_key_create (&s_thread_locked, 0);
+    }
+    dlclose (program);
 
     IgProf::debug ("Profiler core loaded\n");
     IgHook::hook (igexit_hook.raw);
@@ -101,13 +114,31 @@ IgProf::initialize (void)
     IgProf::enable ();
 }
 
-void
+bool
 IgProf::lock (void)
-{ pthread_mutex_lock (&s_lock); }
+{
+    if (s_pthreads)
+    {
+        void *inlock = pthread_getspecific (s_thread_locked);
+        if (! inlock)
+        {
+	    pthread_setspecific (s_thread_locked, &s_thread_locked);
+            pthread_mutex_lock (&s_lock);
+	    return true;
+        }
+    }
+    return false;
+}
 
 void
 IgProf::unlock (void)
-{ pthread_mutex_unlock (&s_lock); }
+{
+    if (s_pthreads)
+    {
+        pthread_mutex_unlock (&s_lock);
+	pthread_setspecific (s_thread_locked, 0);
+    }
+}
 
 void
 IgProf::enable (void)
@@ -334,6 +365,7 @@ doexit (void)
 
     IgProf::deactivate (); // twice disabled!
     s_initialized = false; // signal local data is unsafe to use
+    s_pthreads = false; // make sure we no longer use threads stuff
 }
 
 static void
@@ -354,6 +386,7 @@ dokill (pid_t pid, int sig)
 	}
     }
 }
+
 static void igexit (int code) { doexit (); (*igexit_hook.typed.chain) (code); }
 static void ig_exit (int code) { doexit (); (*ig_exit_hook.typed.chain) (code); }
 static int igkill (pid_t pid, int sig) { dokill (pid, sig); return (*igkill_hook.typed.chain) (pid, sig); }
