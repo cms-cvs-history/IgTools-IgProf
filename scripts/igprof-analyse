@@ -125,7 +125,17 @@ sub analyse
     foreach my $sym (@sorted) {
 	# print parents
 	print "\n", "-" x 78, "\n";
-	foreach my $caller (sort keys %{$flat->{$sym}{CALLERS}})
+	my @parents = sort keys %{$flat->{$sym}{CALLERS}};
+	if (scalar @keyorder == 1) {
+	    @parents = sort { ($sortkey eq "SELF_KEY"
+			       ? ($flat->{$a}{CALLS}{$sym}{$keyorder[0]}[0]
+			          <=> $flat->{$b}{CALLS}{$sym}{$keyorder[0]}[0])
+			       : 0)
+			      || ($flat->{$a}{CUM_KEY}{$keyorder[0]}[0]
+			          <=> $flat->{$b}{CUM_KEY}{$keyorder[0]}[0]) }
+			@parents;
+	}
+	foreach my $caller (@parents)
 	{
 	    my $thiscall = $flat->{$caller}{CALLS}{$sym};
 	    print "\t";
@@ -147,7 +157,17 @@ sub analyse
 	print "\n";
 
 	# print children
-	foreach my $callee (sort keys %{$flat->{$sym}{CALLS}})
+	my @children = sort keys %{$flat->{$sym}{CALLS}};
+	if (scalar @keyorder == 1) {
+	    @children = sort { ($sortkey eq "SELF_KEY"
+				?  ($flat->{$sym}{CALLS}{$b}{$keyorder[0]}[0]
+			            <=> $flat->{$sym}{CALLS}{$a}{$keyorder[0]}[0])
+				: 0)
+			       || ($flat->{$b}{CUM_KEY}{$keyorder[0]}[0]
+			           <=> $flat->{$a}{CUM_KEY}{$keyorder[0]}[0]) }
+			@children;
+	}
+	foreach my $callee (@children)
 	{
 	    my $thiscall = $flat->{$sym}{CALLS}{$callee};
 	    print "\t";

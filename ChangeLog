@@ -1,5 +1,7 @@
 2004-05-15  Lassi A. Tuura  <lat@iki.fi>
 
+	* igprof-analyse: Sort parents and callers too.
+
 	* igprof-analyse: Improve by-caller sorting.
 
 	* IgProf.cc: Counters are now large numbers.
