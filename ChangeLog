@@ -1,5 +1,10 @@
 2004-05-14  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProf.cc: Remove messing with thread-specific data, it just
+	creates problems -- it allocates memory and we are sometimes
+	unable to capture all threads.  Just make sure the performance
+	profiler doesn't call us from a signal handler.
+
 	* IgProfPerf.cc: Pass valid memory to thread start routine.
 
 	* IgProf.cc: Properly check if the program is multi-threaded and

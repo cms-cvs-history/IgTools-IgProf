@@ -54,12 +54,6 @@ static int		s_enabled	= 0;
 static bool		s_initialized	= false;
 static bool		s_pthreads	= false;
 static pthread_mutex_t	s_lock;
-// There is an odd bug in linux pthread mutex handling where if
-// we re-enter recursive mutex locking in the same *thread* twice,
-// e.g. through signal handling, it dead-locks.  So try to avoid
-// that.
-static pthread_key_t	s_thread_locked;
-
 
 static LiveMaps &livemaps (void) { static LiveMaps s; return s; }
 static ActivationList &activations (void) { static ActivationList s; return s; }
@@ -70,7 +64,7 @@ static ActivationList &deactivations (void) { static ActivationList s; return s;
 
 IgProfLock::IgProfLock (int &enabled)
 {
-    m_locked = IgProf::lock ();
+    IgProf::lock ();
     m_enabled = enabled;
     IgProf::deactivate ();
 }
@@ -78,7 +72,7 @@ IgProfLock::IgProfLock (int &enabled)
 IgProfLock::~IgProfLock (void)
 {
     IgProf::activate ();
-    if (m_locked) IgProf::unlock ();
+    IgProf::unlock ();
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -96,7 +90,6 @@ IgProf::initialize (void)
         pthread_mutexattr_init (&attrs);
         pthread_mutexattr_settype (&attrs, PTHREAD_MUTEX_RECURSIVE);
         pthread_mutex_init (&s_lock, &attrs);
-        pthread_key_create (&s_thread_locked, 0);
     }
     dlclose (program);
 
@@ -115,30 +108,16 @@ IgProf::initialize (void)
 }
 
 bool
+IgProf::isMultiThreaded (void)
+{ return s_pthreads; }
+
+void
 IgProf::lock (void)
-{
-    if (s_pthreads)
-    {
-        void *inlock = pthread_getspecific (s_thread_locked);
-        if (! inlock)
-        {
-	    pthread_setspecific (s_thread_locked, &s_thread_locked);
-            pthread_mutex_lock (&s_lock);
-	    return true;
-        }
-    }
-    return false;
-}
+{ if (s_pthreads) pthread_mutex_lock (&s_lock); }
 
 void
 IgProf::unlock (void)
-{
-    if (s_pthreads)
-    {
-        pthread_mutex_unlock (&s_lock);
-	pthread_setspecific (s_thread_locked, 0);
-    }
-}
+{ if (s_pthreads) pthread_mutex_unlock (&s_lock); }
 
 void
 IgProf::enable (void)
