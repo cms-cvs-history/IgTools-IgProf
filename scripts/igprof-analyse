@@ -34,11 +34,11 @@ sub readDump
 	elsif (/(\s+)<node id="([^"]*)" symaddr="([^"]*)">(.*)/)
 	{
 	    $#nodestack = length($1)-2;
-	    my $node = { ID => $2, SYMADDR => $3, COUNTERS => [], CHILDREN => [] };
 	    my $rest = $4;
+	    my $node = { ID => $2, SYMADDR => $3, COUNTERS => {}, CHILDREN => [] };
 	    while ($rest && $rest =~ /<counter name="([^"]*)" value="([^"]*)"\/>(.*)/)
 	    {
-		push (@{$node->{COUNTERS}}, { NAME => $1, VALUE => $2 });
+		$node->{COUNTERS}{$1} = $2;
 		$rest = $3;
 	    }
 	    push (@{$nodestack[$#nodestack-1]{CHILDREN}}, $node);
@@ -70,7 +70,7 @@ sub keysof
 sub checkkeys
 {
     my ($node, @keys) = @_;
-    foreach my $key (map { $_->{NAME} } @{$node->{COUNTERS}}) {
+    foreach my $key (keys %{$node->{COUNTERS}}) {
 	push (@keys, $key) if ! grep ($_ eq $key, @keys);
     }
     foreach my $kid (@{$node->{CHILDREN}}) {
@@ -84,40 +84,234 @@ sub analyse
     my ($dump, $keys) = @_;
     print "keys = ", join (", ", @$keys), "\n";
 
-    my $syms = $dump->{SYMS};
-    my $flat = { "spontaneous" => { PARENTS => [], SELF => [], CHILDREN => [] } };
-    foreach my $node (@{$dump->{NODES}}) {
-	foreach my $node (@{$node->{CHILDREN}}) {
-	    &analysenode ("spontaneous", $node, $flat);
-        }
+    $dump->{NODES}[0]{SYMADDR} = "spontaneous";
+
+    # Accumulate values
+    foreach my $node (map { @{$_->{CHILDREN}} } @{$dump->{NODES}}) {
+	&accumulate ($dump->{NODES}[0], $node);
     }
 
-    # FIXME: sort table by keys
-    foreach my $sym (sort keys %$flat) {
-	use Data::Dumper;
-	print "$sym => ", Dumper ($flat->{$sym});
-	# print parents
-	# print row
-	# print children
+    # Suppress filtered symbols
+    foreach my $node (map { @{$_->{CHILDREN}} } @{$dump->{NODES}}) {
+	&suppressions ($dump->{SYMS}, $dump->{NODES}[0], $node);
     }
+
+    # Initialise result table
+    my $flat = { "spontaneous" => {} };
+    foreach my $node (map { @{$_->{CHILDREN}} } @{$dump->{NODES}}) {
+	&analysenode ("spontaneous", $node, $flat, $keys);
+    }
+
+    # Calculate final sort keys
+    foreach my $sym (keys %$flat) {
+	&summarise ($flat, $keys, $sym);
+    }
+
+    # Sort the symbols by selected criteria (FIXME: keys vs. sortkeys)
+    my $rank = 1;
+    my @sorted = reverse sort { &cmpnodes($flat, $keys, $a, $b); } keys %$flat;
+    foreach my $sym (@sorted) {
+	$flat->{$sym}{RANK} = $rank++;
+    }
+
+    # Output result table
+    foreach my $sym (@sorted) {
+	# print parents
+	print "\n", "-" x 60, "\n";
+	foreach my $caller (sort keys %{$flat->{$sym}{CALLERS}}) {
+	    print join("\t", "",
+		       (map { ($flat->{$caller}{SELF_KEY}{$_},
+			       $flat->{$caller}{CUM_KEY}{$_}) } @$keys),
+       		       "$dump->{SYMS}{$caller}{NAME} [$flat->{$caller}{RANK}]\n");
+	}
+
+	# print row
+	print join("\t", "[$flat->{$sym}{RANK}]",
+		   (map { ($flat->{$sym}{SELF_KEY}{$_},
+			   $flat->{$sym}{CUM_KEY}{$_}) } @$keys),
+   		   "$dump->{SYMS}{$sym}{NAME}\n");
+
+	# print children
+	foreach my $child (sort keys %{$flat->{$sym}{CHILDREN}}) {
+	    print join("\t", "",
+		       (map { ($flat->{$child}{SELF_KEY}{$_},
+			       $flat->{$child}{CUM_KEY}{$_}) } @$keys),
+       		       "$dump->{SYMS}{$child}{NAME} [$flat->{$child}{RANK}]\n");
+	}
+    }
+}
+
+sub accumulate
+{
+    my ($parent, $node) = @_;
+
+    # Initialise cumulative counters to self values
+    foreach my $counter (keys %{$node->{COUNTERS}})
+    {
+	my $name = $counter;
+	$name =~ /([A-Z]+_)(.*)/;
+	my $cumname = "$1CUM_$2";
+	$node->{COUNTERS}{$cumname} = $node->{COUNTERS}{$name};
+    }
+
+    # Process children
+    foreach my $kid (@{$node->{CHILDREN}}) {
+	&accumulate ($node, $kid);
+    }
+
+    # Accumulate parent cumulative counts
+    foreach my $counter (grep ($_ !~ /_CUM_/, keys %{$node->{COUNTERS}}))
+    {
+	my $name = $counter;
+	$name =~ /([A-Z]+_)(.*)/;
+	my $cumname = "$1CUM_$2";
+	my $val = $node->{COUNTERS}{$name};
+
+	if ($name =~ /_MAX$/)
+	{
+	    $parent->{COUNTERS}{$cumname} = $val if $parent->{COUNTERS}{$cumname} < $val;
+	}
+	else
+	{
+	   $parent->{COUNTERS}{$cumname} += $val;
+        }
+    }
+}
+
+sub suppressions
+{
+    my ($syms, $parent, $node) = @_;
+
+    # Apply counts of a filtered node to the parent
+    if (grep ($_ eq $syms->{$node->{SYMADDR}}{NAME}, @filters))
+    {
+        foreach my $counter (keys %{$node->{COUNTERS}})
+	{
+	    my $name = $counter;
+	    $name =~ /([A-Z]+_)(.*)/;
+	    $name = "$1$2";
+	    my $cumname = "$1CUM_$2";
+	    my $cumval = $node->{COUNTERS}{$cumname} || 0;
+
+	    if ($name =~ /_MAX$/)
+	    {
+	        $parent->{COUNTERS}{$name} ||= 0;
+		$parent->{COUNTERS}{$name} = $cumval if $parent->{COUNTERS}{$name} < $cumval;
+		# NB: moving the largest value up in the tree doesn't change cumulative vals
+		# as the parent always contains it's own cumulative values
+	    }
+	    else
+	    {
+	        $parent->{COUNTERS}{$name} ||= 0;
+		$parent->{COUNTERS}{$name} += $cumval;
+	    }
+        }
+
+	@{$parent->{CHILDREN}} = grep ($_ ne $node, @{$parent->{CHILDREN}});
+    }
+
+    # Process children
+    my @kids = @{$node->{CHILDREN}};
+    foreach my $kid (@kids) {
+	&suppressions ($syms, $node, $kid);
+    }
+}
+
+sub summarise 
+{
+    my ($flat, $keys, $sym) = @_;
+    foreach my $key (@$keys) {
+	my ($sval, $cval);
+	if ($key =~ /_MAX$/) {
+	    $sval = $flat->{$sym}{SELF}{MAX}{$key};
+	    $cval = $flat->{$sym}{CUM}{MAX}{$key};
+	} else {
+	    $sval = $flat->{$sym}{SELF}{SUM}{$key};
+	    $cval = $flat->{$sym}{CUM}{SUM}{$key};
+	}
+	$flat->{$sym}{SELF_KEY}{$key} = $sval;
+	$flat->{$sym}{CUM_KEY}{$key} = $cval;
+    }
+
+    return 0;
+}
+
+sub cmpnodes
+{
+    my ($flat, $keys, $a, $b) = @_;
+    foreach my $key (@$keys) {
+	my $aval = $flat->{$a}{SELF_KEY}{$key};
+	my $bval = $flat->{$b}{SELF_KEY}{$key};
+	my $diff = ((defined ($aval) ? $aval : -1)
+		    <=> (defined ($bval) ? $bval : -1));
+	return $diff if $diff;
+    }
+
+    foreach my $key (@$keys) {
+	my $aval = $flat->{$a}{CUM_KEY}{$key};
+	my $bval = $flat->{$b}{CUM_KEY}{$key};
+	my $diff = ((defined ($aval) ? $aval : -1)
+		    <=> (defined ($bval) ? $bval : -1));
+	return $diff if $diff;
+    }
+
+    return eval($a) <=> eval ($b);
 }
 
 sub analysenode
 {
-    my ($parent, $node, $result) = @_;
+    my ($parent, $node, $result, $keys) = @_;
     my $sym = $node->{SYMADDR};
-    my $symnode = $result->{$sym}; # ||= { PARENTS => [], SELF => [], CHILDREN => [] };
-    push (@{$result->{$parent}{CHILDREN}}, $sym);
-    push (@{$symnode->{PARENTS}}, $parent);
-    push (@{$symnode->{SELF}}, $node->{COUNTERS});
-    foreach my $kid (@{$node->{CHILDREN}}) {
-	&analysenode ($sym, $kid, $result);
+    my $symnode = ($result->{$sym} ||= {});
+
+    $symnode->{CALLERS}{$parent} = 1;
+
+    # Add values for all requested counters
+    foreach my $counter (keys %{$node->{COUNTERS}}) {
+	my ($part, $name, $val) = ("SELF", $counter, $node->{COUNTERS}{$counter});
+	if ($name =~ /([A-Z]+_)CUM_(.*)/) {
+	    $part = "CUM"; $name = "$1$2";
+	}
+
+	if (grep ($name eq $_, @$keys))
+	{
+	    push (@{$result->{$parent}{CHILDREN}{$sym}{$counter}}, $val);
+            $symnode->{$part}{MAX}{$name} ||= 0;
+            $symnode->{$part}{MAX}{$name} = $val
+		if ($symnode->{$part}{MAX}{$name} < $val);
+            $symnode->{$part}{SUM}{$name} ||= 0;
+            $symnode->{$part}{SUM}{$name} += $val;
+	}
     }
+
+    # Make sure all requested counters have both "CUM" and "SELF" values.
+    foreach my $key (@$keys) {
+	my $cumkey = join("_CUM_", ($key =~ m|([^_]+)|g));
+	$symnode->{SELF}{SUM}{$key} = $symnode->{SELF}{MAX}{$key} = 0
+	    if ! grep ($key eq $_, keys %{$node->{COUNTERS}});
+	$symnode->{CUM}{SUM}{$key} = $symnode->{CUM}{MAX}{$key} = 0
+	    if ! grep ($cumkey eq $_, keys %{$node->{COUNTERS}});
+    }
+
+    # Analyse children
+    foreach my $kid (@{$node->{CHILDREN}}) {
+	&analysenode ($sym, $kid, $result, $keys);
+    }
+}
+
+sub usage
+{
+    print STDERR "igprof-analyse [--report KEY[,KEY]...]\n",
+    		 "  [--sort KEY[,KEY]...] [--order ORDER]\n",
+		 "  [--filter FILE] [--no-filter] [--]\n",
+		 "  [FILE]...\n";
 }
 
 while ($#ARGV != 0)
 {
-    if ($ARGV[0] eq '--report')
+    if ($ARGV[0] eq '--help')
+    { &usage(); exit (1); }
+    elsif ($ARGV[0] eq '--report')
     { @keys = split(',', $ARGV[1]); shift (@ARGV); shift (@ARGV); }
     elsif ($ARGV[0] eq '--sort')
     { @sort = split(',', $ARGV[1]); shift (@ARGV); shift (@ARGV); }
