@@ -3,6 +3,7 @@
 BEGIN { use strict; $^W = 1; }
 
 my @keys;
+my @allkeys;
 my @sort;
 my $order = 1;
 my @filters;
@@ -159,6 +160,13 @@ sub accumulate
 {
     my ($parent, $node) = @_;
 
+    # Initialise missing counters
+    foreach my $counter (@allkeys)
+    {
+	$node->{COUNTERS}{$counter} = [ 0, 0 ]
+	    if ! exists $node->{COUNTERS}{$counter};
+    }
+
     # Initialise cumulative counters to self values
     foreach my $counter (keys %{$node->{COUNTERS}})
     {
@@ -284,7 +292,7 @@ sub analysenode
     my $sym = $node->{SYMADDR};
     my $symnode = ($result->{$sym} ||= {});
 
-    # Add values for all requested counters
+    # Add values for all requested counters.  Note that all counters exist.
     foreach my $counter (keys %{$node->{COUNTERS}}) {
 	my ($part, $name, $val) = ("SELF", $counter, $node->{COUNTERS}{$counter});
 	if ($name =~ /([A-Z]+_)CUM_(.*)/) {
@@ -310,19 +318,6 @@ sub analysenode
             $symnode->{$part}{SUM}{$name}[0] += $val->[0];
             $symnode->{$part}{SUM}{$name}[1]++;
 	}
-    }
-
-    # Make sure all requested counters have both "CUM" and "SELF" values.
-    foreach my $key (@keys) {
-	my $cumkey = join("_CUM_", ($key =~ m|([^_]+)|g));
-	if (! grep ($key eq $_, keys %{$node->{COUNTERS}})) {
-	    $symnode->{SELF}{SUM}{$key} = [ 0, 0 ];
-	    $symnode->{SELF}{MAX}{$key} = [ 0, 0 ];
-        }
-	if (! grep ($cumkey eq $_, keys %{$node->{COUNTERS}})) {
-	    $symnode->{CUM}{SUM}{$key} = [ 0, 0 ];
-	    $symnode->{CUM}{MAX}{$key} = [ 0, 0 ];
-        }
     }
 
     # Analyse children
@@ -381,6 +376,7 @@ foreach my $file (@filterfiles)
 foreach my $file (@ARGV)
 {
     my $prof = &readDump ($file);
-    @keys = &keysof ($prof) if ! scalar @keys;
+    @allkeys = &keysof ($prof);
+    @keys = @allkeys if ! scalar @keys;
     &analyse ($prof);
 }

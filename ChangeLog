@@ -1,5 +1,7 @@
 2004-05-13  Lassi A. Tuura  <lat@iki.fi>
 
+	* igprof-analyse: Normalise counters early.
+
 	* IgProfMem.cc, IgProfPerf.cc, IgProfFileDesc.cc: Fix option
 	parsing.
 
