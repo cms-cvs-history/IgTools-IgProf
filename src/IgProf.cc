@@ -30,18 +30,40 @@ typedef std::list<void (*) (void)>		ActivationList;
 //<<<<<< PRIVATE FUNCTION DEFINITIONS                                   >>>>>>
 
 static void igexit (int);
-static void igcexit (int);
 static void ig_exit (int);
 static int  igkill (pid_t pid, int sig);
 
-IGPROF_HOOK (void (int), exit, igexit);
-IGPROF_LIBHOOK (void (int), exit, "libc.so.6", igcexit);
-IGPROF_HOOK (void (int), _exit, ig_exit);
-IGPROF_HOOK (int (pid_t, int), kill, igkill);
+#if __linux
+static void igcexit (int);
+static void igc_exit (int);
+static int  igckill (pid_t pid, int sig);
+#endif
+
+IGPROF_HOOK (void (int),			exit,	igexit);
+IGPROF_HOOK (void (int),			_exit,	ig_exit);
+IGPROF_HOOK (int (pid_t, int),			kill,	igkill);
+
+#if __linux
+IGPROF_LIBHOOK ("libc.so.6", void (int),	exit,	igcexit);
+IGPROF_LIBHOOK ("libc.so.6", void (int),	_exit,	igc_exit);
+IGPROF_LIBHOOK ("libc.so.6", int (pid_t, int),	kill,	igckill);
+#endif
+
+#ifdef PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP
+# define MUTEX_STATIC_INIT PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP
+# define MUTEX_DYNAMIC_INIT(lock)
+#else
+# define MUTEX_STATIC_INIT PTHREAD_MUTEX_INITIALIZER
+# define MUTEX_DYNAMIC_INIT(lock) \
+    do { pthread_mutexattr_t attrs; \
+         pthread_mutexattr_init (&attrs); \
+         pthread_mutexattr_settype (&attrs, PTHREAD_MUTEX_RECURSIVE); \
+         pthread_mutex_init (lock, &attrs); } while (0)
+#endif
 
 static int		s_enabled	= 0;
 static bool		s_initialized	= false;
-static pthread_mutex_t	s_lock		= PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t	s_lock		= MUTEX_STATIC_INIT;
 
 static LiveMaps &livemaps (void) { static LiveMaps s; return s; }
 static ActivationList &activations (void) { static ActivationList s; return s; }
@@ -63,16 +85,17 @@ IgProf::initialize (void)
     if (s_initialized) return;
     s_initialized = true;
 
-    pthread_mutexattr_t attrs;
-    pthread_mutexattr_init (&attrs);
-    pthread_mutexattr_settype (&attrs, PTHREAD_MUTEX_RECURSIVE);
-    pthread_mutex_init (&s_lock, &attrs);
+    MUTEX_DYNAMIC_INIT (&s_lock);
 
     IgProf::debug ("Profiler core loaded\n");
     IgHook::hook (igexit_hook.raw);
-    IgHook::hook (igcexit_hook.raw);
     IgHook::hook (ig_exit_hook.raw);
     IgHook::hook (igkill_hook.raw);
+#if __linux
+    IgHook::hook (igcexit_hook.raw);
+    IgHook::hook (igc_exit_hook.raw);
+    IgHook::hook (igckill_hook.raw);
+#endif
     IgProf::onactivate (&IgProf::enable);
     IgProf::ondeactivate (&IgProf::disable);
     IgProf::enable ();
@@ -298,58 +321,23 @@ IgProf::dump (void)
 
 
 //////////////////////////////////////////////////////////////////////
-static void igexit (int code)
+static void
+doexit (void)
 {
+    IgProfLock lock (s_enabled);
+    if (lock.enabled () > 0)
     {
-        IgProfLock lock (s_enabled);
-        if (lock.enabled () > 0)
-        {
-            IgProf::debug ("exit() called, dumping state\n");
-	    IgProf::dump ();
-            IgProf::debug ("igprof quitting\n");
-        }
-
-        IgProf::deactivate (); // twice disabled!
-	s_initialized = false; // signal local data is unsafe to use
+        IgProf::debug ("exit() called, dumping state\n");
+	IgProf::dump ();
+        IgProf::debug ("igprof quitting\n");
     }
-    (*igexit_hook.typed.chain) (code);
+
+    IgProf::deactivate (); // twice disabled!
+    s_initialized = false; // signal local data is unsafe to use
 }
 
-static void igcexit (int code)
-{
-    {
-        IgProfLock lock (s_enabled);
-        if (lock.enabled () > 0)
-        {
-            IgProf::debug ("exit() called, dumping state\n");
-	    IgProf::dump ();
-            IgProf::debug ("igprof quitting\n");
-        }
-
-        IgProf::deactivate (); // twice disabled!
-	s_initialized = false; // signal local data is unsafe to use
-    }
-    (*igcexit_hook.typed.chain) (code);
-}
-
-static void ig_exit (int code)
-{
-    {
-        IgProfLock lock (s_enabled);
-        if (lock.enabled () > 0)
-        {
-            IgProf::debug ("_exit() called, dumping state\n");
-	    IgProf::dump ();
-            IgProf::debug ("igprof quitting\n");
-        }
-
-        IgProf::deactivate (); // twice disabled!
-	s_initialized = false; // signal local data is unsafe to use
-    }
-    (*ig_exit_hook.typed.chain) (code);
-}
-
-static int igkill (pid_t pid, int sig)
+static void
+dokill (pid_t pid, int sig)
 {
     if ((pid == 0 || pid == getpid ())
 	&& (sig == SIGHUP || sig == SIGINT || sig == SIGQUIT
@@ -365,8 +353,16 @@ static int igkill (pid_t pid, int sig)
 	    IgProf::dump ();
 	}
     }
-    return (*igkill_hook.typed.chain) (pid, sig);
 }
+static void igexit (int code) { doexit (); (*igexit_hook.typed.chain) (code); }
+static void ig_exit (int code) { doexit (); (*ig_exit_hook.typed.chain) (code); }
+static int igkill (pid_t pid, int sig) { dokill (pid, sig); return (*igkill_hook.typed.chain) (pid, sig); }
+
+#if __linux
+static void igcexit (int code) { doexit (); (*igcexit_hook.typed.chain) (code); }
+static void igc_exit (int code) { doexit (); (*igc_exit_hook.typed.chain) (code); }
+static int igckill (pid_t pid, int sig) { dokill (pid, sig); return (*igckill_hook.typed.chain) (pid, sig); }
+#endif
 
 //////////////////////////////////////////////////////////////////////
 static bool autoboot = (IgProf::initialize (), true);

@@ -1,5 +1,10 @@
 2004-05-14  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProf.cc, IgProfMem.cc, IgProfFileDesc.cc: Trap all functions
+	twice, once for main program and another time for executable, as
+	we used to do for "exit()".  Required for some binaries.  To be
+	cleaned up so a single macro does both variations.
+
 	* IgProfFileDesc.cc (initialize): Fix option handling.
 
 	* IgProfFileDesc.cc: Implement.

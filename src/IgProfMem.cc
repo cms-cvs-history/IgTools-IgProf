@@ -22,13 +22,33 @@ static void *igmemalign (size_t align, size_t size);
 static void *igvalloc (size_t size);
 static void igfree (void *ptr);
 
-IGPROF_HOOK (void * (size_t), malloc, igmalloc);
-IGPROF_HOOK (void * (size_t, size_t), calloc, igcalloc);
-IGPROF_HOOK (void * (void *, size_t), realloc, igrealloc);
-IGPROF_HOOK (int (void **, size_t, size_t), posix_memalign, igpmemalign);
-IGPROF_HOOK (void * (size_t, size_t), memalign, igmemalign);
-IGPROF_HOOK (void * (size_t), valloc, igvalloc);
-IGPROF_HOOK (void (void *), free, igfree);
+#if __linux
+static void *igcmalloc (size_t n);
+static void *igcrealloc (void *ptr, size_t n);
+static void *igccalloc (size_t n, size_t m);
+static int  igcpmemalign (void **ptr, size_t align, size_t size);
+static void *igcmemalign (size_t align, size_t size);
+static void *igcvalloc (size_t size);
+static void igcfree (void *ptr);
+#endif
+
+IGPROF_HOOK (void * (size_t),			malloc,		igmalloc);
+IGPROF_HOOK (void * (size_t, size_t),		calloc,		igcalloc);
+IGPROF_HOOK (void * (void *, size_t),		realloc,	igrealloc);
+IGPROF_HOOK (int (void **, size_t, size_t),	posix_memalign,	igpmemalign);
+IGPROF_HOOK (void * (size_t, size_t),		memalign,	igmemalign);
+IGPROF_HOOK (void * (size_t),			valloc,		igvalloc);
+IGPROF_HOOK (void (void *),			free,		igfree);
+
+#if __linux
+IGPROF_LIBHOOK ("libc.so.6", void * (size_t),			malloc,		igcmalloc);
+IGPROF_LIBHOOK ("libc.so.6", void * (size_t, size_t),		calloc,		igccalloc);
+IGPROF_LIBHOOK ("libc.so.6", void * (void *, size_t),		realloc,	igcrealloc);
+IGPROF_LIBHOOK ("libc.so.6", int (void **, size_t, size_t),	posix_memalign,	igcpmemalign);
+IGPROF_LIBHOOK ("libc.so.6", void * (size_t, size_t),		memalign,	igcmemalign);
+IGPROF_LIBHOOK ("libc.so.6", void * (size_t),			valloc,		igcvalloc);
+IGPROF_LIBHOOK ("libc.so.6", void (void *),			free,		igcfree);
+#endif
 
 static IgHookTrace::Counter	s_ct_total	= { "MEM_TOTAL" };
 static IgHookTrace::Counter	s_ct_largest	= { "MEM_MAX" };
@@ -49,7 +69,7 @@ add (void *ptr, size_t size)
 {
     IGPROF_TRACE (("[mem add %p %lu\n", ptr, size));
 
-    int		drop = 3; // one for stacktrace, one for me, one for hook
+    int		drop = 4; // one for stacktrace, one for me, two for hook
     IgHookTrace	*node = IgProf::root ();
     void	*addresses [128];
     int		depth = IgHookTrace::stacktrace (addresses, 128);
@@ -196,6 +216,15 @@ IgProfMem::initialize (void)
         IgHook::hook (igmemalign_hook.raw);
         IgHook::hook (igvalloc_hook.raw);
         IgHook::hook (igfree_hook.raw);
+#if __linux
+        IgHook::hook (igcmalloc_hook.raw);
+        IgHook::hook (igccalloc_hook.raw);
+        IgHook::hook (igcrealloc_hook.raw);
+        IgHook::hook (igcpmemalign_hook.raw);
+        IgHook::hook (igcmemalign_hook.raw);
+        IgHook::hook (igcvalloc_hook.raw);
+        IgHook::hook (igcfree_hook.raw);
+#endif
         IgProf::debug ("Memory profiler enabled\n");
 	// This may allocate, so force our flag to remain false
 	// and then set it to a known value.
@@ -214,11 +243,12 @@ void
 IgProfMem::disable (void)
 { s_enabled--; }
 
-void *igmalloc (size_t n)
+static void *
+domalloc (IgHook::SafeData<void *(size_t)> &hook, size_t n)
 {
     IGPROF_TRACE (("(%d igmalloc %lu\n", s_enabled, n));
     IgProfLock lock (s_enabled);
-    void *result = (*igmalloc_hook.typed.chain) (n);
+    void *result = (*hook.chain) (n);
 
     if (lock.enabled () > 0 && result)
 	add (result, n);
@@ -227,11 +257,13 @@ void *igmalloc (size_t n)
     return result;
 }
 
-void *igcalloc (size_t n, size_t m)
+static void *
+docalloc (IgHook::SafeData<void *(size_t, size_t)> &hook,
+	   size_t n, size_t m)
 {
     IGPROF_TRACE (("(%d igcalloc %lu %lu\n", s_enabled, n, m));
     IgProfLock lock (s_enabled);
-    void *result = (*igcalloc_hook.typed.chain) (n, m);
+    void *result = (*hook.chain) (n, m);
 
     if (lock.enabled () > 0 && result)
 	add (result, n * m);
@@ -240,11 +272,13 @@ void *igcalloc (size_t n, size_t m)
     return result;
 }
 
-void *igrealloc (void *ptr, size_t n)
+static void *
+dorealloc (IgHook::SafeData<void *(void *, size_t)> &hook,
+	   void *ptr, size_t n)
 {
     IGPROF_TRACE (("(%d igrealloc %p %lu\n", s_enabled, ptr, n));
     IgProfLock lock (s_enabled);
-    void *result = (*igrealloc_hook.typed.chain) (ptr, n);
+    void *result = (*hook.chain) (ptr, n);
 
     if (lock.enabled () > 0)
     {
@@ -256,11 +290,13 @@ void *igrealloc (void *ptr, size_t n)
     return result;
 }
 
-void *igmemalign (size_t alignment, size_t size)
+static void *
+domemalign (IgHook::SafeData<void *(size_t, size_t)> &hook,
+	    size_t alignment, size_t size)
 {
     IGPROF_TRACE (("(%d igmemalign %lu %lu\n", s_enabled, alignment, size));
     IgProfLock lock (s_enabled);
-    void *result = (*igmemalign_hook.typed.chain) (alignment, size);
+    void *result = (*hook.chain) (alignment, size);
 
     if (lock.enabled () > 0 && result)
 	add (result, size);
@@ -269,11 +305,12 @@ void *igmemalign (size_t alignment, size_t size)
     return result;
 }
 
-void *igvalloc (size_t size)
+static void *
+dovalloc (IgHook::SafeData<void *(size_t)> &hook, size_t size)
 {
     IGPROF_TRACE (("(%d igvalloc %lu\n", s_enabled, size));
     IgProfLock lock (s_enabled);
-    void *result = (*igvalloc_hook.typed.chain) (size);
+    void *result = (*hook.chain) (size);
 
     if (lock.enabled () > 0 && result)
 	add (result, size);
@@ -282,11 +319,13 @@ void *igvalloc (size_t size)
     return result;
 }
 
-int igpmemalign (void **ptr, size_t alignment, size_t size)
+static int
+dopmemalign (IgHook::SafeData<int(void **, size_t, size_t)> &hook,
+	     void **ptr, size_t alignment, size_t size)
 {
     IGPROF_TRACE (("(%d igpmemalign %p %lu %lu\n", s_enabled, ptr, alignment, size));
     IgProfLock lock (s_enabled);
-    int result = (*igpmemalign_hook.typed.chain) (ptr, alignment, size);
+    int result = (*hook.chain) (ptr, alignment, size);
 
     if (lock.enabled () > 0 && ptr && *ptr)
 	add (*ptr, size);
@@ -295,16 +334,35 @@ int igpmemalign (void **ptr, size_t alignment, size_t size)
     return result;
 }
 
-void igfree (void *ptr)
+static void
+dofree (IgHook::SafeData<void (void *)> &hook, void *ptr)
 {
     IGPROF_TRACE (("(%d igfree %p\n", s_enabled, ptr));
     IgProfLock lock (s_enabled);
-    (*igfree_hook.typed.chain) (ptr);
+    (*hook.chain) (ptr);
 
     if (lock.enabled () > 0)
 	remove (ptr);
 
     IGPROF_TRACE ((")\n"));
 }
+
+static void *igmalloc (size_t n) { return domalloc (igmalloc_hook.typed, n); }
+static void *igrealloc (void *ptr, size_t n) { return dorealloc (igrealloc_hook.typed, ptr, n); }
+static void *igcalloc (size_t n, size_t m) { return docalloc (igcalloc_hook.typed, n, m); }
+static int  igpmemalign (void **ptr, size_t align, size_t size) { return dopmemalign (igpmemalign_hook.typed, ptr, align, size); }
+static void *igmemalign (size_t align, size_t size) { return domemalign (igmemalign_hook.typed, align, size); }
+static void *igvalloc (size_t size) { return dovalloc (igvalloc_hook.typed, size); }
+static void igfree (void *ptr) { return dofree (igfree_hook.typed, ptr); }
+
+#if __linux
+static void *igcmalloc (size_t n) { return domalloc (igcmalloc_hook.typed, n); }
+static void *igcrealloc (void *ptr, size_t n) { return dorealloc (igcrealloc_hook.typed, ptr, n); }
+static void *igccalloc (size_t n, size_t m) { return docalloc (igccalloc_hook.typed, n, m); }
+static int  igcpmemalign (void **ptr, size_t align, size_t size) { return dopmemalign (igcpmemalign_hook.typed, ptr, align, size); }
+static void *igcmemalign (size_t align, size_t size) { return domemalign (igcmemalign_hook.typed, align, size); }
+static void *igcvalloc (size_t size) { return dovalloc (igcvalloc_hook.typed, size); }
+static void igcfree (void *ptr) { return dofree (igcfree_hook.typed, ptr); }
+#endif
 
 static bool autoboot = (IgProfMem::initialize (), true);
