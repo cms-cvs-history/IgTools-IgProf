@@ -1,5 +1,8 @@
 2004-05-15  Lassi A. Tuura  <lat@iki.fi>
 
+	* test/test_load.cc: Reduce loop counts, we now do real locking
+	so programs run much slower.
+
 	* IgProf.cc, IgProfPerf.cc: Wise up.  The pthreads locking stuff
 	does not work with asynchronous signals.  So make each thread keep
 	its own tree roots so the (performance) profiling module can add
