@@ -126,6 +126,8 @@ IgProfFileDesc::initialize (void)
 		    break;
 	    }
 	}
+	else
+	    options++;
 
 	while (*options && *options != ',' && *options != ' ')
 	    options++;

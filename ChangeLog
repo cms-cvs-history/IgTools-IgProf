@@ -1,5 +1,8 @@
 2004-05-10  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProfMem.cc, IgProfPerf.cc, IgProfFileDesc.cc (initialize):
+	Make progress in the option string when unrecognised input is found.
+
 	* scripts/igprof: Adapt to new profiler core.
 	* scripts/igprof-analyse: New, analyse output files.
 

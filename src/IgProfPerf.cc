@@ -227,6 +227,8 @@ IgProfPerf::initialize (void)
 	    enable = true;
 	    options += 4;
 	}
+	else
+	    options++;
 
 	while (*options && *options != ',' && *options != ' ')
 	    options++;
