@@ -586,7 +586,7 @@ sub usage
 		 "  [--] [FILE]...\n";
 }
 
-while ($#ARGV > 0)
+while (scalar @ARGV)
 {
     if ($ARGV[0] eq '--help')
     { &usage(); exit (1); }
