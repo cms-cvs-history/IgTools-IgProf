@@ -6,6 +6,8 @@
 #include "Ig_Tools/IgHook/interface/IgHookTrace.h"
 #include "Ig_Tools/IgHook/interface/IgHookLiveMap.h"
 #include <cstdlib>
+#include <cstdio>
+#include <sys/socket.h>
 
 //<<<<<< PRIVATE DEFINES                                                >>>>>>
 //<<<<<< PRIVATE CONSTANTS                                              >>>>>>
@@ -14,6 +16,22 @@
 //<<<<<< PUBLIC VARIABLE DEFINITIONS                                    >>>>>>
 //<<<<<< CLASS STRUCTURE INITIALIZATION                                 >>>>>>
 //<<<<<< PRIVATE FUNCTION DEFINITIONS                                   >>>>>>
+
+static int igopen (const char *fn, int flags, int mode);
+static int igopen64 (const char *fn, int flags, int mode);
+static int igclose (int fd);
+static int igdup (int fd);
+static int igdup2 (int fd, int newfd);
+static int igsocket (int domain, int type, int proto);
+static int igaccept (int fd, struct sockaddr *addr, socklen_t *len);
+
+IGPROF_HOOK (int (const char *, int, int),	open,		igopen);
+IGPROF_HOOK (int (const char *, int, int),	__open64,	igopen64);
+IGPROF_HOOK (int (int),				close,		igclose);
+IGPROF_HOOK (int (int),				dup,		igdup);
+IGPROF_HOOK (int (int, int),			dup2,		igdup2);
+IGPROF_HOOK (int (int, int, int),		socket,		igsocket);
+IGPROF_HOOK (int (int, sockaddr *,socklen_t *),	accept,		igaccept);
 
 static IgHookTrace::Counter	s_ct_used	= { "FD_USED" };
 static IgHookTrace::Counter	s_ct_live	= { "FD_LIVE" };
@@ -52,13 +70,16 @@ remove (int fd)
     if (s_count_leaks)
     {
 	IgHookLiveMap::Iterator	info = s_live->find (fd);
-	IGPROF_ASSERT (info != s_live->end ());
+	if (info == s_live->end ())
+	    // Unknown to us, probably allocated before we started.
+	    // IGPROF_ASSERT (info != s_live->end ());
+	    return;
 
 	IgHookTrace	*node = info->second.first;
 	size_t		size = info->second.second;
 
-	IGPROF_ASSERT (node->counter (&s_ct_live)->value () >= size);
-	node->counter (&s_ct_live)->sub (size);
+	IGPROF_ASSERT (node->counter (&s_ct_live)->value () >= 1);
+	node->counter (&s_ct_live)->untick ();
 
 	s_live->remove (info);
     }
@@ -134,7 +155,13 @@ IgProfFileDesc::initialize (void)
         if (s_count_leaks)
 	    s_live = IgProf::liveMap ("File Descriptor Leaks");
 
-        // IgHook::hook (igmalloc_hook.raw);
+        IgHook::hook (igopen_hook.raw);
+        IgHook::hook (igopen64_hook.raw);
+        IgHook::hook (igclose_hook.raw);
+        IgHook::hook (igdup_hook.raw);
+        IgHook::hook (igdup2_hook.raw);
+        IgHook::hook (igsocket_hook.raw);
+        IgHook::hook (igaccept_hook.raw);
         IgProf::debug ("File descriptor profiler enabled\n");
         IgProf::onactivate (&IgProfFileDesc::enable);
         IgProf::ondeactivate (&IgProfFileDesc::disable);
@@ -149,5 +176,106 @@ IgProfFileDesc::enable (void)
 void
 IgProfFileDesc::disable (void)
 { s_enabled--; }
+
+static int
+igopen (const char *fn, int flags, int mode)
+{
+    IGPROF_TRACE (("(%d igopen %s %d %d\n", s_enabled, fn, flags, mode));
+    IgProfLock lock (s_enabled);
+    int result = (*igopen_hook.typed.chain) (fn, flags, mode);
+
+    if (lock.enabled () > 0 && result != -1)
+	add (result);
+
+    IGPROF_TRACE ((" -> %d)\n", result));
+    return result;
+}
+
+static int
+igopen64 (const char *fn, int flags, int mode)
+{
+    IGPROF_TRACE (("(%d igopen64 %s %d %d\n", s_enabled, fn, flags, mode));
+    IgProfLock lock (s_enabled);
+    int result = (*igopen64_hook.typed.chain) (fn, flags, mode);
+
+    if (lock.enabled () > 0 && result != -1)
+	add (result);
+
+    IGPROF_TRACE ((" -> %d)\n", result));
+    return result;
+}
+
+static int
+igclose (int fd)
+{
+    IGPROF_TRACE (("(%d igclose %d\n", s_enabled, fd));
+    IgProfLock lock (s_enabled);
+    int result = (*igclose_hook.typed.chain) (fd);
+
+    if (lock.enabled () > 0 && result != -1)
+	remove (fd);
+
+    IGPROF_TRACE ((" -> %d)\n", result));
+    return result;
+}
+
+static int
+igdup (int fd)
+{
+    IGPROF_TRACE (("(%d igdup %d\n", s_enabled, fd));
+    IgProfLock lock (s_enabled);
+    int result = (*igdup_hook.typed.chain) (fd);
+
+    if (lock.enabled () > 0 && result != -1)
+	add (result);
+
+    IGPROF_TRACE ((" -> %d)\n", result));
+    return result;
+}
+
+static int
+igdup2 (int fd, int newfd)
+{
+    IGPROF_TRACE (("(%d igdup2 %d %d\n", s_enabled, fd, newfd));
+    IgProfLock lock (s_enabled);
+    int result = (*igdup2_hook.typed.chain) (fd, newfd);
+
+    if (lock.enabled () > 0 && result != -1)
+    {
+	remove (newfd);
+	add (newfd);
+    }
+
+    IGPROF_TRACE ((" -> %d)\n", result));
+    return result;
+}
+
+static int
+igsocket (int domain, int type, int proto)
+{
+    IGPROF_TRACE (("(%d igsocket %d %d %d\n", s_enabled, domain, type, proto));
+    IgProfLock lock (s_enabled);
+    int result = (*igsocket_hook.typed.chain) (domain, type, proto);
+
+    if (lock.enabled () > 0 && result != -1)
+	add (result);
+
+    IGPROF_TRACE ((" -> %d)\n", result));
+    return result;
+}
+
+static int
+igaccept (int fd, struct sockaddr *addr, socklen_t *len)
+{
+    IGPROF_TRACE (("(%d igaccept %d %d\n", s_enabled, fd, how));
+    IgProfLock lock (s_enabled);
+    int result = (*igaccept_hook.typed.chain) (fd, addr, len);
+
+    if (lock.enabled () > 0 && result != -1)
+	add (result);
+
+    IGPROF_TRACE ((" -> %d)\n", result));
+    return result;
+}
 
 static bool autoboot = (IgProfFileDesc::initialize (), true);
