@@ -2,69 +2,52 @@
 # Collect up args for igprof.
 
 usage() {
-  echo -e "--help                \tthis help message"
-  echo 
-  echo -e "Options for profiling"
-  echo -e "--mode profile        \tforce profile mode"
-  echo -e "--memory-profiler     \tstart the memory profiler"
-  echo -e "--performance-profiler\tstart the performance profile"
-  echo -e "--file-descriptor     \tstart the file descriptor profile"
-  echo -e "--check-leaks         \tenable leak tracking"
-  echo -e "cmd [args...]         \tcommand arguments to execute"
+  echo "igprof [options] program [options]"
   echo
-  echo -e "Options for analysis"
-  echo -e "--mode analyse        \tforce analysis mode"
-  echo -e "--report C1[,C2...]   \treport counters C1, C2, ..."
-  echo -e "--sort C1[,C2...]     \tsort by counters C1, C2, ..."
-  echo -e "--order ORDER         \torder 'ascending' or 'descending'"
-  echo -e "--filter FILE         \tsuppress symbols mentioned in FILE"
-  echo -e "--no-filtering        \tdon't suppress default symbols"
-  echo -e "file [...]            \tfiles to analyse"
+  echo "Options to igprof:"
+  echo -e "-h, --help                 \tthis help message"
+  echo -e "-d, --debug                \tenable more details from profiler"
+  echo -e "-f, --full                 \tstart all the profilers"
+  echo -e "-mp, --memory-profiler     \tstart the memory profiler"
+  echo -e "-pp, --performance-profiler\tstart the performance profile (default)"
+  echo -e "-pr, --real-time           \tmeasure real time in performance profiler"
+  echo -e "-pu, --user-time           \tmeasure user time in performance profiler"
+  echo -e "-fd, --file-descriptor     \tstart the file descriptor profile"
+  echo -e "-cl, --check-leaks         \tenable leak tracking in activated profilers"
+  echo -e "[--] cmd [args...]         \tcommand arguments to execute"
 }
 
 append() { eval "if [ -z \"\$$1\" ]; then $1=\"\$2\"; else $1=\"\$$1 \$2\"; fi"; }
 
-SORT= MEM= FD= PERF= ALL= MODE=profile
+SORT= MEM= FD= PERF= ALL=
 while [ "$#" != 0 ]; do
   case "$1" in
-    --help | -h )
+    -h | --help )
       usage; exit 1;;
 
-    --debug )
+    -d | --debug )
       IGPROF_DEBUGGING=1; export IGPROF_DEBUGGING; shift ;;
 
-    --mode )
-      MODE="$2"; shift; shift ;;
+    -f | --full )
+      MEM="mem" FD="fd" PERF="perf" ALL=":all"; shift ;;
 
-    --full )
-      MEM="mem" FD="fd" PERF="perf" ALL=":all" MODE=profile; shift ;;
-
-    --memory-profiler | --memory | -m | -mp )
+    -mp | --memory-profiler )
       [ -z "$MEM" ] && MEM=mem
-      MEM="$MEM:total:largest:live" MODE=profile; shift;;
+      MEM="$MEM:total:largest:live"; shift;;
 
-    --file-descriptor | --fd | -f | -fd )
+    -fd | --file-descriptor )
       [ -z "$FD" ] && FD=fd
-      FD="$FD:used:live" MODE=profile; shift ;;
+      FD="$FD:used:live"; shift ;;
 
-    --check-leaks | --leaks | -l | -cl )
-      ALL="$ALL:leaks" MODE=profile; shift ;;
+    -pp | --performance-profiler )
+      PERF="perf"; shift ;;
+    -pr | --real-time )
+      [ -z "$PERF" ] && PERF="perf"; PERF="$PERF:real"; shift ;;
+    -pu | --user-time )
+      [ -z "$PERF" ] && PERF="perf"; PERF="$PERF:user"; shift ;;
 
-    --performance-profiler | --performance | -p | -pp )
-      PERF="perf" MODE=profile; shift ;;
-
-    --analyse )
-      MODE=report ;;
-    --report | -R )
-      SORT="$SORT --report $2"; MODE=report; shift; shift ;;
-    --sort | -s )
-      SORT="$SORT --sort $2"; MODE=report; shift; shift ;;
-    --order )
-      SORT="$SORT --order $2"; shift; shift ;;
-    --filter )
-      SORT="$SORT --filter $2"; shift; shift ;;
-    --no-filtering )
-      SORT="$SORT --no-filter"; shift ;;
+    -cl | --check-leaks )
+      ALL="$ALL:leaks"; shift ;;
 
     -- )
       shift; break ;;
@@ -79,9 +62,7 @@ while [ "$#" != 0 ]; do
   esac
 done
 
-if [ MODE=profile -a X"$MEM" = X -a X"$FD" = X -a X"$PERF" = X ]; then
-  PERF=perf
-fi
+[ X"$MEM" = X -a X"$FD" = X -a X"$PERF" = X ] && PERF=perf
 
 if [ -z "$ALL" ]; then :; else
   [ -z "$MEM"  ] || MEM="$MEM:all"
@@ -89,24 +70,18 @@ if [ -z "$ALL" ]; then :; else
   [ -z "$PERF" ] || PERF="$PERF:all"
 fi
 
-if [ X$MODE = Xprofile ]; then
+[ X"$MEM" = X ]  || append IGPROF "$MEM"
+[ X"$FD" = X ]   || append IGPROF "$FD"
+[ X"$PERF" = X ] || append IGPROF "$PERF"
 
-  [ X"$MEM" = X ]  || append IGPROF "$MEM"
-  [ X"$FD" = X ]   || append IGPROF "$FD"
-  [ X"$PERF" = X ] || append IGPROF "$PERF"
-
-  case $(uname) in
-    Darwin )
-      DYLD_BIND_AT_LAUNCH=1
-      DYLD_INSERT_LIBRARIES=$LOCALRT/lib/`scram arch`/libIgProf.dylib;
-      export DYLD_BIND_AT_LAUNCH DYLD_INSERT_LIBRARIES ;;
-    * )
-      LD_PRELOAD=libIgProf.so;
-      export LD_PRELOAD ;;
-  esac
-  export IGPROF
-  exec "$@"
-
-else
-  igprof-analyse $SORT ${1+"$@"}
-fi
+case $(uname) in
+  Darwin )
+    DYLD_BIND_AT_LAUNCH=1
+    DYLD_INSERT_LIBRARIES=$LOCALRT/lib/`scram arch`/libIgProf.dylib
+    export DYLD_BIND_AT_LAUNCH DYLD_INSERT_LIBRARIES ;;
+  * )
+    LD_PRELOAD=libIgProf.so;
+    export LD_PRELOAD ;;
+esac
+export IGPROF
+exec "$@"

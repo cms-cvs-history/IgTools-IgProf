@@ -1,5 +1,9 @@
 2004-06-04  Lassi A. Tuura  <lat@iki.fi>
 
+	* igprof: Only support profiling.  Clean up option handling and
+	document all available options; remove option shortcuts.  Support
+	performance profiler options to select timer.
+
 	* IgProfPerf.cc: Support real, user and process time profiling.
 	Select the timer and signal to use based on this choice.
 
