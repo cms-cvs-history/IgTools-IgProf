@@ -1,3 +1,11 @@
+2004-04-16  Giulio Eulisse  <giulio.eulisse@cern.ch>
+
+	* IgSProfTimerHooks.cc, IgSProfPThreadCreateHooks.cc: using thread
+	as argument name in place of __thread as the latter is a keyword
+	with more recent versions of glibc.
+	Fixed the __THROW statement in pthread_join () as the prototype
+	has changed in more recent versions of glibc.
+
 2004-03-15  Giulio Eulisse  <giulio.eulisse@cern.ch>
 
 	* IgSProfTimerHooks.cc: more robust support for multithreading.

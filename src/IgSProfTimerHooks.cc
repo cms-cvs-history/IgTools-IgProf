@@ -130,10 +130,10 @@ __sprof_magic_workerThread (void *)
     return 0;    
 }
 
-typedef int (*pthread_create_ptr) (void * __thread,
-				   const void * __attr,
-				   void *(*__start_routine) (void *),
-				   void * __arg);
+typedef int (*pthread_create_ptr) (void * thread,
+				   const void * attr,
+				   void *(*start_routine) (void *),
+				   void * arg);
 
 void
 IGUANA_sprof_initialize_hook (void)

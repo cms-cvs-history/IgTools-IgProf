@@ -27,10 +27,10 @@ extern "C"
     unsigned int __igprof_magic_threadArray[1024];    
     bool	 __igprof_magic_inPthreadLock = false;    
     
-    typedef int (*pthread_create_ptr) (void * __thread,
-				       const void * __attr,
-				       void *(*__start_routine) (void *),
-				       void * __arg);
+    typedef int (*pthread_create_ptr) (void * thread,
+				       const void * attr,
+				       void *(*start_routine) (void *),
+				       void * arg);
 
     typedef int (*pthread_sigmask_ptr) (int how, 
 				    const sigset_t *newmask, 
@@ -79,10 +79,11 @@ extern "C"
 	return startRoutine(args->arg);		
     }
     
-    int pthread_create (pthread_t * __thread,
-			const pthread_attr_t * __attr,
-			void *(*__start_routine) (void *),
-			void * __arg) __THROW
+    int pthread_create (pthread_t * thread,
+			const pthread_attr_t * attr,
+			void *(*start_routine) (void *),
+			void * arg) __THROW
+
     {
 	static pthread_create_ptr realPthreadCreate = 0;
 	fprintf (stderr, "pthread_create_called\n");
@@ -95,11 +96,11 @@ extern "C"
 	}
 	
 	HandlerArgs args;
-	args.startRoutine = __start_routine;
-	args.arg = __arg;
+	args.startRoutine = start_routine;
+	args.arg = arg;
    
-	return realPthreadCreate (__thread,
-				  __attr,
+	return realPthreadCreate (thread,
+				  attr,
 				  (PthreadHandlerRoutine) __igprof_magic_wrapperRoutine, 
 				  (void *) &args);	
     }
@@ -211,7 +212,14 @@ extern "C"
 	return result;	
     }
     
-    int pthread_join(pthread_t th, void **thread_return) __THROW
+    int pthread_join(pthread_t th, void **thread_return)
+// FIXME: hack to cope with different thorwing model of pthreads
+// functions in glibc2.3
+#if __GLIBC__ == 2
+# if __GLIBC_MINOR__ == 2
+ __THROW
+# endif
+#endif
     {
 	fprintf (stderr, "pthread_join called\n");
 	fflush (stderr);
@@ -226,4 +234,3 @@ extern "C"
 	return result;	
     }
 }
-
