@@ -1,5 +1,7 @@
 2004-05-07  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProf.cc (dumpTrace): Dump node address so leaks can be matched.
+
 	* Preliminary version rewritten using IgHook.
 
 2004-04-16  Giulio Eulisse  <giulio.eulisse@cern.ch>

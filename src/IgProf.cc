@@ -142,7 +142,7 @@ dumpTrace (FILE *output, IgHookTrace *node, int depth)
 	int		offset;
 	bool		nonheap = node->symbol (sym, lib, offset);
 
-	fprintf (output, "T[%p+%d %s (%s)]:", node->address (), offset, sym, lib);
+	fprintf (output, "T[%p %p+%d %s (%s)]:", (void *) node, node->address (), offset, sym, lib);
 	for (IgHookTrace::CounterValue *val = node->counters (); val; val = val->next ())
 	    fprintf (output, " C(%s,%lu)", val->counter ()->m_name, val->value ());
 	fputc ('\n', output);
