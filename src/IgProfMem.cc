@@ -81,7 +81,7 @@ add (void *ptr, size_t size)
     // Increment counters for this node
     if (s_count_total)   node->counter (&s_ct_total)->add (size);
     if (s_count_largest) node->counter (&s_ct_largest)->max (size);
-    if (s_count_live)    node->counter (&s_ct_live)->max (size);
+    if (s_count_live)    node->counter (&s_ct_live)->add (size);
     if (s_count_leaks)
     {
 	IGPROF_ASSERT (s_live->find ((unsigned long) ptr) == s_live->end ());

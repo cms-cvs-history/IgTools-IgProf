@@ -1,5 +1,7 @@
 2004-05-14  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProfMem.cc (add): Live counter is cumulative, not maxed.
+
 	* IgProf.cc, IgProfMem.cc, IgProfFileDesc.cc: Trap all functions
 	twice, once for main program and another time for executable, as
 	we used to do for "exit()".  Required for some binaries.  To be
