@@ -4,7 +4,7 @@ BEGIN { use strict; $^W = 1; }
 
 my $output = "text";
 my $demangle = 0;
-my $gdb = 1;
+my $gdb = 0;
 my $showlibs = 0;
 my @keys;
 my @allkeys;
@@ -25,11 +25,11 @@ sub symname
     my ($sym, $lib, $liboffset) = @_;
     if (! exists $demangled{$sym}) {
 	my $new = $sym;
-	if ($gdb)
+	if ($gdb && $lib)
 	{
 	    # use gdb to figure out real symbol
 	    my $file = "/tmp/igprof-analyse.$$";
-	    open (TMP, " > $file") || die;
+	    open (TMP, "> $file") || die;
 	    print TMP "file $lib\n";
 	    print TMP "info line *$liboffset\n";
 	    close (TMP) || die;
@@ -37,9 +37,9 @@ sub symname
 	    open (GDB, "gdb --batch --command=$file |") || die;
 	    while (<GDB>)
 	    {
-		if (/^Line .* starts at .* <(.*)(\+\d+)> and /) {
+		if (/starts at .* <([A-Za-z0-9_]+)(\+\d+)?>/) {
 		    $new = $1; last;
-		} elsif (/^No line number .* <(.*)(\+\d+)>/) {
+		} elsif (/^No line number .* <([A-Za-z0-9_]+)(\+\d+)?>/) {
 		    $new = $1; last;
 	        }
 	    }
@@ -70,12 +70,19 @@ sub readDump
     while (<DUMP>)
     {
         chomp;
-	if (m|<sym addr="(.*)" offset="(.*)" name="(.*)" lib="(.*)"( liboff="(.*)")?/>|)
+	if (m|<sym addr="(.*)" offset="(.*)" name="(.*)" lib="(.*)" liboff="(.*)"/>|)
 	{
 	    $syms->{$1}{OFFSET} = $2;
 	    $syms->{$1}{NAME} = $3;
 	    $syms->{$1}{LIB} = $4;
-	    $syms->{$1}{LIBOFF} = ($6 || 0);
+	    $syms->{$1}{LIBOFF} = $5;
+	}
+	elsif (m|<sym addr="(.*)" offset="(.*)" name="(.*)" lib="(.*)"/>|)
+	{
+	    $syms->{$1}{OFFSET} = $2;
+	    $syms->{$1}{NAME} = $3;
+	    $syms->{$1}{LIB} = $4;
+	    $syms->{$1}{LIBOFF} = 0;
 	}
 	elsif (/(\s+)<node id="([^"]*)" symaddr="([^"]*)">/)
 	{

@@ -1,5 +1,9 @@
 2004-06-15  Lassi A. Tuura  <lat@iki.fi>
 
+	* scripts/igprof-analyse: Don't make GDB resolution the default.
+	Only do GDB resolution if the library name is non-null.  Improve
+	recognition of GDB output.  Fix input file parsing.
+
 	* IgProf.cc (panic, dumpSymbols): Also print out library offset.
 	* scripts/igprof-analyse: Handle new library offset for symbols.
 	Optionally remap symbols with gdb to real (possibly private)
