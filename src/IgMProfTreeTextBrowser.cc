@@ -131,20 +131,20 @@ IgMProfTreeTextBrowser::dumpFlatProfile (void)
 		= caller->m_children.find (*i);
 
 	    m_flatout << ""
-		      << "\t" << std::setw(12) << std::setfill(' ') << caller->m_allocs
-		      << "\t" << std::setw(12) << std::setfill(' ') << thiscall->second.second
+		      << "\t" << std::setw (15) << std::setfill (' ') << caller->m_allocs
+		      << "\t" << std::setw (15) << std::setfill (' ') << thiscall->second.second
 		      << "\t" << thiscall->second.first
 		      << "/" << n->m_calls
-		      << "\t  " << caller->m_symname
+		      << "\t\t  " << caller->m_symname
 		      << " (" << caller->m_libname
 		      << ") [" << (std::find (order.begin (), order.end (), *c) - order.begin ()) << "]\n";
 	}
 	// Dump info on this item
 	m_flatout << "[" << (i - order.begin ()) << "]"
-		  << "\t" << std::setw(12) << std::setfill(' ') << n->m_allocs
-		  << "\t" << std::setw(12) << std::setfill(' ') << (long long) (n->m_allocs-n->m_childrenAllocs)
+		  << "\t" << std::setw (15) << std::setfill (' ') << n->m_allocs
+		  << "\t" << std::setw (15) << std::setfill (' ') << (long long) (n->m_allocs-n->m_childrenAllocs)
 		  << "\t" << n->m_calls
-		  << "\t" << n->m_symname
+		  << "\t\t" << n->m_symname
 		  << " (" << n->m_libname << ")\n";
 		
 	// Dump children
@@ -152,11 +152,11 @@ IgMProfTreeTextBrowser::dumpFlatProfile (void)
 	{
 	    IgMProfFlatNode *callee = m_flat [c->first];
 	    m_flatout << ""
-		      << "\t" << std::setw(12) << std::setfill(' ') << callee->m_allocs
-		      << "\t" << std::setw(12) << std::setfill(' ') << c->second.second
+		      << "\t" << std::setw (15) << std::setfill (' ') << callee->m_allocs
+		      << "\t" << std::setw (15) << std::setfill (' ') << c->second.second
 		      << "\t" << c->second.first
 		      << "/" << callee->m_calls
-		      << "\t  " << callee->m_symname
+		      << "\t\t  " << callee->m_symname
 		      << " (" << callee->m_libname
 		      << ") [" << (std::find (order.begin (), order.end (), c->first) - order.begin ()) << "]\n";
 	}
@@ -166,6 +166,11 @@ IgMProfTreeTextBrowser::dumpFlatProfile (void)
 void
 IgMProfTreeTextBrowser::dump(void)
 {	    
+    std::ostringstream converter;
+    converter << getpid ();
+    m_treeFilename = m_filename+converter.str () + ".tree";
+    m_flatFilename = m_filename+converter.str () + ".flat";
+
     m_flat [0] = new IgMProfFlatNode ("<system>", "<spontaneous>");
 
     if(IgMProfConfigurationSingleton::instance()->m_treeOutput)

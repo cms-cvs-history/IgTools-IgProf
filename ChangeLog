@@ -1,3 +1,13 @@
+2004-02-03  Giulio Eulisse  <giulio.eulisse@cern.ch>
+
+	* test/BuildFile, test_forking.cc: added test for multithreading support.
+
+	* IgMProfTreeTextBrowser.cc (dump): name is generated on dump() to
+	avoid problems with multiple threads.
+	(dumpFlatProfile): hopefully, nicer layout with big numbers...
+
+	* IgSProfTimerHooks.cc: added multithread support.
+
 2003-11-17  Giulio Eulisse  <giulio.eulisse@cern.ch>
 
 	* IgMProfAllocation.h (struct IgMProfAllocation): this structure

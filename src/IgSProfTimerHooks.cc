@@ -7,6 +7,7 @@
 #include <sys/param.h>
 #include <iostream>
 #include <signal.h>
+#include <pthread.h>
 
 //<<<<<< PRIVATE DEFINES                                                >>>>>>
 //<<<<<< PRIVATE CONSTANTS                                              >>>>>>
@@ -39,14 +40,34 @@ IGUANA_sprof_dispose_hook (void)
     setitimer(ITIMER_PROF, &timings, 0);    
 }
 
+void
+IGUANA_sprof_atfork_child (void)
+{
+    // This function is called each time a program forks (either
+    // because of a pthread_create or of a real fork().  This allows
+    // to get information for multithreaded programs as well besides
+    // the main thread.
 
-/*FIXME: multithreading under linux will give wrong results.
- */
+    // FIXME: this is VERY specific to threads/fork implementation
+    // found in certain version of linux...I doubt seriously it will
+    // work on something != 2.4...
+
+    signal (SIGPROF,(sighandler_t) IGUANA_sprof_sigprof_hook);
+    struct itimerval timings;
+    timings.it_interval.tv_sec = 0;
+    timings.it_interval.tv_usec = 1000;
+    timings.it_value.tv_sec = 0;
+    timings.it_value.tv_usec = 1000;
+        
+    setitimer(ITIMER_PROF, &timings, 0);    
+}
+
+
 void
 IGUANA_sprof_initialize_hook (void)
 {
     std::cerr << "Starting profiler" << std::endl;
-    
+    pthread_atfork (0, 0, IGUANA_sprof_atfork_child);    
     signal (SIGPROF,(sighandler_t) IGUANA_sprof_sigprof_hook );    
     struct itimerval timings;
     timings.it_interval.tv_sec = 0;
