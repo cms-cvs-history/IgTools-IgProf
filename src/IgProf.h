@@ -27,16 +27,45 @@ public:
     static const char *		options (void);
     static IgHookTrace *	root (void);
     static IgHookLiveMap *	liveMap (const char *label);
-    static void			dump (void);
 
     static void			initialize (void);
+    static void			dump (void);
+
+    static void			onactivate (void (*func) (void));
+    static void			ondeactivate (void (*func) (void));
+
+    static void			activate (void);
+    static void			deactivate (void);
+
+private:
+    friend class IgProfLock;
+    static void			lock (void);
+    static void			unlock (void);
+
     static void			enable (void);
     static void			disable (void);
-    static void			onexit (void (*func) (void));
-    static void			runexit (void);
+};
+
+class IgProfLock
+{
+public:
+    IgProfLock (int &enabled);
+    ~IgProfLock (void);
+
+    int		enabled (void);
+
+private:
+    IgProfLock (const IgProfLock &);
+    IgProfLock &operator= (const IgProfLock &);
+
+    int		m_enabled;
 };
 
 //<<<<<< INLINE PUBLIC FUNCTIONS                                        >>>>>>
 //<<<<<< INLINE MEMBER FUNCTIONS                                        >>>>>>
+
+inline int
+IgProfLock::enabled (void)
+{ return m_enabled; }
 
 #endif // IG_PROF_IG_PROF_H

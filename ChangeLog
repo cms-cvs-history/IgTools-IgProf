@@ -1,3 +1,15 @@
+2004-05-10  Lassi A. Tuura  <lat@iki.fi>
+
+	* IgProf.h, IgProf.cc: Clean up internal static variable usage.
+	Provide clean means to lock and unlock profiler core and activate
+	or deactivate all enabled modules.  Use the facility in hooked
+	functions.  Dump output in XML.  Dump symbol table separately
+	from the trace.
+	* IgProfFileDesc.cc: Use new profiler locking/activation scheme.
+	* IgProfPerf.cc: Use new profiler locking/activation scheme.
+	* IgProfMem.cc: Use new profiler locking/activation scheme.
+	Automatically enable live counting if leak checking is turned on.
+
 2004-05-07  Lassi A. Tuura  <lat@iki.fi>
 
 	* IgProf.cc (dumpTrace): Dump node address so leaks can be matched.

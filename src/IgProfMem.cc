@@ -165,7 +165,8 @@ IgProfMem::initialize (void)
 		}
 		else if (! strncmp (options, ":leaks", 6))
 		{
-		    IgProf::debug ("Memory: enabling leak table\n");
+		    IgProf::debug ("Memory: enabling leak table and live counting\n");
+		    s_count_live = 1;
 		    s_count_leaks = 1;
 		    options += 6;
 		    opts = true;
@@ -209,8 +210,9 @@ IgProfMem::initialize (void)
         IgHook::hook (igvalloc_hook.raw);
         IgHook::hook (igfree_hook.raw);
         IgProf::debug ("Memory profiler enabled\n");
-	IgProf::onexit (&IgProfMem::disable);
-        IgProfMem::enable ();
+	IgProf::onactivate (&IgProfMem::enable);
+	IgProf::ondeactivate (&IgProfMem::disable);
+	IgProfMem::enable ();
     }
 }
 
@@ -224,88 +226,80 @@ IgProfMem::disable (void)
 
 void *igmalloc (size_t n)
 {
-    int enabled = s_enabled; s_enabled = 0;
+    IgProfLock lock (s_enabled);
     void *result = (*igmalloc_hook.typed.chain) (n);
 
-    if (enabled > 0 && result)
+    if (lock.enabled () > 0 && result)
 	add (result, n);
 
-    s_enabled = enabled;
     return result;
 }
 
 void *igcalloc (size_t n, size_t m)
 {
-    int enabled = s_enabled; s_enabled = 0;
+    IgProfLock lock (s_enabled);
     void *result = (*igcalloc_hook.typed.chain) (n, m);
 
-    if (enabled > 0 && result)
+    if (lock.enabled () > 0 && result)
 	add (result, n * m);
 
-    s_enabled = enabled;
     return result;
 }
 
 void *igrealloc (void *ptr, size_t n)
 {
-    int enabled = s_enabled; s_enabled = 0;
+    IgProfLock lock (s_enabled);
     void *result = (*igrealloc_hook.typed.chain) (ptr, n);
 
-    if (enabled > 0 && result)
+    if (lock.enabled () > 0 && result)
     {
 	remove (ptr);
 	add (result, n);
     }
 
-    s_enabled = enabled;
     return result;
 }
 
 void *igmemalign (size_t alignment, size_t size)
 {
-    int enabled = s_enabled; s_enabled = 0;
+    IgProfLock lock (s_enabled);
     void *result = (*igmemalign_hook.typed.chain) (alignment, size);
 
-    if (enabled > 0 && result)
+    if (lock.enabled () > 0 && result)
 	add (result, size);
 
-    s_enabled = enabled;
     return result;
 }
 
 void *igvalloc (size_t size)
 {
-    int enabled = s_enabled; s_enabled = 0;
+    IgProfLock lock (s_enabled);
     void *result = (*igvalloc_hook.typed.chain) (size);
 
-    if (enabled > 0 && result)
+    if (lock.enabled () > 0 && result)
 	add (result, size);
 
-    s_enabled = enabled;
     return result;
 }
 
 int igpmemalign (void **ptr, size_t alignment, size_t size)
 {
-    int enabled = s_enabled; s_enabled = 0;
+    IgProfLock lock (s_enabled);
     int result = (*igpmemalign_hook.typed.chain) (ptr, alignment, size);
 
-    if (enabled > 0 && ptr && *ptr)
+    if (lock.enabled () > 0 && ptr && *ptr)
 	add (*ptr, size);
 
-    s_enabled = enabled;
     return result;
 }
 
 void igfree (void *ptr)
 {
-    int enabled = s_enabled; s_enabled = 0;
+    IgProfLock lock (s_enabled);
     (*igfree_hook.typed.chain) (ptr);
 
-    if (enabled > 0)
+    if (lock.enabled () > 0)
 	remove (ptr);
-
-    s_enabled = enabled;
 }
 
 static bool autoboot = (IgProfMem::initialize (), true);

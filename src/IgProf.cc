@@ -13,12 +13,18 @@
 #include <cerrno>
 #include <list>
 #include <map>
+#include <set>
 #include <unistd.h>
 #include <sys/signal.h>
+#include <pthread.h>
 
 //<<<<<< PRIVATE DEFINES                                                >>>>>>
 //<<<<<< PRIVATE CONSTANTS                                              >>>>>>
 //<<<<<< PRIVATE TYPES                                                  >>>>>>
+
+typedef std::map<const char *, IgHookLiveMap *> LiveMaps;
+typedef std::list<void (*) (void)>		ActivationList;
+
 //<<<<<< PRIVATE VARIABLE DEFINITIONS                                   >>>>>>
 //<<<<<< PUBLIC VARIABLE DEFINITIONS                                    >>>>>>
 //<<<<<< CLASS STRUCTURE INITIALIZATION                                 >>>>>>
@@ -32,20 +38,24 @@ IGPROF_HOOK (void (int), exit, igexit);
 IGPROF_HOOK (void (int), _exit, ig_exit);
 IGPROF_HOOK (int (pid_t, int), kill, igkill);
 
-static int					s_enabled	= 0;
-static bool					s_initialized	= false;
+static int		s_enabled	= 0;
+static bool		s_initialized	= false;
+static pthread_mutex_t	s_lock		= PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 
-static std::map<const char *,IgHookLiveMap *> &
-livemaps (void)
-{ static std::map<const char *, IgHookLiveMap *> s_livemaps; return s_livemaps; }
-
-static std::list<void (*) (void)> &
-exitlist (void)
-{ static std::list<void (*) (void)> s_exitlist; return s_exitlist; }
+static LiveMaps &livemaps (void) { static LiveMaps s; return s; }
+static ActivationList &activations (void) { static ActivationList s; return s; }
+static ActivationList &deactivations (void) { static ActivationList s; return s; }
 
 //<<<<<< PUBLIC FUNCTION DEFINITIONS                                    >>>>>>
 //<<<<<< MEMBER FUNCTION DEFINITIONS                                    >>>>>>
 
+IgProfLock::IgProfLock (int &enabled)
+{ IgProf::lock (); m_enabled = enabled; IgProf::deactivate (); }
+
+IgProfLock::~IgProfLock (void)
+{ IgProf::activate (); IgProf::unlock (); }
+
+//////////////////////////////////////////////////////////////////////
 void
 IgProf::initialize (void)
 {
@@ -56,8 +66,18 @@ IgProf::initialize (void)
     IgHook::hook (igexit_hook.raw);
     IgHook::hook (ig_exit_hook.raw);
     IgHook::hook (igkill_hook.raw);
+    IgProf::onactivate (&IgProf::enable);
+    IgProf::ondeactivate (&IgProf::disable);
     IgProf::enable ();
 }
+
+void
+IgProf::lock (void)
+{ pthread_mutex_lock (&s_lock); }
+
+void
+IgProf::unlock (void)
+{ pthread_mutex_unlock (&s_lock); }
 
 void
 IgProf::enable (void)
@@ -68,22 +88,37 @@ IgProf::disable (void)
 { s_enabled--; }
 
 void
-IgProf::onexit (void (*func) (void))
-{ exitlist ().push_back (func); }
+IgProf::onactivate (void (*func) (void))
+{ activations ().push_back (func); }
 
 void
-IgProf::runexit (void)
+IgProf::ondeactivate (void (*func) (void))
+{ deactivations ().push_back (func); }
+
+void
+IgProf::activate (void)
 {
-    if (s_enabled <= 0)
+    if (! s_initialized)
 	return;
 
-    std::list<void (*) (void)> &l = exitlist ();
-    std::list<void (*) (void)>::iterator i = l.begin ();
-    std::list<void (*) (void)>::iterator end = l.end ();
-    for (; i != end; ++i)
+    ActivationList		&l = activations ();
+    ActivationList::iterator	i = l.begin ();
+    ActivationList::iterator	end = l.end ();
+    for ( ; i != end; ++i)
 	(*i) ();
+}
 
-    IgProf::disable ();
+void
+IgProf::deactivate (void)
+{
+    if (! s_initialized)
+	return;
+
+    ActivationList		&l = deactivations ();
+    ActivationList::iterator	i = l.begin ();
+    ActivationList::iterator	end = l.end ();
+    for ( ; i != end; ++i)
+	(*i) ();
 }
 
 const char *
@@ -128,41 +163,53 @@ IgProf::debug (const char *format, ...)
 }
 
 static void
-dumpTrace (FILE *output, IgHookTrace *node, int depth)
+dumpSymbols (FILE *output, IgHookTrace *node, std::set<void *> &addresses)
 {
-    if (depth == 0)
-	fprintf (output, "Trace\n");
-    else
+    if (node->address () && ! addresses.count (node->address ()))
     { 
-	for (int i = 0; i < depth; ++i)
-	    fputc (' ', output);
-
 	const char	*sym;
 	const char	*lib;
 	int		offset;
 	bool		nonheap = node->symbol (sym, lib, offset);
 
-	fprintf (output, "T[%p %p+%d %s (%s)]:", (void *) node, node->address (), offset, sym, lib);
-	for (IgHookTrace::CounterValue *val = node->counters (); val; val = val->next ())
-	    fprintf (output, " C(%s,%lu)", val->counter ()->m_name, val->value ());
-	fputc ('\n', output);
+	// FIXME: url quote lib name!
+	fprintf (output, "  <sym addr=\"%p\" offset=\"%d\" name=\"%s\" lib=\"%s\"/>\n",
+		 node->address (), offset, sym ? sym : "", lib ? lib : "");
 
 	if (! nonheap) delete [] sym;
+
+	addresses.insert (node->address ());
+    }
+
+    for (IgHookTrace *kid = node->children (); kid; kid = kid->next ())
+	dumpSymbols (output, kid, addresses);
+}
+
+static void
+dumpTrace (FILE *output, IgHookTrace *node, int depth)
+{
+    if (depth > 0)
+    { 
+	for (int i = 0; i <= depth; ++i)
+	    fputc (' ', output);
+
+	fprintf (output, "<node id=\"%p\" symaddr=\"%p\">", (void *) node, node->address ());
+	for (IgHookTrace::CounterValue *val = node->counters (); val; val = val->next ())
+	    fprintf (output, "<counter name=\"%s\" value=\"%lu\"/>",
+		     val->counter ()->m_name, val->value ());
+	fputc ('\n', output);
     }
 
     for (IgHookTrace *kid = node->children (); kid; kid = kid->next ())
 	dumpTrace (output, kid, depth+1);
-}
 
-static void
-dumpLiveMap (FILE *output, const char *label, IgHookLiveMap *live)
-{
-    fprintf (output, "\nLiveMap %s (%d)\n", label, live->size ());
-    IgHookLiveMap::Iterator i = live->begin ();
-    IgHookLiveMap::Iterator end = live->end ();
-    for ( ; i != end; ++i)
-        fprintf (output, " M[%p] = (%ld, %lu)\n",
-		 (void *) i->second.first, i->first, i->second.second);
+    if (depth > 0)
+    {
+	for (int i = 0; i <= depth; ++i)
+	    fputc (' ', output);
+
+	fprintf (output, "</node>\n");
+    }
 }
 
 void
@@ -172,8 +219,6 @@ IgProf::dump (void)
     if (dumping) return;
     dumping = true;
 
-    IgProfMem::disable ();
-
     char filename [64];
     sprintf (filename, "igprof.%ld", (long) getpid ());
 
@@ -181,65 +226,89 @@ IgProf::dump (void)
     if (! output)
     {
 	IgProf::debug ("can't write to output %s: %d\n", filename, errno);
+	dumping = false;
 	return;
     }
 
+    IgProf::debug ("dumping state to %s\n", filename);
+    std::set<void *> addresses;
+    fprintf (output, "<igprof>\n");
+    fprintf (output, " <symbols>\n");
+    dumpSymbols (output, IgProf::root (), addresses);
+    fprintf (output, " </symbols>\n");
+    fprintf (output, " <trace>\n");
     dumpTrace (output, IgProf::root (), 0);
-    std::map<const char *, IgHookLiveMap *>::iterator i = livemaps ().begin ();
-    std::map<const char *, IgHookLiveMap *>::iterator end = livemaps ().end ();
-    while (i != end)
+    fprintf (output, " </trace>\n");
+    LiveMaps::iterator i = livemaps ().begin ();
+    LiveMaps::iterator end = livemaps ().end ();
+    for ( ; i != end; ++i)
     {
-	dumpLiveMap (output, i->first, i->second);
-	++i;
+        fprintf (output, " <live map=\"%s\" size=\"%lu\">\n", i->first, i->second->size ());
+        IgHookLiveMap::Iterator m = i->second->begin ();
+        IgHookLiveMap::Iterator mend = i->second->end ();
+        for ( ; m != mend; ++m)
+            fprintf (output, "  <leak node=\"%p\" resource=\"%ld\" info=\"%lu\"/>\n",
+		     (void *) m->second.first, m->first, m->second.second);
+        fprintf (output, " </live>\n");
     }
 
+    fprintf (output, "</igprof>\n");
     fclose (output);
     dumping = false;
-    IgProfMem::enable ();
 }
 
 
 //////////////////////////////////////////////////////////////////////
 static void igexit (int code)
 {
-    if (s_enabled > 0)
     {
-        IgProf::debug ("exit() called, dumping state\n");
-	IgProf::dump ();
-        IgProf::debug ("igprof quitting\n");
-    }
+        IgProfLock lock (s_enabled);
+        if (lock.enabled () > 0)
+        {
+            IgProf::debug ("exit() called, dumping state\n");
+	    IgProf::dump ();
+            IgProf::debug ("igprof quitting\n");
+        }
 
-    IgProf::runexit ();
+        IgProf::deactivate (); // twice disabled!
+	s_initialized = false; // signal local data is unsafe to use
+    }
     (*igexit_hook.typed.chain) (code);
 }
 
 static void ig_exit (int code)
 {
-    if (s_enabled > 0)
     {
-        IgProf::debug ("_exit() called, dumping state\n");
-	IgProf::dump ();
-        IgProf::debug ("igprof quitting\n");
-    }
+        IgProfLock lock (s_enabled);
+        if (lock.enabled () > 0)
+        {
+            IgProf::debug ("_exit() called, dumping state\n");
+	    IgProf::dump ();
+            IgProf::debug ("igprof quitting\n");
+        }
 
-    IgProf::runexit ();
+        IgProf::deactivate (); // twice disabled!
+	s_initialized = false; // signal local data is unsafe to use
+    }
     (*ig_exit_hook.typed.chain) (code);
 }
 
 static int igkill (pid_t pid, int sig)
 {
-    if (s_enabled > 0
-	&& (pid == 0 || pid == getpid ())
-	&& (sig == SIGHUP || sig == SIGINT || sig == SIGQUIT
-	    || sig == SIGILL || sig == SIGABRT || sig == SIGFPE
-	    || sig == SIGKILL || sig == SIGSEGV || sig == SIGPIPE
-	    || sig == SIGALRM || sig == SIGTERM || sig == SIGUSR1
-	    || sig == SIGUSR2 || sig == SIGBUS || sig == SIGIOT))
     {
-	IgProf::debug ("kill(%d,%d) called, dumping state\n", (int) pid, sig);
-	IgProf::dump ();
+        IgProfLock lock (s_enabled);
+        if (lock.enabled () > 0
+	    && (pid == 0 || pid == getpid ())
+	    && (sig == SIGHUP || sig == SIGINT || sig == SIGQUIT
+	        || sig == SIGILL || sig == SIGABRT || sig == SIGFPE
+	        || sig == SIGKILL || sig == SIGSEGV || sig == SIGPIPE
+	        || sig == SIGALRM || sig == SIGTERM || sig == SIGUSR1
+	        || sig == SIGUSR2 || sig == SIGBUS || sig == SIGIOT))
+        {
+	    IgProf::debug ("kill(%d,%d) called, dumping state\n", (int) pid, sig);
+	    IgProf::dump ();
+        }
     }
-
     return (*igkill_hook.typed.chain) (pid, sig);
 }
 

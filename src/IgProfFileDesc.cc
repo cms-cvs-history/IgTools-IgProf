@@ -144,8 +144,9 @@ IgProfFileDesc::initialize (void)
 
         // IgHook::hook (igmalloc_hook.raw);
         IgProf::debug ("File descriptor profiler enabled\n");
-        IgProf::onexit (&IgProfFileDesc::disable);
-        IgProfFileDesc::enable ();
+        IgProf::onactivate (&IgProfFileDesc::enable);
+        IgProf::ondeactivate (&IgProfFileDesc::disable);
+	IgProfFileDesc::enable ();
     }
 }
 

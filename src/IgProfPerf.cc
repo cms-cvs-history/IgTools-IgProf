@@ -72,8 +72,9 @@ IgProfPerf::initialize (void)
     {
         // IgHook::hook (igmalloc_hook.raw);
         IgProf::debug ("Performance profiler enabled\n");
-	IgProf::onexit (&IgProfPerf::disable);
-        IgProfPerf::enable ();
+	IgProf::onactivate (&IgProfPerf::enable);
+	IgProf::ondeactivate (&IgProfPerf::disable);
+	IgProfPerf::enable ();
     }
 }
 
