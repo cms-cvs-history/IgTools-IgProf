@@ -4,7 +4,6 @@
 #include "Ig_Tools/IgProf/src/IgProf.h"
 #include "Ig_Tools/IgHook/interface/IgHookTrace.h"
 #include "Ig_Tools/IgHook/interface/IgHookLiveMap.h"
-#include <cassert>
 #include <cstdlib>
 
 //<<<<<< PRIVATE DEFINES                                                >>>>>>
@@ -48,6 +47,8 @@ static bool			s_initialized	= false;
 static void 
 add (void *ptr, size_t size)
 {
+    IGPROF_TRACE (("[mem add %p %lu\n", ptr, size));
+
     int		drop = 3; // one for stacktrace, one for me, one for hook
     IgHookTrace	*node = IgProf::root ();
     void	*addresses [128];
@@ -61,7 +62,13 @@ add (void *ptr, size_t size)
     if (s_count_total)   node->counter (&s_ct_total)->add (size);
     if (s_count_largest) node->counter (&s_ct_largest)->max (size);
     if (s_count_live)    node->counter (&s_ct_live)->max (size);
-    if (s_count_leaks)   s_live->insert ((unsigned long) ptr, node, size);
+    if (s_count_leaks)
+    {
+	IGPROF_ASSERT (s_live->find ((unsigned long) ptr) == s_live->end ());
+	s_live->insert ((unsigned long) ptr, node, size);
+    }
+
+    IGPROF_TRACE (("]\n"));
 }
 
 /** Remove knowledge about allocation.  If we are tracking leaks,
@@ -70,19 +77,28 @@ add (void *ptr, size_t size)
 static void
 remove (void *ptr)
 {
+    IGPROF_TRACE (("[mem rm %p\n", ptr));
+
     if (s_count_leaks)
     {
 	IgHookLiveMap::Iterator	info = s_live->find ((unsigned long) ptr);
-	assert (info != s_live->end ());
+	if (info == s_live->end ())
+	    // Unknown to us, probably allocated before we started.
+	    // This happens for instance with GCC 3.4+ as libstdc++
+	    // allocates memory and is invoked before we start.
+	    // IGPROF_ASSERT (info != s_live->end ());
+	    return;
 
 	IgHookTrace	*node = info->second.first;
 	size_t		size = info->second.second;
 
-	assert (node->counter (&s_ct_live)->value () >= size);
+	IGPROF_ASSERT (node->counter (&s_ct_live)->value () >= size);
 	node->counter (&s_ct_live)->sub (size);
 
 	s_live->remove (info);
     }
+
+    IGPROF_TRACE (("]\n", ptr));
 }
 
 //<<<<<< PUBLIC FUNCTION DEFINITIONS                                    >>>>>>
@@ -178,9 +194,12 @@ IgProfMem::initialize (void)
         IgHook::hook (igvalloc_hook.raw);
         IgHook::hook (igfree_hook.raw);
         IgProf::debug ("Memory profiler enabled\n");
+	// This may allocate, so force our flag to remain false
+	// and then set it to a known value.
+	s_enabled = -10;
 	IgProf::onactivate (&IgProfMem::enable);
 	IgProf::ondeactivate (&IgProfMem::disable);
-	IgProfMem::enable ();
+	s_enabled = 1;
     }
 }
 
@@ -194,80 +213,95 @@ IgProfMem::disable (void)
 
 void *igmalloc (size_t n)
 {
+    IGPROF_TRACE (("(%d igmalloc %lu\n", s_enabled, n));
     IgProfLock lock (s_enabled);
     void *result = (*igmalloc_hook.typed.chain) (n);
 
     if (lock.enabled () > 0 && result)
 	add (result, n);
 
+    IGPROF_TRACE ((" -> %p)\n", result));
     return result;
 }
 
 void *igcalloc (size_t n, size_t m)
 {
+    IGPROF_TRACE (("(%d igcalloc %lu %lu\n", s_enabled, n, m));
     IgProfLock lock (s_enabled);
     void *result = (*igcalloc_hook.typed.chain) (n, m);
 
     if (lock.enabled () > 0 && result)
 	add (result, n * m);
 
+    IGPROF_TRACE ((" -> %p)\n", result));
     return result;
 }
 
 void *igrealloc (void *ptr, size_t n)
 {
+    IGPROF_TRACE (("(%d igrealloc %p %lu\n", s_enabled, ptr, n));
     IgProfLock lock (s_enabled);
     void *result = (*igrealloc_hook.typed.chain) (ptr, n);
 
-    if (lock.enabled () > 0 && result)
+    if (lock.enabled () > 0)
     {
-	remove (ptr);
-	add (result, n);
+	if (ptr) remove (ptr);
+	if (result) add (result, n);
     }
 
+    IGPROF_TRACE ((" -> %p)\n", result));
     return result;
 }
 
 void *igmemalign (size_t alignment, size_t size)
 {
+    IGPROF_TRACE (("(%d igmemalign %lu %lu\n", s_enabled, alignment, size));
     IgProfLock lock (s_enabled);
     void *result = (*igmemalign_hook.typed.chain) (alignment, size);
 
     if (lock.enabled () > 0 && result)
 	add (result, size);
 
+    IGPROF_TRACE ((" -> %p)\n", result));
     return result;
 }
 
 void *igvalloc (size_t size)
 {
+    IGPROF_TRACE (("(%d igvalloc %lu\n", s_enabled, size));
     IgProfLock lock (s_enabled);
     void *result = (*igvalloc_hook.typed.chain) (size);
 
     if (lock.enabled () > 0 && result)
 	add (result, size);
 
+    IGPROF_TRACE ((" -> %p)\n", result));
     return result;
 }
 
 int igpmemalign (void **ptr, size_t alignment, size_t size)
 {
+    IGPROF_TRACE (("(%d igpmemalign %p %lu %lu\n", s_enabled, ptr, alignment, size));
     IgProfLock lock (s_enabled);
     int result = (*igpmemalign_hook.typed.chain) (ptr, alignment, size);
 
     if (lock.enabled () > 0 && ptr && *ptr)
 	add (*ptr, size);
 
+    IGPROF_TRACE ((" -> %p %d)\n", *ptr, result));
     return result;
 }
 
 void igfree (void *ptr)
 {
+    IGPROF_TRACE (("(%d igfree %p\n", s_enabled, ptr));
     IgProfLock lock (s_enabled);
     (*igfree_hook.typed.chain) (ptr);
 
     if (lock.enabled () > 0)
 	remove (ptr);
+
+    IGPROF_TRACE ((")\n"));
 }
 
 static bool autoboot = (IgProfMem::initialize (), true);
