@@ -1,5 +1,5 @@
 <use name=Ig_Tools/IgHook>
-
+<Flags NO_LIB_CHECKING=yes>
 <export>
  <use name=Ig_Tools/IgHook>
  <lib name=IgProf>
