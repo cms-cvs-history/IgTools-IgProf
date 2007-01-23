@@ -1,5 +1,17 @@
 2007-01-23  Lassi A. Tuura  <lat@iki.fi>
 
+	* igprof-analyse: Report and sort only one counter at a time, in
+	order to keep the functionality simple enough to document and
+	implement.  Add a '--verbose' option to get processing details.
+	Don't fold recursive calls into the report entry; add a "'#"
+	suffix to nested calls to keep them separate.  Unravel the
+	recursive analysis calls into a single stack-based 'walk' function
+	with pre- and post-traversal action functions; this avoids
+	warnings from perl on too deep recursion and makes the code easier
+	to manage.  Maintain a separate who-call-who matrix in order to
+	speed up function sorting; this makes a dramatic difference with
+	very large call trees.
+
 	* test/test_forking.cc: Join the sub-thread, otherwise we
 	lose the stats for it.
 
