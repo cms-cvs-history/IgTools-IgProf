@@ -1,5 +1,8 @@
 2007-01-23  Lassi A. Tuura  <lat@iki.fi>
 
+	* test/test_forking.cc: Join the sub-thread, otherwise we
+	lose the stats for it.
+
 	* IgProfFileDesc.cc, IgProfMem.cc (add): Capture deeper stack
 	frames, 256 frames instead of 128.
 

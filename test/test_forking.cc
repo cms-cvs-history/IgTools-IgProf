@@ -5,10 +5,10 @@
 #include <iostream>
 #include <cassert>
 
-void 
+void
 a (void)
 {
-    std::cerr << "a () called by thread" << getpid () << std::endl;
+    std::cerr << "a () called by thread " << getpid () << std::endl;
     for  (int i = 0; i < 1000000; i++)
     {
 	exp(1);	
@@ -18,17 +18,16 @@ a (void)
 void *
 b (void *)
 {
-    std::cerr << "b() called by thread" << getpid () << std::endl;
+    std::cerr << "b() called by thread " << getpid () << std::endl;
     sigset_t newset;
     sigset_t oldset;
 
     for (int j  = 0; j < 10; j++)
     {
 	std::cerr << "thread " << getpid ()<< " still alive" << std::endl;
-	
 	for  (int i = 0; i < 10000000; i++)
 	{
-	    exp(1);	
+	    exp(1);
 	}
     }
     return 0;
@@ -58,4 +57,6 @@ main (int /*argc*/, char ** /*argv*/)
 	    a ();	
 	}	
     }
+
+    pthread_join (thread, 0);
 }
