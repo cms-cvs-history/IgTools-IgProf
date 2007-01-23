@@ -33,6 +33,11 @@ typedef sig_t sighandler_t;
 //<<<<<< PRIVATE FUNCTION DEFINITIONS                                   >>>>>>
 
 // Traps for this profiler module
+IGPROF_LIBHOOK (3, int, dopthread_sigmask, _main,
+	        (int how, sigset_t *newmask, sigset_t *oldmask),
+		(how, newmask, oldmask),
+	        "pthread_sigmask", 0, "/lib/tls/libpthread.so.0")
+
 IGPROF_LIBHOOK (4, int, dopthread_create, _main,
 	        (pthread_t *thread, const pthread_attr_t *attr,
 		 void * (*start_routine)(void *), void *arg),
@@ -57,6 +62,8 @@ static int			s_enabled	= 0;
 static bool			s_initialized	= false;
 static int			s_signal	= SIGPROF;
 static int			s_itimer	= ITIMER_PROF;
+static pthread_t		s_mainthread	= 0;
+
 #if __linux
 static pthread_mutex_t		s_lock		= PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t		s_sigstart	= PTHREAD_MUTEX_INITIALIZER;
@@ -70,14 +77,15 @@ static void
 add (void)
 {
     IgHookTrace	*node = IgProf::threadRoot ();
-    void	*addresses [128];
-    int		depth = IgHookTrace::stacktrace (addresses, 128);
+    void	*addresses [256];
+    int		depth = IgHookTrace::stacktrace (addresses, 256);
     // one for stacktrace, one for me, one for signal frame, one for profileSignalHandler(), one for
     // pthreads signal handler wrapper (on linux only?).
-    int		drop = 4 + (IgProf::isMultiThreaded () ? 1 : 0);
+    int		droptop = 2 + (IgProf::isMultiThreaded () ? 1 : 0);
+    int		dropbottom = (s_mainthread && pthread_self() == s_mainthread ? 3 : 4);
 
     // Walk the tree
-    for (int i = depth-2; node && i >= drop; --i)
+    for (int i = depth-dropbottom; node && i >= droptop; --i)
 	node = node->child (IgHookTrace::tosymbol (addresses [i]));
 
     // Increment counters for this node
@@ -214,7 +222,15 @@ threadWrapper (void *arg)
 		   (unsigned long) pthread_self (),
 		   (void *) start_routine,
 		   start_arg);
-    return (*start_routine) (start_arg);
+
+    void *ret = (*start_routine) (start_arg);
+
+    IgProf::debug ("Perf: exiting thread %lu from profiling (%p, %p)\n",
+		   (unsigned long) pthread_self (),
+		   (void *) start_routine,
+		   start_arg);
+    IgProf::exitThread ();
+    return ret;
 }
 
 //<<<<<< PUBLIC FUNCTION DEFINITIONS                                    >>>>>>
@@ -282,6 +298,9 @@ IgProfPerf::initialize (void)
 	// signal handling worker thread that mirrors the profiling
 	// signal to all real user-threads.
 	IgProf::debug ("Performance profiler enabled\n");
+	if (IgProf::isMultiThreaded())
+	    s_mainthread = pthread_self();
+
 #if __linux
 	registerThisThread ();
 	enableSignalThread ();
@@ -291,6 +310,7 @@ IgProfPerf::initialize (void)
 	IgHook::hook (dopthread_create_hook_pthread20.raw);
 	IgHook::hook (dopthread_create_hook_pthread21.raw);
 #endif
+	IgHook::hook (dopthread_sigmask_hook_main.raw);
 	IgProf::onactivate (&IgProfPerf::enable);
 	IgProf::ondeactivate (&IgProfPerf::disable);
 
@@ -332,6 +352,20 @@ dopthread_create (IgHook::SafeData<igprof_dopthread_create_t> &hook,
     wrapped->arg = arg;
     int ret = hook.chain (thread, attr, &threadWrapper, wrapped);
     return ret;
+}
+
+// Trap fiddling with thread signal masks
+static int
+dopthread_sigmask (IgHook::SafeData<igprof_dopthread_sigmask_t> &hook,
+		   int how, sigset_t *newmask,  sigset_t *oldmask)
+{
+    if (how == SIG_BLOCK || how == SIG_SETMASK)
+    {
+	sigdelset (newmask, SIGALRM);
+	sigdelset (newmask, SIGVTALRM);
+	sigdelset (newmask, SIGPROF);
+    }
+    return hook.chain (how, newmask, oldmask);
 }
 
 //////////////////////////////////////////////////////////////////////

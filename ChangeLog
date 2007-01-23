@@ -1,3 +1,15 @@
+2007-01-23  Lassi A. Tuura  <lat@iki.fi>
+
+	* IgProfFileDesc.cc, IgProfMem.cc (add): Capture deeper stack
+	frames, 256 frames instead of 128.
+
+	* IgProfPerf.cc: Capture pthread_sigmask and prevent profiling
+	signals from being swallowed or blocked.  Capture deeper stack
+	frames, 256 frames instead of 128.  Adjust number of frames to
+	drop off from profiling signals, it seems the layouts changed.
+	Explicitly call "exitThread" when returning from the captured
+	thread, it seems the thread library no longer calls on exit.
+
 2004-06-21  Shahzad Muzaffar <Shahzad.Muzaffar@cern.ch>
 
 	* BuildFile: updated for new SCRAM V1.

@@ -56,8 +56,8 @@ add (int fd)
 {
     int		drop = 4; // one for stacktrace, one for me, two for hook
     IgHookTrace	*node = IgProf::root ();
-    void	*addresses [128];
-    int		depth = IgHookTrace::stacktrace (addresses, 128);
+    void	*addresses [256];
+    int		depth = IgHookTrace::stacktrace (addresses, 256);
 
     // Walk the tree
     for (int i = depth-2; i >= drop; --i)
