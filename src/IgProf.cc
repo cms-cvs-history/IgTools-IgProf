@@ -22,6 +22,7 @@
 //<<<<<< PRIVATE CONSTANTS                                              >>>>>>
 //<<<<<< PRIVATE TYPES                                                  >>>>>>
 
+class IgProfExitDump { public: ~IgProfExitDump (); };
 typedef std::map<const char *, IgHookLiveMap *> LiveMaps;
 typedef std::list<void (*) (void)>		ActivationList;
 
@@ -31,12 +32,6 @@ typedef std::list<void (*) (void)>		ActivationList;
 //<<<<<< PRIVATE FUNCTION DEFINITIONS                                   >>>>>>
 
 // Traps for this profiling module
-IGPROF_DUAL_HOOK (1, void, doexit, _main, _libc,
-		  (int code), (code),
-		  "exit", 0, "libc.so.6")
-IGPROF_DUAL_HOOK (1, void, doexit, _main2, _libc2,
-		  (int code), (code),
-		  "_exit", 0, "libc.so.6")
 IGPROF_DUAL_HOOK (2, int,  dokill, _main, _libc,
 		  (pid_t pid, int sig), (pid, sig),
 		  "kill", 0, "libc.so.6")
@@ -44,15 +39,21 @@ IGPROF_DUAL_HOOK (2, int,  dokill, _main, _libc,
 // Data for this profiler module
 static int		s_enabled	= 0;
 static bool		s_initialized	= false;
+static bool		s_activated	= false;
 static bool		s_pthreads	= false;
 static pthread_t	s_mainthread;
 static pthread_key_t	s_troot;
 static pthread_mutex_t	s_lock;
 
 // Static data that needs to be constructed lazily on demand
-static LiveMaps &livemaps (void) { static LiveMaps s; return s; }
-static ActivationList &activations (void) { static ActivationList s; return s; }
-static ActivationList &deactivations (void) { static ActivationList s; return s; }
+static LiveMaps &livemaps (void)
+{ static LiveMaps *s = new LiveMaps; return *s; }
+
+static ActivationList &activations (void)
+{ static ActivationList *s = new ActivationList; return *s; }
+
+static ActivationList &deactivations (void)
+{ static ActivationList *s = new ActivationList; return *s; }
 
 //<<<<<< PUBLIC FUNCTION DEFINITIONS                                    >>>>>>
 //<<<<<< MEMBER FUNCTION DEFINITIONS                                    >>>>>>
@@ -80,11 +81,13 @@ IgProfLock::~IgProfLock (void)
     for profiling.  Captures various exit points so we generate a
     dump before the program goes "out".  Automatically triggered
     to run on library load.  All profiler modules should invoke
-    this method before doing their own initialisation.  */
-void
+    this method before doing their own initialisation.
+
+    Returns @c true if profiling is activated in this process.  */
+bool
 IgProf::initialize (void)
 {
-    if (s_initialized) return;
+    if (s_initialized) return s_activated;
     s_initialized = true;
 
     void *program = dlopen (0, RTLD_NOW);
@@ -100,19 +103,25 @@ IgProf::initialize (void)
     }
     dlclose (program);
 
+    const char *target = getenv ("IGPROF_TARGET");
     s_mainthread = pthread_self ();
-    IgProf::debug ("Profiler core loaded\n");
-    IgHook::hook (doexit_hook_main.raw);
-    IgHook::hook (doexit_hook_main2.raw);
+    if (target && ! strstr (program_invocation_name, target))
+    {
+	IgProf::debug ("Current process not selected for profiling\n");
+	return s_activated = false;
+    }
+    IgProf::debug ("Profiler core loaded, running %s\n",
+		   s_pthreads ? "multi-threaded" : "without threads");
+    IgProf::debug ("Options: %s\n", IgProf::options());
+
     IgHook::hook (dokill_hook_main.raw);
 #if __linux
-    if (doexit_hook_main.raw.chain)  IgHook::hook (doexit_hook_libc.raw);
-    if (doexit_hook_main2.raw.chain) IgHook::hook (doexit_hook_libc2.raw);
-    if (dokill_hook_main.raw.chain)  IgHook::hook (dokill_hook_libc.raw);
+    if (dokill_hook_main.raw.chain) IgHook::hook (dokill_hook_libc.raw);
 #endif
     IgProf::onactivate (&IgProf::enable);
     IgProf::ondeactivate (&IgProf::disable);
     IgProf::enable ();
+    return s_activated = true;
 }
 
 /** Return @c true if the process was linked against threading package.  */
@@ -407,18 +416,44 @@ IgProf::dump (void)
     if (dumping) return;
     dumping = true;
 
-    char filename [64];
-    sprintf (filename, "igprof.%ld", (long) getpid ());
+    const char *options = IgProf::options ();
+    char       outname [1024];
 
-    FILE *output = fopen (filename, "w+");
+    outname [0] = 0;
+    while (options && *options)
+    {
+	while (*options == ' ' || *options == ',')
+	    ++options;
+
+	if (! strncmp (options, "out='", 5))
+	{
+	    int i = 0;
+	    options += 5;
+	    while (i < 1023 && *options && *options != '\'')
+		outname[i++] = *options++;
+	    outname[i] = 0;
+	}
+	else
+	    options++;
+
+	while (*options && *options != ',' && *options != ' ')
+	    options++;
+    }
+
+    if (! *outname)
+        sprintf (outname, "igprof.%ld", (long) getpid ());
+
+    FILE *output = (outname[0] == '|'
+		    ? (unsetenv("LD_PRELOAD"), popen(outname+1, "w"))
+		    : fopen (outname, "w+"));
     if (! output)
     {
-	IgProf::debug ("can't write to output %s: %d\n", filename, errno);
+	IgProf::debug ("can't write to output %s: %d\n", outname, errno);
 	dumping = false;
 	return;
     }
 
-    IgProf::debug ("dumping state to %s\n", filename);
+    IgProf::debug ("dumping state to %s\n", outname);
     std::set<void *> addresses;
 #if __linux
     fprintf (output, "<igprof program=\"%s\" pid=\"%lu\">\n",
@@ -452,39 +487,6 @@ IgProf::dump (void)
 
 
 //////////////////////////////////////////////////////////////////////
-/** Trapped calls to exit() and _exit().  Dump out profiler data.  */
-static void
-doexit (IgHook::SafeData<igprof_doexit_t> &hook, int code)
-{
-    {
-	// Disable if we were already enabled.  Note that on
-	// Linux, end of thread calls into __pthread_do_exit()
-	// which actually calls exit() and lands here.  So be
-	// sure not to disable the system unnecessarily.
-
-        IgProfLock lock (s_enabled);
-	pthread_t thread = pthread_self ();
-        if (lock.enabled () > 0 && thread == s_mainthread)
-        {
-            IgProf::debug ("%s() called, dumping state\n", hook.function);
-	    IgProf::exitThread ();
-	    IgProf::dump ();
-            IgProf::debug ("igprof quitting\n");
-
-            IgProf::deactivate (); // twice disabled!
-            s_initialized = false; // signal local data is unsafe to use
-            s_pthreads = false; // make sure we no longer use threads stuff
-	}
-	else if (s_pthreads && thread != s_mainthread)
-	{
-	    IgProf::debug ("thread %lu %s(), continuing\n",
-			   (unsigned long) thread, hook.function);
-	    IgProf::exitThread ();
-	}
-    }
-    hook.chain (code);
-}
-
 /** Trapped calls to kill().  Dump out profiler data if the signal
     looks dangerous.  Mostly really to trap calls to abort().  */
 static int
@@ -508,4 +510,16 @@ dokill (IgHook::SafeData<igprof_dokill_t> &hook, pid_t pid, int sig)
 }
 
 //////////////////////////////////////////////////////////////////////
-static bool autoboot = (IgProf::initialize (), true);
+/** Dump out profile data when application is about to exit. */
+IgProfExitDump::~IgProfExitDump (void)
+{
+    IgProf::deactivate ();
+    IgProf::dump ();
+    IgProf::debug ("igprof quitting\n");
+    s_initialized = false; // signal local data is unsafe to use
+    s_pthreads = false; // make sure we no longer use threads stuff
+}
+
+//////////////////////////////////////////////////////////////////////
+static bool autoboot = IgProf::initialize ();
+static IgProfExitDump exitdump;

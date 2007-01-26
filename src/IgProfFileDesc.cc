@@ -103,7 +103,7 @@ IgProfFileDesc::initialize (void)
     if (s_initialized) return;
     s_initialized = true;
 
-    IgProf::initialize ();
+    if (! IgProf::initialize ()) return;
     IgProf::debug ("File descriptor profiler loaded\n");
 
     const char	*options = IgProf::options ();

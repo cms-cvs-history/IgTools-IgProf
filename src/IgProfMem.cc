@@ -42,7 +42,7 @@ IGPROF_DUAL_HOOK (1, void, dofree, _main, _libc,
 static IgHookTrace::Counter	s_ct_total	= { "MEM_TOTAL" };
 static IgHookTrace::Counter	s_ct_largest	= { "MEM_MAX" };
 static IgHookTrace::Counter	s_ct_live	= { "MEM_LIVE" };
-static IgHookTrace::Counter	s_ct_maxlive	= { "MEM_LIVE_MAX" };
+static IgHookTrace::Counter	s_ct_peaklive	= { "MEM_LIVE_PEAK" };
 static bool			s_count_total	= 0;
 static bool			s_count_largest	= 0;
 static bool			s_count_live	= 0;
@@ -58,6 +58,7 @@ static void
 add (void *ptr, size_t size)
 {
     IGPROF_TRACE (("[mem add %p %lu\n", ptr, size));
+    static struct { void *addr; IgHookTrace *node; } cache [256];
 
     int		drop = 4; // one for stacktrace, one for me, two for hook
     IgHookTrace	*node = IgProf::root ();
@@ -65,8 +66,23 @@ add (void *ptr, size_t size)
     int		depth = IgHookTrace::stacktrace (addresses, 256);
 
     // Walk the tree
-    for (int i = depth-2; i >= drop; --i)
-	node = node->child (IgHookTrace::tosymbol (addresses [i]));
+    for (int i = depth-3, j = 0, valid = 1; i >= drop; --i, ++j)
+    {
+	if (valid && cache[j].addr == addresses[i])
+	{
+	    node = cache[j].node;
+	}
+	else
+	{
+	    // Avoid calling tosymbol(addresses[i]) here, it incurs
+	    // a huge penalty.  We opt to build a larger tree (and
+            // profile dump) and to merge the symbols at analysis.
+	    node = node->child (addresses[i]);
+	    cache[j].addr = addresses[i];
+	    cache[j].node = node;
+	    valid = 0;
+        }
+    }
 
     // Increment counters for this node
     if (s_count_total)   node->counter (&s_ct_total)->add (size);
@@ -75,9 +91,9 @@ add (void *ptr, size_t size)
     {
 	IgHookTrace::CounterValue *ctr = node->counter (&s_ct_live);
 	ctr->add (size);
-	node->counter (&s_ct_maxlive)->max (ctr->value ());
+	node->counter (&s_ct_peaklive)->max (ctr->value ());
     }
-    if (s_count_leaks)
+    if (s_count_leaks || s_count_live)
     {
 	IGPROF_ASSERT (s_live->find ((unsigned long) ptr) == s_live->end ());
 	s_live->insert ((unsigned long) ptr, node, size);
@@ -94,7 +110,7 @@ remove (void *ptr)
 {
     IGPROF_TRACE (("[mem rm %p\n", ptr));
 
-    if (s_count_leaks)
+    if (s_count_leaks || s_count_live)
     {
 	IgHookLiveMap::Iterator	info = s_live->find ((unsigned long) ptr);
 	if (info == s_live->end ())
@@ -127,7 +143,7 @@ IgProfMem::initialize (void)
     if (s_initialized) return;
     s_initialized = true;
 
-    IgProf::initialize ();
+    if (! IgProf::initialize ()) return;
     IgProf::debug ("Memory profiler loaded\n");
 
     const char	*options = IgProf::options ();
@@ -203,7 +219,7 @@ IgProfMem::initialize (void)
 
     if (enable)
     {
-        if (s_count_leaks)
+        if (s_count_leaks || s_count_live)
 	    s_live = IgProf::liveMap ("Memory Leaks");
 
         IgHook::hook (domalloc_hook_main.raw);

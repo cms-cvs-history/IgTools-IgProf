@@ -1,5 +1,29 @@
 2007-01-26  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProf.h, IgProf.cc, IgProfFileDesc.cc, IgProfMem.cc: Add
+	support for $IGPROF_TARGET environment variable to select
+	processes to profile; if the process is not selected, force all
+	profile modules off.  Add support for an output option in profiler
+	options, and if the output file starts with '|', send the output
+	via a pipe; this allows the output file to be renamed and for
+	example to be compressed.  If debugging mode is on, log the
+	profiling options used.  Dump the profile output via a global
+	destructor, and remove the exit hooks; this allows global
+	destructors to be included in the results (allocate live map
+	tables and profiler chains on the heap so they remain valid).
+
+	* IgProfMem.cc: Rename MEM_LIVE_MAX counter to MEM_LIVE_PEAK; it's
+	not a "MAX" counter in the sense the analysis code understands it.
+	Improve performance by keeping a cache of recent call address to
+	counter node mappings, and by not mapping the addresses to symbols
+	(leaving that to analysis); the profiler overhead is now small.
+	Always maintain the live heap object map.
+
+	* IgProfPerf.cc: Hook 'pthread_sigmask' with default symbol look
+	up in order not to load libpthread.so into non-threaded programs.
+	Remove the Linux "profiling thread", it is now unnecessary.  Check
+	signal mask pointer is valid in pthread_sigmask override.
+
 	* igprof-analyse: Add options to show number of calls and call
 	paths; by default do not show these columns.  Output first flat
 	by-cumulative and by-self profiles, then always by-cumulative call

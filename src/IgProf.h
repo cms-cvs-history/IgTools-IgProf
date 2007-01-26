@@ -30,7 +30,7 @@ public:
     static IgHookTrace *	threadRoot (void);
     static IgHookLiveMap *	liveMap (const char *label);
 
-    static void			initialize (void);
+    static bool			initialize (void);
     static void			dump (void);
 
     static void			onactivate (void (*func) (void));

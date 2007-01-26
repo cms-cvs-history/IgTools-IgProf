@@ -36,7 +36,7 @@ typedef sig_t sighandler_t;
 IGPROF_LIBHOOK (3, int, dopthread_sigmask, _main,
 	        (int how, sigset_t *newmask, sigset_t *oldmask),
 		(how, newmask, oldmask),
-	        "pthread_sigmask", 0, "/lib/tls/libpthread.so.0")
+	        "pthread_sigmask", 0, 0) // "/lib/tls/libpthread.so.0")
 
 IGPROF_LIBHOOK (4, int, dopthread_create, _main,
 	        (pthread_t *thread, const pthread_attr_t *attr,
@@ -63,14 +63,6 @@ static bool			s_initialized	= false;
 static int			s_signal	= SIGPROF;
 static int			s_itimer	= ITIMER_PROF;
 static pthread_t		s_mainthread	= 0;
-
-#if __linux
-static pthread_mutex_t		s_lock		= PTHREAD_MUTEX_INITIALIZER;
-static pthread_mutex_t		s_sigstart	= PTHREAD_MUTEX_INITIALIZER;
-static int			s_nthreads	= 0;
-static pthread_t		s_threads [1024];
-static pthread_t		s_profthread;
-#endif
 
 /** Record a tick.  Increments counters in the tree for ticks.  */
 static void 
@@ -105,17 +97,7 @@ profileSignalHandler (void)
     if (s_enabled <= 0)
 	return;
 
-#if __linux
-    if (IgProf::isMultiThreaded () && pthread_self () == s_profthread)
-    {
-	pthread_mutex_lock (&s_lock);
-	for (int i = 0; i < s_nthreads; ++i)
-	    pthread_kill (s_threads [i], s_signal);
-	pthread_mutex_unlock (&s_lock);
-    }
-    else
-#endif
-	add ();
+    add ();
 }
 
 /** Enable profiling timer.  You should have called
@@ -133,82 +115,18 @@ static void
 enableSignalHandler (void)
 { signal (s_signal, (sighandler_t) &profileSignalHandler); }
 
-#if __linux
-/** Old GNU/Linux system hack.  Make sure the signal handling thread
-    signal mask is restored after fork().  */
-static void
-profileSignalThreadFork (void)
-{
-    enableSignalHandler ();
-    enableTimer ();
-}
-
-/** Old GNU/Linux system hack.  Worker thread for receiving
-    profiling signals on behalf of all the other threads.  */
-static void *
-profileSignalThread (void *)
-{
-    IgProf::initThread ();
-    IgProf::debug ("Perf: starting signal handler thread %lu\n",
-		   (unsigned long) pthread_self ());
-    pthread_atfork (0, 0, &profileSignalThreadFork);
-    enableSignalHandler ();
-    enableTimer ();
-    pthread_mutex_unlock (&s_sigstart);
-    
-    while (true)
-	sleep (1);
-
-    return 0;
-}
-
-/** Old GNU/Linux system hack.  If the process is multi-threaded
-    (linked against pthreads), start a a worker thread to listen for
-    the profiling signals.  */
-static void
-enableSignalThread (void)
-{
-    if (IgProf::isMultiThreaded ())
-    {
-	// Start the thread and wait until it's running.
-	pthread_mutex_lock (&s_sigstart);
-	pthread_create (&s_profthread, 0, &profileSignalThread, 0);
-	pthread_mutex_lock (&s_sigstart);
-    }
-}
-
-/** Old GNU/Linux system hack.  Record this thread to the table of
-    threads we need to pass profiling signal to.  */
-static void
-registerThisThread (void)
-{
-    IgProf::debug ("Perf: registering thread %lu\n", (unsigned long) pthread_self ());
-    pthread_mutex_lock (&s_lock);
-    IGPROF_ASSERT (s_nthreads < 1024);
-    s_threads [s_nthreads++] = pthread_self ();
-    pthread_mutex_unlock (&s_lock);
-}
-#endif
-
 /** A wrapper for starting user threads to enable profiling.  */
 static void *
 threadWrapper (void *arg)
 {
     IgProf::initThread ();
 
-#if __linux
-    // Old GNU/Linux system hack: make sure signal worker sends the
-    // signal to this thread too.
-    registerThisThread ();
-    enableSignalHandler ();
-#endif
-
+    // Enable profiling in this thread.
     sigset_t profset;
     sigemptyset (&profset);
     sigaddset (&profset, s_signal);
     pthread_sigmask (SIG_UNBLOCK, &profset, 0);
-
-    // Enable profiling in this thread.
+    enableSignalHandler ();
     enableTimer ();
 
     // Get arguments
@@ -243,7 +161,7 @@ IgProfPerf::initialize (void)
     if (s_initialized) return;
     s_initialized = true;
 
-    IgProf::initialize ();
+    if (! IgProf::initialize ()) return;
     IgProf::debug ("Performance profiler loaded\n");
 
     const char	*options = IgProf::options ();
@@ -301,10 +219,6 @@ IgProfPerf::initialize (void)
 	if (IgProf::isMultiThreaded())
 	    s_mainthread = pthread_self();
 
-#if __linux
-	registerThisThread ();
-	enableSignalThread ();
-#endif
 	IgHook::hook (dopthread_create_hook_main.raw);
 #if __linux
 	IgHook::hook (dopthread_create_hook_pthread20.raw);
@@ -319,7 +233,6 @@ IgProfPerf::initialize (void)
 
 	enableSignalHandler ();
 	enableTimer ();
-
 	IgProfPerf::enable ();
     }
 }
@@ -359,7 +272,7 @@ static int
 dopthread_sigmask (IgHook::SafeData<igprof_dopthread_sigmask_t> &hook,
 		   int how, sigset_t *newmask,  sigset_t *oldmask)
 {
-    if (how == SIG_BLOCK || how == SIG_SETMASK)
+    if (newmask && (how == SIG_BLOCK || how == SIG_SETMASK))
     {
 	sigdelset (newmask, SIGALRM);
 	sigdelset (newmask, SIGVTALRM);
