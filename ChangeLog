@@ -1,5 +1,22 @@
 2007-01-26  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProf.cc: Hook into exit() functions after all, otherwise we
+	fail to capture statistics from non-main threads that call exit().
+	If that happens, just merge the thread result to the main tree.
+
+	* IgProfMem.cc: Look up symbols after all, using a hash table to
+	track previously looked up addresses so we don't call dladdr()
+	unnecessarily frequently.  The table doesn't use much memory.
+	This is what Giulio used to do in the old days.
+
+	* IgProfPerf.cc: Do not look up symbol addresses, pass call
+	addresses through as they are and let the analyser worry about
+	them.  The reason is that every dladdr() takes a mutex lock inside
+	the dynamic linker, causing a deadlock if the same thread is
+	already inside the dynamic linker when the profiling signal hits.
+
+2007-01-26  Lassi A. Tuura  <lat@iki.fi>
+
 	* cmssw-igprof-patch: Add script to patch IgHook and IgProf for
 	building and using them inside a CMSSW area.  Effectively just
 	changes the library name to include Ig_Tools.

@@ -58,28 +58,46 @@ static void
 add (void *ptr, size_t size)
 {
     IGPROF_TRACE (("[mem add %p %lu\n", ptr, size));
-    static struct { void *addr; IgHookTrace *node; } cache [256];
+    typedef struct { void *addr; IgHookTrace *node; } NodeCache;
+#if __GNUC__
+    typedef __gnu_cxx::hash_map
+	<unsigned long, void *, __gnu_cxx::hash<unsigned long>,
+	 std::equal_to<unsigned long>,
+	 IgHookAlloc< std::pair<unsigned long, void *> > > SymCache;
+#else
+    typedef std::map
+	<unsigned long, void *, std::less<unsigned long>,
+	 IgHookAlloc< std::pair<unsigned long, void *> > > SymCache;
+#endif
 
-    int		drop = 4; // one for stacktrace, one for me, two for hook
-    IgHookTrace	*node = IgProf::root ();
-    void	*addresses [256];
-    int		depth = IgHookTrace::stacktrace (addresses, 256);
+    static const int N_STACK = 256;
+    static SymCache  symcache;
+    static NodeCache nodecache [N_STACK];
+    void	     *addresses [N_STACK];
+    IgHookTrace      *node = IgProf::root ();
+    int		     depth = IgHookTrace::stacktrace (addresses, N_STACK);
+    int		     drop = 4; // stacktrace, me, two for hook
 
     // Walk the tree
     for (int i = depth-3, j = 0, valid = 1; i >= drop; --i, ++j)
     {
-	if (valid && cache[j].addr == addresses[i])
+	if (valid && nodecache[j].addr == addresses[i])
 	{
-	    node = cache[j].node;
+	    node = nodecache[j].node;
 	}
 	else
 	{
-	    // Avoid calling tosymbol(addresses[i]) here, it incurs
-	    // a huge penalty.  We opt to build a larger tree (and
-            // profile dump) and to merge the symbols at analysis.
-	    node = node->child (addresses[i]);
-	    cache[j].addr = addresses[i];
-	    cache[j].node = node;
+            unsigned long	calladdr = (unsigned long) addresses[i];
+	    SymCache::iterator	symaddr = symcache.find (calladdr);
+	    if (symaddr == symcache.end())
+	    {
+		void *addr = IgHookTrace::tosymbol (addresses[i]);
+		symaddr = symcache.insert
+		    (SymCache::value_type (calladdr, addr)).first;
+	    }
+	    node = node->child (symaddr->second);
+	    nodecache[j].addr = addresses[i];
+	    nodecache[j].node = node;
 	    valid = 0;
         }
     }

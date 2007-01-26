@@ -36,7 +36,7 @@ typedef sig_t sighandler_t;
 IGPROF_LIBHOOK (3, int, dopthread_sigmask, _main,
 	        (int how, sigset_t *newmask, sigset_t *oldmask),
 		(how, newmask, oldmask),
-	        "pthread_sigmask", 0, 0) // "/lib/tls/libpthread.so.0")
+	        "pthread_sigmask", 0, 0)
 
 IGPROF_LIBHOOK (4, int, dopthread_create, _main,
 	        (pthread_t *thread, const pthread_attr_t *attr,
@@ -78,7 +78,7 @@ add (void)
 
     // Walk the tree
     for (int i = depth-dropbottom; node && i >= droptop; --i)
-	node = node->child (IgHookTrace::tosymbol (addresses [i]));
+	node = node->child (addresses[i]);
 
     // Increment counters for this node
     node->counter (&s_ct_ticks)->tick ();

@@ -32,6 +32,12 @@ typedef std::list<void (*) (void)>		ActivationList;
 //<<<<<< PRIVATE FUNCTION DEFINITIONS                                   >>>>>>
 
 // Traps for this profiling module
+IGPROF_DUAL_HOOK (1, void, doexit, _main, _libc,
+		  (int code), (code),
+		  "exit", 0, "libc.so.6")
+IGPROF_DUAL_HOOK (1, void, doexit, _main2, _libc2,
+		  (int code), (code),
+		  "_exit", 0, "libc.so.6")
 IGPROF_DUAL_HOOK (2, int,  dokill, _main, _libc,
 		  (pid_t pid, int sig), (pid, sig),
 		  "kill", 0, "libc.so.6")
@@ -114,9 +120,13 @@ IgProf::initialize (void)
 		   s_pthreads ? "multi-threaded" : "without threads");
     IgProf::debug ("Options: %s\n", IgProf::options());
 
+    IgHook::hook (doexit_hook_main.raw);
+    IgHook::hook (doexit_hook_main2.raw);
     IgHook::hook (dokill_hook_main.raw);
-#if __linux
-    if (dokill_hook_main.raw.chain) IgHook::hook (dokill_hook_libc.raw);
+ #if __linux
+    if (doexit_hook_main.raw.chain)  IgHook::hook (doexit_hook_libc.raw);
+    if (doexit_hook_main2.raw.chain) IgHook::hook (doexit_hook_libc2.raw);
+    if (dokill_hook_main.raw.chain)  IgHook::hook (dokill_hook_libc.raw);
 #endif
     IgProf::onactivate (&IgProf::enable);
     IgProf::ondeactivate (&IgProf::disable);
@@ -487,6 +497,25 @@ IgProf::dump (void)
 
 
 //////////////////////////////////////////////////////////////////////
+/** Trapped calls to exit() and _exit().  */
+static void
+doexit (IgHook::SafeData<igprof_doexit_t> &hook, int code)
+{
+    // Force the merge of per-thread profile tree into the main tree
+    // if a non-main thread calls exit().  Then pass on the call.
+    {
+        IgProfLock lock (s_enabled);
+	pthread_t thread = pthread_self ();
+	if (s_pthreads && thread != s_mainthread)
+	{
+	    IgProf::debug ("thread %lu called %s(), merging\n",
+			   (unsigned long) thread, hook.function);
+	    IgProf::exitThread ();
+	}
+    }
+    hook.chain (code);
+}
+
 /** Trapped calls to kill().  Dump out profiler data if the signal
     looks dangerous.  Mostly really to trap calls to abort().  */
 static int
