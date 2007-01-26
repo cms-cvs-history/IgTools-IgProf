@@ -1,0 +1,67 @@
+#!/bin/sh
+
+# Patch IgProf and IgHook for building in CMSSW tree.
+if [ -d Ig_Tools/IgHook -a -d Ig_Tools/IgProf ]; then :; else
+   echo "ERROR: Cannot find Ig_Tools/IgHook and Ig_Tools/IgProf."
+   echo
+   echo "Please 'cd' into the 'src' directory of your local CMSSW"
+   echo "project area, check out Ig_Tools from IGNOMINY, and then"
+   echo "run this script from the 'src' directory."
+   exit 1
+fi
+
+echo "Patching your IgHook and IgProf for building inside CMSSW."
+patch -p0 <<\EOF
+--- Ig_Tools/IgHook/BuildFile	1 Feb 2005 14:40:57 -0000	1.5
++++ Ig_Tools/IgHook/BuildFile	26 Jan 2007 13:01:53 -0000
+@@ -2,5 +2,5 @@
+ 
+ <export>
+  <use name=sockets>
+- <lib name=IgHook>
++ <lib name=Ig_ToolsIgHook>
+ </export>
+--- Ig_Tools/IgProf/BuildFile	3 Nov 2006 17:03:05 -0000	1.4
++++ Ig_Tools/IgProf/BuildFile	26 Jan 2007 13:01:53 -0000
+@@ -2,5 +2,5 @@
+ <Flags NO_LIB_CHECKING=yes>
+ <export>
+  <use name=Ig_Tools/IgHook>
+- <lib name=IgProf>
++ <lib name=Ig_ToolsIgProf>
+ </export>
+--- Ig_Tools/IgProf/scripts/igprof	26 Jan 2007 12:56:07 -0000	1.8
++++ Ig_Tools/IgProf/scripts/igprof	26 Jan 2007 13:01:53 -0000
+@@ -87,7 +87,7 @@ case $(uname) in
+     DYLD_INSERT_LIBRARIES=$LOCALRT/lib/`scram arch`/libIgProf.dylib
+     export DYLD_BIND_AT_LAUNCH DYLD_INSERT_LIBRARIES ;;
+   * )
+-    LD_PRELOAD=${LD_PRELOAD:+${LD_PRELOAD}:}libIgProf.so;
++    LD_PRELOAD=${LD_PRELOAD:+${LD_PRELOAD}:}libIg_ToolsIgProf.so;
+     export LD_PRELOAD ;;
+ esac
+ export IGPROF
+--- Ig_Tools/IgProf/src/.gdbinit	15 May 2004 14:15:52 -0000	1.1
++++ Ig_Tools/IgProf/src/.gdbinit	26 Jan 2007 13:01:53 -0000
+@@ -1,4 +1,4 @@
+-set env LD_PRELOAD libIgProf.so
++set env LD_PRELOAD libIg_ToolsIgProf.so
+ set env IGPROF "mem:all fd:all perf:all"
+ set env IGHOOK_DEBUGGING 1
+ set env IGPROF_DEBUGGING 1
+EOF
+
+if [ $? != 0 ]; then
+  echo
+  echo "*** ERROR ***"
+  echo "Patching your Ig_Tools area failed.  You are unlikely to"
+  echo "be able to build a working 'igprof'!  Please report the"
+  echo "problem with the actual command you executed and all the"
+  echo "output to the IGNOMINY developers.  Thank you and sorry"
+  echo "for the trouble."
+  exit 1
+else
+  echo
+  echo "Your Ig_Tools area was successfully patched.  Please run"
+  echo "'scramv1 build' in Ig_Tools now."
+fi

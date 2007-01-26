@@ -1,5 +1,9 @@
 2007-01-26  Lassi A. Tuura  <lat@iki.fi>
 
+	* cmssw-igprof-patch: Add script to patch IgHook and IgProf for
+	building and using them inside a CMSSW area.  Effectively just
+	changes the library name to include Ig_Tools.
+
 	* igprof: Add "-o" option to specify output destination.  If debug
 	mode is enabled, turn on IgHook debugging as well.  Correct how
 	parameters for all profiler modules are set.  If $LD_PRELOAD is
