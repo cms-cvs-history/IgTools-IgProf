@@ -1,5 +1,11 @@
 2007-01-26  Lassi A. Tuura  <lat@iki.fi>
 
+	* igprof: Add "-o" option to specify output destination.  If debug
+	mode is enabled, turn on IgHook debugging as well.  Correct how
+	parameters for all profiler modules are set.  If $LD_PRELOAD is
+	already set, add to it rather than override it; this allows igprof
+	to coexist with other tools like catchsegv and valgrind.
+
 	* IgProf.h, IgProf.cc, IgProfFileDesc.cc, IgProfMem.cc: Add
 	support for $IGPROF_TARGET environment variable to select
 	processes to profile; if the process is not selected, force all

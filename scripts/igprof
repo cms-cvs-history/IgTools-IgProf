@@ -6,6 +6,7 @@ usage() {
   echo
   echo "Options to igprof:"
   echo -e "-h, --help                 \tthis help message"
+  echo -e "-o, --output FILE          \toutput to FILE, or pipe if starts with '|'"
   echo -e "-d, --debug                \tenable more details from profiler"
   echo -e "-f, --full                 \tstart all the profilers"
   echo -e "-mp, --memory-profiler     \tstart the memory profiler"
@@ -19,14 +20,19 @@ usage() {
 
 append() { eval "if [ -z \"\$$1\" ]; then $1=\"\$2\"; else $1=\"\$$1 \$2\"; fi"; }
 
-SORT= MEM= FD= PERF= ALL=
+SORT= MEM= FD= PERF= ALL= OUT=
 while [ "$#" != 0 ]; do
   case "$1" in
     -h | --help )
       usage; exit 1;;
 
+    -o | --output )
+      OUT="out='$2'"; shift; shift ;;
+
     -d | --debug )
-      IGPROF_DEBUGGING=1; export IGPROF_DEBUGGING; shift ;;
+      IGHOOK_DEBUGGING=1 IGPROF_DEBUGGING=1;
+      export IGHOOK_DEBUGGING IGPROF_DEBUGGING;
+      shift ;;
 
     -f | --full )
       MEM="mem" FD="fd" PERF="perf" ALL=":all"; shift ;;
@@ -65,11 +71,12 @@ done
 [ X"$MEM" = X -a X"$FD" = X -a X"$PERF" = X ] && PERF=perf
 
 if [ -z "$ALL" ]; then :; else
-  [ -z "$MEM"  ] || MEM="$MEM:all"
-  [ -z "$FD"   ] || FD="$FD:all"
-  [ -z "$PERF" ] || PERF="$PERF:all"
+  [ -z "$MEM"  ] || MEM="$MEM$ALL"
+  [ -z "$FD"   ] || FD="$FD$ALL"
+  [ -z "$PERF" ] || PERF="$PERF$ALL"
 fi
 
+[ X"$OUT" = X ]  || append IGPROF "$OUT"
 [ X"$MEM" = X ]  || append IGPROF "$MEM"
 [ X"$FD" = X ]   || append IGPROF "$FD"
 [ X"$PERF" = X ] || append IGPROF "$PERF"
@@ -80,7 +87,7 @@ case $(uname) in
     DYLD_INSERT_LIBRARIES=$LOCALRT/lib/`scram arch`/libIgProf.dylib
     export DYLD_BIND_AT_LAUNCH DYLD_INSERT_LIBRARIES ;;
   * )
-    LD_PRELOAD=libIgProf.so;
+    LD_PRELOAD=${LD_PRELOAD:+${LD_PRELOAD}:}libIgProf.so;
     export LD_PRELOAD ;;
 esac
 export IGPROF
