@@ -1,6 +1,7 @@
 #!/usr/bin/env perl
 
 BEGIN { use strict; use warnings; $^W = 1; }
+use File::Temp;
 
 my $output = "text";
 my $demangle = 0;
@@ -10,146 +11,223 @@ my $verbose = 0;
 my $key;
 my @allkeys;
 my $order = 1;
+my $showcalls = undef;
+my $showpaths = 0;
 my @filters;
 my @filterfiles;
-my $sortkey = "SELF_KEY";
 my @builtinfilter = qw(malloc calloc realloc memalign posix_memalign valloc _Znwj _Znaj
 		       _ZNSt24__default_alloc_templateILb1ELi0EE14_S_chunk_allocEjRi
 		       _ZNSt24__default_alloc_templateILb1ELi0EE9_S_refillEj
 		       _ZNSt24__default_alloc_templateILb1ELi0EE8allocateEj);
 
-
-my %demangled = ();
-sub symname
+sub symremap
 {
-    my ($sym, $lib, $liboffset) = @_;
-    my $suffix = "";
-    if ($sym =~ /(.*)('[0-9]+)/o)
-    {
-	$sym = $1;
-	$suffix = $2;
-    }
+     my ($prof) = @_;
 
-    if (! exists $demangled{$sym}) {
-	my $new = $sym;
-	if ($gdb && $lib)
+     # If we are using GDB to resolve symbols more accurately, write
+     # a batch file to map library address offsets to symbol names.
+     if ($gdb)
+     {
+	my ($fh, $file) = mkstemp ("/tmp/igprof-analyse.gdb.XXXXXXXX");
+	my $syms = $$prof{SYMS};
+	my $prevlib = "";
+	print $fh "set width 10000\n";
+	foreach my $sym (sort { $$a{LIB} cmp $$b{LIB} } values %$syms)
 	{
-	    # use gdb to figure out real symbol
-	    my $file = "/tmp/igprof-analyse.$$";
-	    open (TMP, "> $file") || die;
-	    print TMP "file $lib\n";
-	    print TMP "info line *$liboffset\n";
-	    close (TMP) || die;
+	    next if ! $$sym{LIB} || ! $$sym{LIBOFF} || ! -f $$sym{LIB};
+	    print $fh "file $$sym{LIB}\n" if $prevlib ne $$sym{LIB};
+	    print $fh "echo IGPROF_SYMCHECK <$$sym{SYMBOL}>\\n\n";
+            print $fh "info line *$$sym{LIBOFF}\n";
+	    $prevlib = $$sym{LIB};
+        }
+	close ($fh) || die;
+	open (GDB, "gdb --batch --command=$file |") || die;
 
-	    open (GDB, "gdb --batch --command=$file |") || die;
-	    while (<GDB>)
-	    {
-		if (/starts at .* <([A-Za-z0-9_]+)(\+\d+)?>/) {
-		    $new = $1; last;
-		} elsif (/^No line number .* <([A-Za-z0-9_]+)(\+\d+)?>/) {
-		    $new = $1; last;
-	        }
+	my $sym = undef;
+	my $suffix = undef;
+	my $oldname = undef;
+	while (<GDB>)
+	{
+	    chomp;
+	    if (/^IGPROF_SYMCHECK <(.*)>/) {
+		$sym = $$syms{$1};
+	        ($oldname, $suffix) = ($$sym{NAME} =~ /(.*)('\d+)?$/);
+		$suffix ||= "";
+	    } elsif (/starts at .* <([A-Za-z0-9_]+)(\+\d+)?>/) {
+		die if ! $sym;
+		$$sym{NAME} = $1 . $suffix;
+		$sym = $suffix = undef;
+	    } elsif (/^No line number .* <([A-Za-z0-9_]+)(\+\d+)?>/) {
+		die if ! $sym;
+		$$sym{NAME} = $1 . $suffix;
+		$sym = $suffix = undef;
 	    }
-	    close (GDB);
-	    unlink ($file);
-	}
-	
-	if ($demangle) {
-	    # now demangle if requested
-	    chomp ($new = `c++filt '$new'`);
-	}
-	$demangled{$sym} = $new;
+        }
+	close (GDB);
+	unlink ($file);
     }
 
-    return $demangled{$sym} . $suffix;
+    if ($demangle)
+    {
+	my ($fh, $file) = mkstemp ("/tmp/igprof-analyse.c++filt.XXXXXXXX");
+	my @syms = values %{$$prof{SYMS}};
+	for (my $i = 0; $i <= $#syms; ++$i)
+	{
+	    print $fh "$i: $syms[$i]{NAME}\n";
+        }
+	close ($fh) || die;
+	open (CPPFILT, "c++filt < $file |") || die;
+	while (<CPPFILT>)
+	{
+	    chomp;
+	    /^(\d+): (.*)/ || next;
+	    $syms[$1]{NAME} = $2;
+        }
+	close (CPPFILT);
+	unlink ($file);
+    }
 }
 
 sub readDump
 {
     my ($file) = @_;
+    my $nodeidx = 0;
     my $syms = {};
-    my $nodes = { CHILDREN => [] };
+    my $nodes = [];
+    my $counts = {};
+    my $freqs = {};
     my $leaks = {};
     my $leaktable = undef;
-    my @nodestack = ($nodes);
+    my @nodestack;
 
-    open (DUMP, "< $file") || die "$file: $!\n";
+    print "Reading profile dump\n" if $verbose;
+    $$syms{"-1"} = { OFFSET => "", NAME => "<spontaneous>", LIB => "" };
+    $$nodes[0] = { INDEX => 0, SYMADDR => "-1", CHILDREN => [] };
+    push(@nodestack, $$nodes[0]);
+    ++$nodeidx;
+
+    if ($file =~ /\.gz$/)
+    {
+        open (DUMP, "gzip -d -c < $file |") || die "$file: $!\n";
+    }
+    else
+    {
+        open (DUMP, "< $file") || die "$file: $!\n";
+    }
+
     while (<DUMP>)
     {
         chomp;
-	if (m|<sym addr="(.*)" offset="(.*)" name="(.*)" lib="(.*)" liboff="(.*)"/>|)
+	if (m|<sym addr="(.*)" offset="(.*)" name="(.*)" lib="(.*)" liboff="(.*)"/>|o)
 	{
-	    $syms->{$1}{OFFSET} = $2;
-	    $syms->{$1}{NAME} = $3;
-	    $syms->{$1}{LIB} = $4;
-	    $syms->{$1}{LIBOFF} = $5;
+	    $$syms{$1}{SYMBOL} = $1;
+	    $$syms{$1}{OFFSET} = $2;
+	    $$syms{$1}{NAME} = $3;
+	    $$syms{$1}{LIB} = $4;
+	    $$syms{$1}{LIBOFF} = $5;
 	}
-	elsif (m|<sym addr="(.*)" offset="(.*)" name="(.*)" lib="(.*)"/>|)
+	elsif (m|<sym addr="(.*)" offset="(.*)" name="(.*)" lib="(.*)"/>|o)
 	{
-	    $syms->{$1}{OFFSET} = $2;
-	    $syms->{$1}{NAME} = $3;
-	    $syms->{$1}{LIB} = $4;
-	    $syms->{$1}{LIBOFF} = 0;
+	    $$syms{$1}{SYMBOL} = $1;
+	    $$syms{$1}{OFFSET} = $2;
+	    $$syms{$1}{NAME} = $3;
+	    $$syms{$1}{LIB} = $4;
+	    $$syms{$1}{LIBOFF} = 0;
 	}
-	elsif (/(\s+)<node id="([^"]*)" symaddr="([^"]*)">/)
+	elsif (/(\s+)<node id="[^"]*" symaddr="([^"]*)">/o)
 	{
-	    my $node = { ID => $2, SYMADDR => $3, CHILDREN => [] };
 	    $#nodestack = length($1)-2;
-	    push (@{$nodestack[$#nodestack]{CHILDREN}}, $node);
-	    push (@nodestack, $node);
+	    my $parent = $nodestack[$#nodestack];
+	    my @same = grep($$syms{$$nodes[$_]{SYMADDR}}{NAME} eq $$syms{$2}{NAME},
+			    @{$$parent{CHILDREN}});
+	    if (! @same)
+	    {
+	        my $index = $nodeidx++;
+	        my $node = { INDEX => $index, SYMADDR => $2, CHILDREN => [] };
+	        $$nodes[$index] = $node;
+	        push (@{$$parent{CHILDREN}}, $index);
+	        push (@nodestack, $node);
+	    }
+	    else
+	    {
+		push (@nodestack, $$nodes[$same[0]]);
+	    }
 	}
-	elsif (/<counter name="(.*)" value="(.*)" count="(.*)"\/>/)
+	elsif (/<counter name="(.*)" value="(.*)" count="(.*)"\/>/o
+	       && (! $key || $1 eq $key))
 	{
-	    $nodestack[$#nodestack]{COUNTERS}{$1} = [ $2, $3 ];
+	    my ($counter, $val, $freq) = ($1, $2, $3);
+	    my $index = $nodestack[$#nodestack]{INDEX};
+	    if (defined $$counts{$counter}[$index])
+	    {
+		$$freqs{$counter}[$index] += $freq;
+	        if ($counter =~ /_MAX$/o) {
+		    $$counts{$counter}[$index] = $val
+		        if $$counts{$counter}[$index] < $val;
+	        } else {
+		    $$counts{$counter}[$index] += $val;
+		}
+	    }
+	    else
+	    {
+	        $$counts{$counter}[$index] = $val;
+	        $$freqs{$counter}[$index] = $freq;
+	    }
 	}
-	elsif (m|<live map="(.*)" size=".*">|)
+	elsif (m|<live map="(.*)" size=".*">|o)
 	{
 	    $leaktable = $1;
 	}
-	elsif (m|<leak node="(.*)" resource="(.*)" extra="(.*)"/>|)
+	elsif (m|<leak node="(.*)" resource="(.*)" extra="(.*)"/>|o)
 	{
-	    push(@{$leaks->{$leaktable}}, [ $1, $2, $3 ]);
+	    push(@{$$leaks{$leaktable}}, [ $1, $2, $3 ]);
 	}
    }
    close (DUMP);
-   return { SYMS => $syms, LEAKS => $leaks, NODES => [ $nodes ] };
+   return { SYMS => $syms, COUNTS => $counts, FREQS => $freqs,
+	    NODES => $nodes, LEAKS => $leaks };
 }
+
+sub thousands
+{
+    my @result;
+    foreach my $x (@_)
+    {
+	$x = "$x";
+	1 while $x =~ s/(\d)(\d{3}($|\D))/$1'$2/;
+	push(@result, $x);
+    }
+
+    return $result[0] if scalar @_ == 1;
+    return @result;
+}
+
 
 sub walk
 {
-    my ($args, $pre, $post, @nodes) = @_;
-    my @stack = map { [ $_, undef ] } @nodes;
+    my ($pre, $post, $prof) = @_;
+    my @stack = [ undef, 0, undef ];
     while (@stack)
     {
-	my ($node_pre, $node_post) = @{pop(@stack)};
-	if ($node_pre)
+	my ($parentid, $preid, $postid) = @{pop(@stack)};
+	my $parent = (defined $parentid ? $$prof{NODES}[$parentid] : undef);
+	if (defined $preid)
 	{
-	    &$pre($node_pre, @$args) if defined $pre;
-	    push(@stack, [ undef, $node_pre ]) if $post;
-	    push(@stack, map { [ $_, undef ] } @{$$node_pre{CHILDREN}});
+	    my $node = $$prof{NODES}[$preid];
+	    &$pre($prof, $parent, $node) if defined $pre;
+	    push(@stack, [ $parentid, undef, $preid ]) if $post;
+	    push(@stack, map { [ $preid, $_, undef ] } @{$$node{CHILDREN}});
 	}
 	else
 	{
-	    &$post($node_post, @$args);
+	    &$post($prof, $parent, $$prof{NODES}[$postid]);
 	}
     }
 }
 
-sub keysof
-{
-    my ($dump) = @_;
-    my %keys = ();
-    &walk([ \%keys ],
-	  sub { my ($node, $keys) = @_;
-		$$keys{$_} ||= 1 for keys %{$$node{COUNTERS}} },
-	  undef,
-	  @{$$dump{NODES}});
-    return keys %keys;
-}
-
 sub symfor
 {
-    my ($dump, $seen, $node) = @_;
+    my ($prof, $seen, $node) = @_;
     if ($$node{REPORT_SYMADDR})
     {
 	$$seen{$$node{REPORT_SYMADDR}} = 1;
@@ -164,11 +242,11 @@ sub symfor
 	my $index = 2;
         $index++ while exists $$seen{"$sym'$index"};
 	$suffix = "'$index";
-	if (! exists $$dump{SYMS}{"$sym$suffix"})
+	if (! exists $$prof{SYMS}{"$sym$suffix"})
 	{
-            $$dump{SYMS}{"$sym$suffix"} = { %{$$dump{SYMS}{$sym}} };
-            $$dump{SYMS}{"$sym$suffix"}{NAME} =~ s/'[0-9]+$//;
-            $$dump{SYMS}{"$sym$suffix"}{NAME} .= $suffix;
+            $$prof{SYMS}{"$sym$suffix"} = { %{$$prof{SYMS}{$sym}} };
+            $$prof{SYMS}{"$sym$suffix"}{NAME} =~ s/'[0-9]+$//;
+            $$prof{SYMS}{"$sym$suffix"}{NAME} .= $suffix;
 	}
     }
     $$node{REPORT_SYMADDR} = "$sym$suffix";
@@ -178,251 +256,299 @@ sub symfor
 
 sub analyse
 {
-    my ($dump) = @_;
-
-    $$_{SYMADDR} = "-1" for @{$$dump{NODES}};
-    $$dump{SYMS}{"-1"} = { OFFSET => "", NAME => "<spontaneous>", LIB => "" };
+    my ($prof) = @_;
+    my $cnt = ($$prof{COUNTS}{$key} ||= []);
+    my $freq = ($$prof{FREQS}{$key} ||= []);
+    my $ccnt = [];
+    my $cfreq = [];
+    my $ismax = ($key =~ /_MAX$/ ? 1 : 0);
 
     # Accumulate values.  Initialise all counters in all nodes, then
     # propagate children's counts to the parent cumulative counts.
-    do { local $|=1; print "Summing counters: " } if $verbose;
-    &walk([],
-	  sub { my ($node) = @_;
-	        $$node{COUNTERS}{$key} ||= [ 0, 0 ];
-		$$node{COUNTERS}{$key . "_CUM"} = [ @{$$node{COUNTERS}{$key}} ]; },
-	  sub { my ($node) = @_;
-                do { local $|=1; print "." } if $verbose;
-		my $cumkey = "${key}_CUM";
-		my $cumval = $$node{COUNTERS}{$cumkey};
-		defined $cumval or die;
-
-		foreach my $kid (@{$$node{CHILDREN}})
-		{
-		    defined $$kid{COUNTERS}{$cumkey} or die;
-		    if ($key =~ /_MAX$/o)
-		    {
-			$$cumval[0] = $$kid{COUNTERS}{$cumkey}[0]
-			    if $$cumval[0] < $$kid{COUNTERS}{$cumkey}[0];
-			$$cumval[1] += $$kid{COUNTERS}{$cumkey}[1];
-		    }
-		    else
-		    {
-			$$cumval[0] += $$kid{COUNTERS}{$cumkey}[0];
-			$$cumval[1] += $$kid{COUNTERS}{$cumkey}[1];
-		    }
-		} },
-	  @{$$dump{NODES}});
-    print "\n" if $verbose;
+    print "Summing counters\n" if $verbose;
+    $$cnt[$_] ||= 0 for 0 .. scalar(@{$$prof{NODES}})-1;
+    $$ccnt[$_] = $$cnt[$_] for 0 .. scalar(@{$$prof{NODES}})-1;
+    $$freq[$_] ||= 0 for 0 .. scalar(@{$$prof{NODES}})-1;
+    $$cfreq[$_] = $$freq[$_] for 0 .. scalar(@{$$prof{NODES}})-1;
+    if ($ismax)
+    {
+        &walk(undef,
+	      sub { my ($prof, $parent, $node) = @_;
+		    return if ! $parent;
+		    my $parentidx = $$parent{INDEX};
+		    my $nodeidx = $$node{INDEX};
+		    $$cfreq[$parentidx] += $$cfreq[$nodeidx];
+		    $$ccnt[$parentidx] = $$ccnt[$nodeidx]
+			if $$ccnt[$parentidx] < $$ccnt[$nodeidx]; },
+	      $prof);
+    }
+    else
+    {
+        &walk(undef,
+	      sub { my ($prof, $parent, $node) = @_;
+		    return if ! $parent;
+		    my $parentidx = $$parent{INDEX};
+		    my $nodeidx = $$node{INDEX};
+		    $$cfreq[$parentidx] += $$cfreq[$nodeidx];
+		    $$ccnt[$parentidx] += $$ccnt[$nodeidx]; },
+	      $prof);
+    }
 
     # Suppress filtered symbols: apply counts of filtered
     # nodes to the self-counts of the parent.
-    do { local $|=1; print "Suppressing symbols: " } if $verbose;
-    &walk([ $$dump{SYMS} ],
-	  sub { my ($node, $syms) = @_;
-                do { local $|=1; print "." } if $verbose;
-		my $kids = $$node{CHILDREN};
-		$$node{CHILDREN} = [];
-		foreach my $kid (@$kids)
+    print "Suppressing symbols\n" if $verbose;
+    if ($ismax)
+    {
+        &walk(sub { my ($prof, $parent, $node) = @_;
+		    return if ! grep($_ eq $$prof{SYMS}{$$node{SYMADDR}}{NAME}, @filters);
+		    my $parentidx = $$parent{INDEX};
+		    my $nodeidx = $$node{INDEX};
+		    $$node{CHILDREN} = [];
+		    $$parent{CHILDREN} = [ grep($_ ne $nodeidx, @{$$parent{CHILDREN}}) ];
+		    $$freq[$parentidx] += $$cfreq[$nodeidx];
+		    $$cnt[$parentidx] += $$ccnt[$nodeidx]
+			if $$cnt[$parentidx] < $$ccnt[$nodeidx]; },
+	      undef,
+	      $prof);
+    }
+    else
+    {
+        &walk(sub { my ($prof, $parent, $node) = @_;
+		    return if ! grep($_ eq $$prof{SYMS}{$$node{SYMADDR}}{NAME}, @filters);
+		    my $parentidx = $$parent{INDEX};
+		    my $nodeidx = $$node{INDEX};
+		    $$node{CHILDREN} = [];
+		    $$parent{CHILDREN} = [ grep($_ ne $nodeidx, @{$$parent{CHILDREN}}) ];
+		    $$freq[$parentidx] += $$cfreq[$nodeidx];
+		    $$cnt[$parentidx] += $$ccnt[$nodeidx]; },
+	      undef,
+	      $prof);
+    }
+
+    # Initialise result table.
+    print "Building call tree map\n" if $verbose;
+    my $flat = {};
+    my $seen = {};
+    &walk(sub { my ($prof, $parent, $node) = @_;
+	        my ($realsym, $sym) = &symfor($prof, $seen, $node);
+		my $symnode = ($$flat{$sym} ||= {});
+		$$symnode{DEPTH} = scalar keys %$seen;
+
+		if ($parent)
 		{
-		    if (! grep($_ eq $$syms{$$kid{SYMADDR}}{NAME}, @filters))
+		    my $parsym = $$parent{REPORT_SYMADDR} || $$parent{SYMADDR};
+		    $$flat{$sym}{CALLERS}{$parsym} = 1;
+		    $$flat{$parsym}{CALLS}{$sym} ||= [ 0, 0 ];
+		    $$flat{$parsym}{CALLS}{$sym}[0] += $$ccnt[$$node{INDEX}];
+		    $$flat{$parsym}{CALLS}{$sym}[1] += $$cfreq[$$node{INDEX}];
+		    $$flat{$parsym}{CALLS}{$sym}[2]++;
+		}
+
+	        foreach my $c ([ "SELF_KEY", $cnt, $freq ], [ "CUM_KEY", $ccnt, $cfreq ])
+		{
+		    my ($part, $cnt, $freq) = @$c;
+		    if ($ismax)
 		    {
-			push(@{$$node{CHILDREN}}, $kid);
-			next;
-		    }
-
-		    my $cumkey = "${key}_CUM";
-		    my $val = $$node{COUNTERS}{$key};
-
-		    defined $val or die;
-		    defined $$kid{COUNTERS}{$key} or die;
-		    defined $$kid{COUNTERS}{$cumkey} or die;
-
-		    if ($key =~ /_MAX$/o)
-		    {
-			$$val[0] = $$kid{COUNTERS}{$cumkey}[0]
-			    if $$kid{COUNTERS}{$cumkey}[0] > $$val[0];
-			$$val[1] += $$kid{COUNTERS}{$cumkey}[1];
+		        $$symnode{$part} ||= [ 0, 0 ];
+		        $$symnode{$part}[0] = $$cnt[$$node{INDEX}]
+			    if ($$symnode{$part}[0] < $$cnt[$$node{INDEX}]);
+		        $$symnode{$part}[1] += $$freq[$$node{INDEX}];
+		        $$symnode{$part}[2]++;
 		    }
 		    else
 		    {
-			$$val[0] += $$kid{COUNTERS}{$cumkey}[0];
-			$$val[1] += $$kid{COUNTERS}{$cumkey}[1];
+		        $$symnode{$part} ||= [ 0, 0 ];
+		        $$symnode{$part}[0] += $$cnt[$$node{INDEX}];
+		        $$symnode{$part}[1] += $$freq[$$node{INDEX}];
+		        $$symnode{$part}[2]++;
 		    }
 		} },
-	  undef,
-	  @{$$dump{NODES}});
-    print "\n" if $verbose;
-
-    # Initialise result table.  Add values for all requested counters.
-    # Note that all counters are already initialised in every node.
-    do { local $|=1; print "Flattening: " } if $verbose;
-    my $flat = {};
-    my $calls = {};
-    my $seen = {};
-    &walk([ $dump, $flat, $calls, $seen ],
-	  sub { my ($node, $dump, $flat, $calls, $seen) = @_;
-                do { local $|=1; print "." } if $verbose;
-	        my ($realsym, $sym) = &symfor($dump, $seen, $node);
-		my $symnode = ($$flat{$sym} ||= {});
-	        foreach my $counter ($key, "${key}_CUM")
-		{
-		    my ($part, $name, $val) = ("SELF", $counter, $$node{COUNTERS}{$counter});
-		    if ($name =~ /(.*)_CUM$/) {
-			$part = "CUM"; $name = "$1";
-		    }
-
-		    next if $name ne $key;
-
-		    foreach my $kid (@{$$node{CHILDREN}})
-		    {
-			my ($kidrealsym, $kidsym) = &symfor($dump, $seen, $kid);
-			my $kidsymnode = ($$flat{$kidsym} ||= {});
-			my $kidval = $$kid{COUNTERS}{$counter};
-			$$kidsymnode{CALLERS}{$sym} = 1;
-			$$symnode{CALLS}{$kidsym}{$counter} ||= [ 0, 0 ];
-			$$symnode{CALLS}{$kidsym}{$counter}[0] += $$kidval[0];
-			$$symnode{CALLS}{$kidsym}{$counter}[1]++;
-			$$calls{$sym}{$kidsym} = 1;
-			delete $$kid{$kidsym};
-			delete $$seen{$kidsym};
-		    }
-
-		    $$symnode{$part}{MAX}{$name} ||= [ 0, 0 ];
-		    $$symnode{$part}{MAX}{$name}[0] = $$val[0]
-			if ($$symnode{$part}{MAX}{$name}[0] < $$val[0]);
-		    $$symnode{$part}{MAX}{$name}[1]++;
-	    
-		    $$symnode{$part}{SUM}{$name} ||= [ 0, 0 ];
-		    $$symnode{$part}{SUM}{$name}[0] += $$val[0];
-		    $$symnode{$part}{SUM}{$name}[1]++;
-		} },
-	  sub { my ($node, $dump, $flat, $calls, $seen) = @_;
-		my $sym = $$node{REPORT_SYMADDR};
-		delete $$seen{$sym};
-		foreach my $kid (@{$$node{CHILDREN}})
-		{
-		    my $kidsym = $$kid{REPORT_SYMADDR};
-		    next if ! exists $$calls{$kidsym};
-		    $$calls{$sym}{$_} = 1 for keys %{$$calls{$kidsym}};
-		} },
-	  @{$$dump{NODES}});
-    print "\n" if $verbose;
-
-    # Calculate final sort keys
-    do { local $|=1; print "Summarising: " } if $verbose;
-    foreach my $sym (keys %$flat)
-    {
-        do { local $|=1; print "." } if $verbose;
-	my ($sval, $cval);
-	if ($key =~ /_MAX$/)
-	{
-	    $sval = $$flat{$sym}{SELF}{MAX}{$key};
-	    $cval = $$flat{$sym}{CUM}{MAX}{$key};
-	}
-	else
-	{
-	    $sval = $$flat{$sym}{SELF}{SUM}{$key};
-	    $cval = $$flat{$sym}{CUM}{SUM}{$key};
-	}
-	$$flat{$sym}{SELF_KEY}{$key} = [ @$sval ];
-	$$flat{$sym}{CUM_KEY}{$key} = [ @$cval ];
-    }
-    print "\n" if $verbose;
+	  sub { my ($prof, $parent, $node) = @_;
+		delete $$seen{$$node{REPORT_SYMADDR} || $$node{SYMADDR}} },
+	  $prof);
 
     # Sort the symbols by selected criteria
-    do { local $|=1; print "Sorting\n" } if $verbose;
+    print "Sorting\n" if $verbose;
     my $rank = 1;
-    my @sorted = sort { &cmpnodes($flat, $calls, $a, $b); } keys %$flat;
-    foreach my $sym (@sorted) {
-	$$flat{$sym}{RANK} = $rank++;
+    my @sorted = sort { &cmpnodes($flat, $a, $b); } keys %$flat;
+    $$flat{$_}{RANK} = $rank++ for @sorted;
+
+    # Resolve symbols using GDB and/or demangler
+    if ($demangle || $gdb)
+    {
+        print "Resolving symbols\n" if $verbose;
+        &symremap($prof);
     }
 
-    # Output result table
-    do { local $|=1; print "Generating report\n" } if $verbose;
+    # Output result: flat and call tree reports.
+    print "Generating report\n" if $verbose;
     my @table = ();
-    foreach my $sym (@sorted) {
+    my $total = $$flat{"-1"}{CUM_KEY}[0];
+    foreach my $sym (@sorted)
+    {
+	# If the row has no value, skip it.
+	next if ! $$flat{$sym}{CUM_KEY}[0];
+
+	# Sort calling and called functions.
 	my $row = { CALLERS => [], SYM => [], CALLS => [] };
 	push (@table, $row);
 
-	my @parents = sort { ($sortkey eq "SELF_KEY"
-			      ? ($flat->{$a}{CALLS}{$sym}{$key}[0]
-			         <=> $flat->{$b}{CALLS}{$sym}{$key}[0])
-			      : 0)
-			     || ($flat->{$a}{CUM_KEY}{$key}[0]
-			         <=> $flat->{$b}{CUM_KEY}{$key}[0]) }
-	    sort keys %{$flat->{$sym}{CALLERS}};
+	my @parents = sort { ($$flat{$a}{CALLS}{$sym}[0]
+			      <=> $$flat{$b}{CALLS}{$sym}[0])
+			     || ($$flat{$a}{CUM_KEY}[0]
+			         <=> $$flat{$b}{CUM_KEY}[0]) }
+	    sort keys %{$$flat{$sym}{CALLERS}};
 
-	my @children = sort { ($sortkey eq "SELF_KEY"
-			       ?  ($flat->{$sym}{CALLS}{$b}{$key}[0]
-			           <=> $flat->{$sym}{CALLS}{$a}{$key}[0])
-			       : 0)
-			      || ($flat->{$b}{CUM_KEY}{$key}[0]
-			          <=> $flat->{$a}{CUM_KEY}{$key}[0]) }
-	    sort keys %{$flat->{$sym}{CALLS}};
+	my @children = sort { ($$flat{$sym}{CALLS}{$b}[0]
+			       <=> $$flat{$sym}{CALLS}{$a}[0])
+			      || ($$flat{$b}{CUM_KEY}[0]
+			          <=> $$flat{$a}{CUM_KEY}[0]) }
+	    sort keys %{$$flat{$sym}{CALLS}};
 
-	# parents
+	# Build calling function information.
+	my $div = $key eq 'PERF_TICKS' ? 100 : 1;
 	foreach my $caller (@parents)
 	{
-	    my $thiscall = $flat->{$caller}{CALLS}{$sym};
-	    my $callrow = [ $flat->{$caller}{RANK},
-			    $dump->{SYMS}{$caller}{NAME},
-			    $dump->{SYMS}{$caller}{LIB},
-			    $dump->{SYMS}{$caller}{LIBOFF},
-		            [ [ $flat->{$caller}{CUM_KEY}{$key}[0], $thiscall->{$key}[0] ],
-			      [ $flat->{$caller}{$sortkey}{$key}[1], $thiscall->{$key}[1] ] ] ];
-	    push (@{$row->{CALLERS}}, $callrow);
+	    my $thiscall = $$flat{$caller}{CALLS}{$sym};
+	    next if ! $$thiscall[0];
+
+	    my $callrow = [ $$flat{$caller}{RANK},
+			    $$prof{SYMS}{$caller}{NAME},
+			    $$prof{SYMS}{$caller}{LIB},
+			    $$prof{SYMS}{$caller}{LIBOFF},
+			    $$thiscall[0]/$total*100,
+		            [ [ $$thiscall[0]/$div, $$flat{$caller}{CUM_KEY}[0]/$div ],
+		              [ $$thiscall[1], $$flat{$caller}{CUM_KEY}[1] ],
+			      [ $$thiscall[2], $$flat{$caller}{CUM_KEY}[2] ] ] ];
+	    push (@{$$row{CALLERS}}, $callrow);
 	}
 
-	# row
-	push (@{$row->{SYM}}, $flat->{$sym}{RANK});
-	push (@{$row->{SYM}}, $dump->{SYMS}{$sym}{NAME});
-	push (@{$row->{SYM}}, $dump->{SYMS}{$sym}{LIB});
-	push (@{$row->{SYM}}, $dump->{SYMS}{$sym}{LIBOFF});
-	push (@{$row->{SYM}}, $flat->{$sym}{$sortkey}{$key});
+	# Fill information for this function itself.
+	push (@{$$row{SYM}}, $$flat{$sym}{RANK});
+	push (@{$$row{SYM}}, $$prof{SYMS}{$sym}{NAME});
+	push (@{$$row{SYM}}, $$prof{SYMS}{$sym}{LIB});
+	push (@{$$row{SYM}}, $$prof{SYMS}{$sym}{LIBOFF});
+	push (@{$$row{SYM}}, $$flat{$sym}{CUM_KEY}[0]/$total*100);
+	push (@{$$row{SYM}}, $$flat{$sym}{CUM_KEY}[0]/$div);
+	push (@{$$row{SYM}}, $$flat{$sym}{SELF_KEY}[0]/$div);
+	push (@{$$row{SYM}}, ($$flat{$sym}{CUM_KEY}[0]-$$flat{$sym}{SELF_KEY}[0])/$div);
+	push (@{$$row{SYM}}, $$flat{$sym}{SELF_KEY});
+	push (@{$$row{SYM}}, $$flat{$sym}{CUM_KEY});
 
-	# children
+	# Build information for called functions.
 	foreach my $callee (@children)
 	{
-	    my $thiscall = $flat->{$sym}{CALLS}{$callee};
-	    my $callrow = [ $flat->{$callee}{RANK},
-			    $dump->{SYMS}{$callee}{NAME},
-			    $dump->{SYMS}{$callee}{LIB},
-			    $dump->{SYMS}{$callee}{LIBOFF},
-		            [ [ $flat->{$callee}{CUM_KEY}{$key}[0], $thiscall->{$key}[0] ],
-			      [ $flat->{$callee}{$sortkey}{$key}[1], $thiscall->{$key}[1] ] ] ];
-	    push (@{$row->{CALLS}}, $callrow);
+	    my $thiscall = $$flat{$sym}{CALLS}{$callee};
+	    next if ! $$thiscall[0];
+
+	    my $callrow = [ $$flat{$callee}{RANK},
+			    $$prof{SYMS}{$callee}{NAME},
+			    $$prof{SYMS}{$callee}{LIB},
+			    $$prof{SYMS}{$callee}{LIBOFF},
+			    $$thiscall[0]/$total*100,
+		            [ [ $$thiscall[0]/$div, $$flat{$callee}{CUM_KEY}[0]/$div ],
+			      [ $$thiscall[1], $$flat{$callee}{CUM_KEY}[1] ],
+			      [ $$thiscall[2], $$flat{$callee}{CUM_KEY}[2] ] ] ];
+	    push (@{$$row{CALLS}}, $callrow);
 	}
     }
 
     if ($output eq 'text')
     {
-        print "counter: $key\n";
+        print "Counter: $key\n";
+	my $maxcnt = length(&thousands("$total")); $maxcnt = 8 if $maxcnt < 8;
+	my $maxval = $maxcnt + ($key eq 'PERF_TICKS' ? 1 : 0);
+        my $basefmt = ($key eq 'PERF_TICKS' ? "\%.2f" : "\%s");
+	my $valfmt = "\%${maxval}s / \%-${maxval}s";
+	my $cntfmt = "\%${maxcnt}s / \%-${maxcnt}s";
+
+	print "\n", "-" x 70, "\n", "Flat performance profile (cumulative >= 1\%)\n\n";
+	print "% total  ",
+	      sprintf("\%${maxval}s", "Total"), "  ",
+	      ($showcalls ? (sprintf("\%${maxcnt}s", "Calls"), "  ") : ()),
+	      ($showpaths ? (sprintf("\%${maxcnt}s", "Paths"), "  ") : ()),
+	      "Function\n";
+        foreach my $entry (@table)
+        {
+	    my ($rank, $name, $lib, $liboff, $pct,
+	        $cum, $self, $kids, $selfall, $cumall) = @{$$entry{SYM}};
+	    print sprintf('%7.1f  ', $pct),
+		  sprintf("\%${maxval}s  ", &thousands(sprintf($basefmt, $cum))),
+		  ($showcalls ? sprintf("\%${maxcnt}s  ", &thousands($$cumall[1])) : ()),
+		  ($showpaths ? sprintf("\%${maxcnt}s  ", &thousands($$cumall[2])) : ()),
+	          "$name [$rank]",
+	          ($showlibs ? " ($lib)\n" : "\n");
+	    last if $pct < 1;
+	}
+
+	print "\n\n", "-" x 70, "\n", "Flat performance profile (self >= 0.01\%)\n\n";
+	print "% total  ",
+	      sprintf("\%${maxval}s  ", "Self"),
+	      ($showcalls ? sprintf("\%${maxcnt}s  ", "Calls") : ()),
+	      ($showpaths ? sprintf("\%${maxcnt}s  ", "Paths") : ()),
+	      "Function\n";
+        foreach my $entry (sort { $$b{SYM}[6] <=> $$a{SYM}[6] } @table)
+        {
+	    my ($rank, $name, $lib, $liboff, $pct,
+	        $cum, $self, $kids, $selfall, $cumall) = @{$$entry{SYM}};
+	    $pct = $self/$total*100;
+	    print sprintf('%7.2f  ', $pct),
+		  sprintf("\%${maxval}s  ", &thousands(sprintf($basefmt, $self))),
+		  ($showcalls ? sprintf("\%${maxcnt}s  ", &thousands($$selfall[1])) : ()),
+		  ($showpaths ? sprintf("\%${maxcnt}s  ", &thousands($$selfall[2])) : ()),
+	          "$name [$rank]",
+	          ($showlibs ? " ($lib)\n" : "\n");
+	    last if $pct < 0.01;
+	}
+
+	print "\n\n", "-" x 70, "\n", "Call tree profile (cumulative)\n";
 	foreach my $entry (@table)
 	{
-	    my ($rank, $name, $lib, $val);
-	    print "\n", "-" x 70, "\n";
-	    foreach my $caller (@{$entry->{CALLERS}})
+	    my $divlen = 34+3*$maxval+$showcalls*(2*$maxcnt+5) + $showpaths*(2*$maxcnt+5);
+	    print "\n", "- " x (++$divlen/2), "\n";
+	    print sprintf('%-8s', 'Rank'), "% total  ",
+	          sprintf("\%${maxval}s  ", "Self"),
+	          sprintf("$valfmt  ", "Self", "Children"),
+	          ($showcalls ? sprintf("$cntfmt  ", "Calls", "Total") : ()),
+	          ($showpaths ? sprintf("$cntfmt  ", "Paths", "Total") : ()),
+	          "Function\n"
+		if ! (($$entry{SYM}[0]-1) % 10);
+
+	    foreach my $caller (@{$$entry{CALLERS}})
 	    {
-		($rank, $name, $lib, $liboff, $val) = @$caller;
-		print join("\t", "", map { "$_->[0]/$_->[1]" } @$val);
-		print "\t@{[&symname ($name, $lib, $liboff)]} [$rank]";
-		print " ($lib)" if $showlibs;
-		print "\n";
+		my ($rank, $name, $lib, $liboff, $pct, $val) = @$caller;
+		print " " x 8,
+		      sprintf('%7.1f  ', $pct),
+		      "." x $maxval, "  ",
+		      sprintf("$valfmt  ", &thousands(map { sprintf($basefmt, $_) } @{$$val[0]})),
+		      ($showcalls ? sprintf("$cntfmt  ", &thousands(@{$$val[1]})) : ()),
+		      ($showpaths ? sprintf("$cntfmt  ", &thousands(@{$$val[2]})) : ()),
+		      "  $name [$rank]",
+		      ($showlibs ? " ($lib)\n" : "\n");
 	    }
 
-	    ($rank, $name, $lib, $liboff, $val) = @{$entry->{SYM}};
-	    print join("\t", "[$rank]", @$val);
-	    print "\t@{[&symname ($name, $lib, $liboff)]}";
-	    print " ($lib)" if $showlibs;
-	    print "\n";
+	    my ($rank, $name, $lib, $liboff, $pct,
+	        $cum, $self, $kids, $selfall, $cumall) = @{$$entry{SYM}};
+	    print sprintf("%-8s", "[$rank]"),
+		  sprintf('%7.1f  ', $pct),
+		  sprintf("\%${maxval}s  ", &thousands(sprintf($basefmt, $cum))),
+		  sprintf("$valfmt  ", &thousands(map { sprintf($basefmt, $_) } $self, $kids)),
+		  ($showcalls ? sprintf("\%${maxcnt}s   \%${maxcnt}s  ", &thousands($$cumall[1]), "") : ()),
+		  ($showpaths ? sprintf("\%${maxcnt}s   \%${maxcnt}s  ", &thousands($$cumall[2]), "") : ()),
+	          $name,
+		  ($showlibs ? " ($lib)\n" : "\n");
 
-	    foreach my $callee (@{$entry->{CALLS}})
+	    foreach my $callee (@{$$entry{CALLS}})
 	    {
-		($rank, $name, $lib, $liboff, $val) = @$callee;
-		print join("\t", "", map { "$_->[0]/$_->[1]" } @$val);
-		print "\t@{[&symname ($name, $lib, $liboff)]} [$rank]";
-		print " ($lib)" if $showlibs;
-		print "\n";
+		my ($rank, $name, $lib, $liboff, $pct, $val) = @$callee;
+		print " " x 8,
+		      sprintf('%7.1f  ', $pct),
+		      "." x $maxval, "  ",
+		      sprintf("$valfmt  ", &thousands(map { sprintf($basefmt, $_) } @{$$val[0]})),
+		      ($showcalls ? sprintf("$cntfmt  ", &thousands(@{$$val[1]})) : ()),
+		      ($showpaths ? sprintf("$cntfmt  ", &thousands(@{$$val[2]})) : ()),
+		      "  $name [$rank]",
+		      ($showlibs ? " ($lib)\n" : "\n");
 	    }
 	}
     }
@@ -431,27 +557,26 @@ sub analyse
 	sub htmlcounter {
 	    my ($span, $value, $count) = @_;
 	    my $spanarg = $span == 1 ? "" : " colspan=\"$span\"";
-	    print "    <td$spanarg>$value</td>\n";
+	    print "    <td$spanarg>$value&nbsp;/</td>\n";
 	    print "    <td$spanarg>$count</td>\n";
 	}
 	    
 	sub htmlrow {
 	    my ($type, $rank, $name, $lib, $liboff, $val) = @_;
-	    print "  <tr>\n";
 	    if ($type eq 0) {
-		print "    <td><a name=\"R$rank\">[$rank]</a></td>\n";
+	        print "  <tr valign='top' bgcolor='#ddd'>\n";
+		print "    <td align='right'><a name=\"R$rank\">[$rank]</a></td>\n";
 	    } else {
+	        print "  <tr valign='top'>\n";
 		print "    <td>&nbsp;</td>\n";
 	    }
-	    if (ref($val) eq 'ARRAY' and ref($val->[0]) eq 'ARRAY') {
+	    if ($type eq 1) {
 		# caller/call syntax
-		&htmlcounter (1, $val->[0][0], $val->[1][0]);
-		&htmlcounter (1, $val->[0][1], $val->[1][1]);
+		&htmlcounter (1, @$_) for @$val;
 	    } else {
 		# symbol syntax
 		&htmlcounter (2, @$val);
 	    }
-	    $name = &symname ($name, $lib, $liboff);
 	    $name =~ s/&/&amp;/g; $name =~ s/</&lt;/g; $name =~ s/>/&gt;/g;
 	    print "    <td><a href=\"#R$rank\">$name</a>";
 	    if ($type eq 0) {
@@ -476,14 +601,14 @@ sub analyse
 	foreach my $entry (@table)
 	{
 	    print "  <tr><td colspan='7'><hr /></tr>\n";
-	    foreach my $caller (@{$entry->{CALLERS}}) {
+	    foreach my $caller (@{$$entry{CALLERS}}) {
 		&htmlrow (1, @$caller);
 	    }
 
-	    my $rank = $entry->{SYM}[0];
-	    &htmlrow (0, @{$entry->{SYM}});
+	    my $rank = $$entry{SYM}[0];
+	    &htmlrow (0, @{$$entry{SYM}});
 
-	    foreach my $callee (@{$entry->{CALLS}}) {
+	    foreach my $callee (@{$$entry{CALLS}}) {
 		&htmlrow (1, @$callee);
 	    }
 	}
@@ -499,12 +624,11 @@ sub analyse
 	    
 	sub xmlrow {
 	    my ($prefix, $rank, $name, $lib, $val) = @_;
-	    my $keytype = $sortkey eq 'CUM_KEY' ? "cumulative" : "self";
 	    print "  $prefix<entry rank=\"$rank\" symbol=\"$name\" module=\"$lib\">\n";
-	    if (ref($val) eq 'ARRAY' and ref($val->[0]) eq 'ARRAY') {
+	    if (ref($val) eq 'ARRAY' and ref($$val[0]) eq 'ARRAY') {
 		# caller/call syntax
-		&xmlcounter ($prefix, "cumulative", $key, $val->[0][0], $val->[1][0]);
-		&xmlcounter ($prefix, "call$keytype", $key, $val->[0][1], $val->[1][1]);
+		&xmlcounter ($prefix, "cumulative", $key, $$val[0][0], $$val[1][0]);
+		&xmlcounter ($prefix, "call$keytype", $key, $$val[0][1], $$val[1][1]);
 	    } else {
 		# symbol syntax
 		&xmlcounter ($prefix, $keytype, $key, @$val);
@@ -515,12 +639,12 @@ sub analyse
 	print "  <counter name=\"$key\"/>\n";
 	foreach my $entry (@table)
 	{
-	    &xmlrow ("", @{$entry->{SYM}});
-	    foreach my $caller (@{$entry->{CALLERS}}) {
+	    &xmlrow ("", @{$$entry{SYM}});
+	    foreach my $caller (@{$$entry{CALLERS}}) {
 		&xmlrow ("  ", @$caller);
 	        print "       </entry>\n";
 	    }
-	    foreach my $callee (@{$entry->{CALLS}}) {
+	    foreach my $callee (@{$$entry{CALLS}}) {
 		&xmlrow ("  ", @$callee);
 	        print "       </entry>\n";
 	    }
@@ -532,9 +656,9 @@ sub analyse
 
 sub cmpnodekey
 {
-    my ($flat, $sortkey, $a, $b) = @_;
-    my $aval = $$flat{$a}{$sortkey}{$key}[0];
-    my $bval = $$flat{$b}{$sortkey}{$key}[0];
+    my ($flat, $a, $b) = @_;
+    my $aval = $$flat{$a}{CUM_KEY}[0];
+    my $bval = $$flat{$b}{CUM_KEY}[0];
     $aval = -1 if ! defined ($aval);
     $bval = -1 if ! defined ($bval);
     my $diff = -1 * $order * ($aval <=> $bval);
@@ -543,26 +667,20 @@ sub cmpnodekey
 
 sub cmpcallers
 {
-    my ($flat, $calls, $a, $b) = @_;
-    # If a calls b, order it first
-    my $acall = (exists $$calls{$a} && exists $$calls{$a}{$b} ? -1 : 1);
-    my $bcall = (exists $$calls{$b} && exists $$calls{$b}{$a} ? -1 : 1);
-    return $acall <=> $bcall;
+    my ($flat, $a, $b) = @_;
+    # If a calls b, order it first.  It's way too expensive to compute
+    # the actual relationship (either takes too long time or too much
+    # memory), so we approximate by comparing call tree depths.
+    return $$flat{$a}{DEPTH} <=> $$flat{$b}{DEPTH};
 }
 
 sub cmpnodes
 {
-    my ($flat, $calls, $a, $b) = @_;
-    my $cmp = &cmpnodekey($flat, $sortkey, $a, $b);
+    my ($flat, $a, $b) = @_;
+    my $cmp = &cmpnodekey($flat, $a, $b);
     return $cmp if $cmp;
 
-    if ($sortkey ne 'CUM_KEY')
-    {
-	$cmp = &cmpnodekey($flat, 'CUM_KEY', $a, $b);
-	return $cmp if $cmp;
-    }
-
-    $cmp = &cmpcallers($flat, $calls, $a, $b);
+    $cmp = &cmpcallers($flat, $a, $b);
     return $cmp if $cmp;
     return $a cmp $b;
 }
@@ -572,10 +690,9 @@ sub usage
     print STDERR "igprof-analyse\n",
 		 "  [-r/--report KEY[,KEY]...] [-o/--order ORDER]\n",
 		 "  [-f/--filter FILE] [-F/--no-filter]\n",
-		 "  { [-e/--self] | [-c/--cumulative] }\n",
 		 "  { [-x/--xml] | [-h/--html] | [-t/--text] }\n",
 		 "  [--libs] [--demangle] [--gdb] [-v/--verbose]\n",
-		 "  [--] [FILE]...\n";
+		 "  [-p/--paths] [-c/--calls] [--] [FILE]...\n";
 }
 
 while (scalar @ARGV)
@@ -592,10 +709,6 @@ while (scalar @ARGV)
     { push (@filterfiles, $ARGV[1]); shift (@ARGV); shift (@ARGV); }
     elsif ($ARGV[0] eq '--no-filter' || $ARGV[0] eq '-F')
     { @builtinfilter = (); shift (@ARGV); }
-    elsif ($ARGV[0] eq '--self' || $ARGV[0] eq '-e')
-    { $sortkey = "SELF_KEY"; shift (@ARGV); }
-    elsif ($ARGV[0] eq '--cumulative' || $ARGV[0] eq '-c')
-    { $sortkey = "CUM_KEY"; shift (@ARGV); }
     elsif ($ARGV[0] eq '--libs' || $ARGV[0] eq '-l')
     { $showlibs = 1; shift (@ARGV); }
     elsif ($ARGV[0] eq '--xml' || $ARGV[0] eq '-x')
@@ -608,10 +721,14 @@ while (scalar @ARGV)
     { $demangle = 1; shift (@ARGV); }
     elsif ($ARGV[0] eq '--gdb' || $ARGV[0] eq '-g')
     { $gdb = 1; shift (@ARGV); }
+    elsif ($ARGV[0] eq '--paths' || $ARGV[0] eq '-p')
+    { $showpaths = 1; shift (@ARGV); }
+    elsif ($ARGV[0] eq '--calls' || $ARGV[0] eq '-c')
+    { $showcalls = 1; shift (@ARGV); }
     elsif ($ARGV[0] eq '--')
     { last; }
     elsif ($ARGV[0] =~ /^-/)
-    { print STDERR "unknown option $ARGV[0]"; &usage(); exit (1); }
+    { print STDERR "unknown option $ARGV[0]\n"; &usage(); exit (1); }
     else
     { last; }
 }
@@ -632,22 +749,20 @@ foreach my $file (@filterfiles)
 foreach my $file (@ARGV)
 {
     my $prof = &readDump ($file);
-    @allkeys = &keysof ($prof);
-    die "Dump has no value for any counter\n" if ! @allkeys;
+    @allkeys = keys %{$$prof{COUNTS}};
+    die "Profile dump has no counter values.\n" if ! @allkeys;
     if (! defined $key)
     {
-	if (grep($_ eq 'PERF_TICKS', @allkeys))
-	{
-	    $key = 'PERF_TICKS';
-	}
-	elsif (grep($_ eq 'MEM_LIVE', @allkeys))
-	{
-	    $key = 'MEM_LIVE';
+	if (scalar @allkeys > 1)
+        {
+	    die "No profile counter selected for reporting, please select one of: @allkeys\n";
 	}
 	else
 	{
 	    $key = $allkeys[0];
 	}
     }
+
+    $showcalls = ($key =~ /MEM/ ? 1 : 0) if ! defined $showcalls;
     &analyse ($prof);
 }

@@ -1,3 +1,29 @@
+2007-01-26  Lassi A. Tuura  <lat@iki.fi>
+
+	* igprof-analyse: Add options to show number of calls and call
+	paths; by default do not show these columns.  Output first flat
+	by-cumulative and by-self profiles, then always by-cumulative call
+	tree.  Improve column formatting so values are easier to read and
+	match.  Format large numbers more readably.  Suppress rows with
+	zero entries from the profile output; these can arise when the
+	selected counter has no data while others do.  If no counter was
+	selected for reporting and the dump includes several, require a
+	counter to be selected -- don't default to any counter.  Optimise
+	how the data is kept in memory.  Read in only the counters we are
+	going to analyse and keep all count and frequency values in an
+	array indexed by an index id given to each node.  Support merging
+	tree nodes when they refer to the same symbol, the memory profiler
+	now produces trees by actual call address.  Change tree walks to
+	pass parent reference as that simplifies tree action
+	implementation.  Speed up the tree walks by use separate action
+	functions based on whether we are maximising or accumulating the
+	counters.  Optimise call tree map sort by using call tree depth to
+	decide whether one function could call the other and should come
+	first, as that uses little additional memory and is very quick.
+	Remap symbol names with a single invocation of gdb and c++filt;
+	this speeds up the process very significantly.  (HTML and XML
+	output are now broken.)
+
 2007-01-24  Lassi A. Tuura  <lat@iki.fi>
 
 	* test/test_load.cc: Use deeper and more varied stacks.
