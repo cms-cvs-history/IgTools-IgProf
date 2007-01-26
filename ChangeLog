@@ -1,3 +1,7 @@
+2007-01-24  Lassi A. Tuura  <lat@iki.fi>
+
+	* test/test_load.cc: Use deeper and more varied stacks.
+
 2007-01-23  Lassi A. Tuura  <lat@iki.fi>
 
 	* igprof-analyse: Report and sort only one counter at a time, in
