@@ -502,13 +502,13 @@ static void
 doexit (IgHook::SafeData<igprof_doexit_t> &hook, int code)
 {
     // Force the merge of per-thread profile tree into the main tree
-    // if a non-main thread calls exit().  Then pass on the call.
+    // if a thread calls exit().  Then forward the call.
     {
         IgProfLock lock (s_enabled);
 	pthread_t thread = pthread_self ();
-	if (s_pthreads && thread != s_mainthread)
+	if (s_pthreads)
 	{
-	    IgProf::debug ("thread %lu called %s(), merging\n",
+	    IgProf::debug ("merging thread %lu profile on %s()\n",
 			   (unsigned long) thread, hook.function);
 	    IgProf::exitThread ();
 	}

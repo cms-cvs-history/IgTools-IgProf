@@ -1,5 +1,8 @@
 2007-01-27  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProf.cc (doexit): Always merge the per-thread profile tree
+	in multi-threaded applications, even the main thread has one.
+
 	* igprof-analyse: Replace fixed symbol name filters with custom
 	filter routines and define standard filters 'igprof', 'malloc',
 	'gcc_pool_alloc', 'no_std' and 'by_lib'; also allow user-defined
