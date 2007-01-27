@@ -1,5 +1,10 @@
 2007-01-27  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProfPerf.cc (add): Improve the number of stack frames dropped.
+	(profileSignalHandler): Update documentation and simplify.
+	(threadWrapper, dopthread_create): Hide from concurrently running
+	other profiler modules.
+
 	* IgProfMem.cc: Improve the number of stack frames dropped.
 
 	* IgProf.cc (doexit): Always merge the per-thread profile tree

@@ -68,13 +68,13 @@ static pthread_t		s_mainthread	= 0;
 static void 
 add (void)
 {
-    IgHookTrace	*node = IgProf::threadRoot ();
     void	*addresses [256];
+    IgHookTrace	*node = IgProf::threadRoot ();
     int		depth = IgHookTrace::stacktrace (addresses, 256);
-    // one for stacktrace, one for me, one for signal frame, one for profileSignalHandler(), one for
-    // pthreads signal handler wrapper (on linux only?).
     int		droptop = 2 + (IgProf::isMultiThreaded () ? 1 : 0);
-    int		dropbottom = (s_mainthread && pthread_self() == s_mainthread ? 3 : 4);
+    int		dropbottom = (s_mainthread && pthread_self() == s_mainthread ? 2 : 3);
+    // droptop: one for stacktrace, one for me, one for signal frame.
+    // dropbottom: drop off thread start wrappers, libc start etc.
 
     // Walk the tree
     for (int i = depth-dropbottom; node && i >= droptop; --i)
@@ -85,19 +85,14 @@ add (void)
 }
 
 /** Performance profiler signal handler, SIGPROF or SIGALRM depending
-    on current profiler mode.  Record a tick for the current program
-    location.  For POSIX-conforming systems assumes the signal handler
-    is registered for the correct thread.  For non-conforming old
-    GNU/Linux systems assumes there is a separate thread listening for
-    the SIGPROF signals, and broadcasts the signal to the other
-    threads.  Skips ticks when the profiler is not enabled.  */
+    on the current profiler mode.  Record a tick for the current program
+    location.  Assumes the signal handler is registered for the correct
+    thread.  Skip ticks when this profiler is not enabled.  */
 static void
 profileSignalHandler (void)
 {
-    if (s_enabled <= 0)
-	return;
-
-    add ();
+    if (s_enabled > 0)
+        add ();
 }
 
 /** Enable profiling timer.  You should have called
@@ -119,35 +114,52 @@ enableSignalHandler (void)
 static void *
 threadWrapper (void *arg)
 {
-    IgProf::initThread ();
+    void *(*start_routine) (void*);
+    void *start_arg;
 
-    // Enable profiling in this thread.
-    sigset_t profset;
-    sigemptyset (&profset);
-    sigaddset (&profset, s_signal);
-    pthread_sigmask (SIG_UNBLOCK, &profset, 0);
-    enableSignalHandler ();
-    enableTimer ();
+    // Hide the init and exit sequences from the memory profiler.  If
+    // the memory and performance profilers are enabled concurrently,
+    // the actions below will otherwise become visible.
+    {
+	IgProfLock lock (s_enabled);
 
-    // Get arguments
-    IgProfPerfWrappedArg *wrapped = (IgProfPerfWrappedArg *) arg;
-    void *(*start_routine) (void*) = wrapped->start_routine;
-    void *start_arg = wrapped->arg;
-    delete wrapped;
+	// Enable separate profile tree for this thread.
+        IgProf::initThread ();
 
-    // Start the user thread
-    IgProf::debug ("Perf: captured thread %lu for profiling (%p, %p)\n",
-		   (unsigned long) pthread_self (),
-		   (void *) start_routine,
-		   start_arg);
+        // Enable profiling in this thread.
+        sigset_t profset;
+        sigemptyset (&profset);
+        sigaddset (&profset, s_signal);
+        pthread_sigmask (SIG_UNBLOCK, &profset, 0);
+        enableSignalHandler ();
+        enableTimer ();
 
+        // Get arguments.
+        IgProfPerfWrappedArg *wrapped = (IgProfPerfWrappedArg *) arg;
+        start_routine = wrapped->start_routine;
+        start_arg = wrapped->arg;
+        delete wrapped;
+
+	// Report the thread.
+        IgProf::debug ("Perf: captured thread %lu for profiling (%p, %p)\n",
+		       (unsigned long) pthread_self (),
+		       (void *) start_routine,
+		       start_arg);
+    }
+
+    // Start the user thread.
     void *ret = (*start_routine) (start_arg);
 
-    IgProf::debug ("Perf: exiting thread %lu from profiling (%p, %p)\n",
-		   (unsigned long) pthread_self (),
-		   (void *) start_routine,
-		   start_arg);
-    IgProf::exitThread ();
+    {
+	// Harvest thread profile result.
+	IgProfLock lock (s_enabled);
+        IgProf::debug ("Perf: exiting thread %lu from profiling (%p, %p)\n",
+		       (unsigned long) pthread_self (),
+		       (void *) start_routine,
+		       start_arg);
+        IgProf::exitThread ();
+    }
+
     return ret;
 }
 
@@ -260,9 +272,16 @@ dopthread_create (IgHook::SafeData<igprof_dopthread_create_t> &hook,
 		  void * (*start_routine) (void *),
 		  void *arg)
 {
-    IgProfPerfWrappedArg *wrapped = new IgProfPerfWrappedArg;
-    wrapped->start_routine = start_routine;
-    wrapped->arg = arg;
+    // Pass the actual arguments to our wrapper in a temporary memory
+    // structure.  We need to hide the creation from memory profiler
+    // in case it's running concurrently with this profiler.
+    IgProfPerfWrappedArg *wrapped;
+    {
+	IgProfLock lock (s_enabled);
+	wrapped = new IgProfPerfWrappedArg;
+        wrapped->start_routine = start_routine;
+        wrapped->arg = arg;
+    }
     int ret = hook.chain (thread, attr, &threadWrapper, wrapped);
     return ret;
 }
