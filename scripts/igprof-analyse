@@ -13,13 +13,349 @@ my @allkeys;
 my $order = 1;
 my $showcalls = undef;
 my $showpaths = 0;
+my @deffilters = qw(igprof);
 my @filters;
-my @filterfiles;
-my @builtinfilter = qw(malloc calloc realloc memalign posix_memalign valloc _Znwj _Znaj
-		       _ZNSt24__default_alloc_templateILb1ELi0EE14_S_chunk_allocEjRi
-		       _ZNSt24__default_alloc_templateILb1ELi0EE9_S_refillEj
-		       _ZNSt24__default_alloc_templateILb1ELi0EE8allocateEj);
 
+######################################################################
+# Support routine for walking node trees.
+sub walk
+{
+    my ($pre, $post, $prof) = @_;
+    my @stack = [ undef, 0, undef ];
+    while (@stack)
+    {
+	my ($parentid, $preid, $postid) = @{pop(@stack)};
+	my $parent = (defined $parentid ? $$prof{NODES}[$parentid] : undef);
+	if (defined $preid)
+	{
+	    my $node = $$prof{NODES}[$preid];
+	    &$pre($prof, $parent, $node) if defined $pre;
+	    push(@stack, [ $parentid, undef, $preid ]) if $post;
+	    push(@stack, map { [ $preid, $_, undef ] } @{$$node{CHILDREN}});
+	}
+	else
+	{
+	    &$post($prof, $parent, $$prof{NODES}[$postid]);
+	}
+    }
+}
+
+# Support routine to graft nodes to another node.
+sub merge_to_node
+{
+    my ($syms, $nodes, $parent, $kid, $cnt, $freq, $ismax) = @_;
+
+    # If the parent does not yet have this kid among its own children,
+    # add it and we are done.
+    my @same = grep($$nodes[$_]{SYMADDR} eq $$kid{SYMADDR}, @{$$parent{CHILDREN}});
+    if (! @same)
+    {
+	push(@{$$parent{CHILDREN}}, $$kid{INDEX});
+	return;
+    }
+
+    # Merge this kid into the existing child node.
+    die "$$syms{$$parent{SYMADDR}}{NAME} has @{[$#same+1]} times child"
+	. " $$syms{$$nodes[$same[0]]{SYMADDR}}{NAME}\n"
+	if scalar @same > 1;
+    my $other = $same[0];
+    if ($ismax)
+    {
+        $$freq[$other] += $$freq[$$kid{INDEX}];
+        $$cnt[$other] = $$cnt[$$kid{INDEX}]
+	    if $$cnt[$other] < $$cnt[$$kid{INDEX}];
+    }
+    else
+    {
+        $$freq[$other] += $$freq[$$kid{INDEX}];
+	$$cnt[$other] += $$cnt[$$kid{INDEX}];
+    }
+
+    # Continue merging down the tree.
+    &merge_to_node ($syms, $nodes, $$nodes[$other], $$nodes[$_], $cnt, $freq, $ismax)
+	for @{$$nodes[$other]{CHILDREN}};
+}
+
+# Support routine to convert all numerical values in the arguments to
+# include thousand separators (').
+sub thousands
+{
+    my @result;
+    foreach my $x (@_)
+    {
+	$x = "$x";
+	1 while $x =~ s/(\d)(\d{3}($|\D))/$1'$2/;
+	push(@result, $x);
+    }
+
+    return $result[0] if scalar @_ == 1;
+    return @result;
+}
+
+######################################################################
+# Filter for standard allocation functions: add to parent.
+sub igprof_filter_malloc_post
+{
+    my ($syms, $nodes, $parent, $node, $cnt, $freq, $ismax) = @_;
+    return if ! $parent;
+
+    # Check if it's a memory allocation function we know about.
+    my @allocs = qw(malloc calloc realloc memalign posix_memalign valloc
+		    zmalloc zcalloc zrealloc _Znwj _Znaj);
+    return if ! grep ($$syms{$$node{SYMADDR}}{NAME} eq $_, @allocs);
+
+    # Yes it was.  Squash the resource usage to the caller.
+    my $nodeidx = $$node{INDEX};
+    my $parentidx = $$parent{INDEX};
+    $$parent{CHILDREN} = [ grep($_ ne $nodeidx, @{$$parent{CHILDREN}}) ];
+    if ($ismax)
+    {
+	$$cnt[$parentidx] = $$cnt[$nodeidx]
+	    if $$cnt[$parentidx] < $$cnt[$nodeidx];
+	$$freq[$parentidx] += $$freq[$nodeidx];
+    }
+    else
+    {
+	$$cnt[$parentidx] += $$cnt[$nodeidx];
+	$$freq[$parentidx] += $$freq[$nodeidx];
+    }
+}
+
+# Filter for G++ <= 3.2 pool allocator for leak statistics as
+# its highly misleading and its inclusion confuses statistics.
+sub igprof_filter_gcc_pool_alloc_post
+{
+    my ($syms, $nodes, $parent, $node, $cnt, $freq, $ismax) = @_;
+    return if ! $parent;
+
+    # Check if it's a memory allocation function we know about.
+    my @allocs = qw(_ZNSt24__default_alloc_templateILb1ELi0EE14_S_chunk_allocEjRi
+		    _ZNSt24__default_alloc_templateILb1ELi0EE9_S_refillEj
+		    _ZNSt24__default_alloc_templateILb1ELi0EE8allocateEj);
+    return if ! grep ($$syms{$$node{SYMADDR}}{NAME} eq $_, @allocs);
+
+    # Yes it was.  Remove this contribution completely.
+    $$parent{CHILDREN} = [ grep($_ ne $$node{INDEX}, @{$$parent{CHILDREN}}) ];
+}
+
+# Filter IgProf/IgHook calls from the call tree, but preserve
+# the functions they call.
+sub igprof_filter_igprof_post
+{
+    my ($syms, $nodes, $parent, $node, $cnt, $freq, $ismax) = @_;
+    return if ! $parent;
+
+    # Check if the symbol was defined in IgProf or IgHook library.
+    return if $$syms{$$node{SYMADDR}}{LIB} !~ /Ig(Hook|Prof)\./o;
+
+    # Yes it was.  Hide this function from the call tree by merging
+    # its children to the parent's calls.  So remove the contribution
+    # of this particular function, but keep those from children.
+    $$parent{CHILDREN} = [ grep($_ ne $$node{INDEX}, @{$$parent{CHILDREN}}) ];
+    &merge_to_node ($syms, $nodes, $parent, $$nodes[$_], $cnt, $freq, $ismax)
+	for @{$$node{CHILDREN}};
+}
+
+# Merge use by C++ std namespace entities to parents.
+sub igprof_filter_no_std_post
+{
+    my ($syms, $nodes, $parent, $node, $cnt, $freq, $ismax) = @_;
+    return if ! $parent;
+
+    # Check if the symbol refers to a definition in the c++ "std" namespace.
+    return if $$syms{$$node{SYMADDR}}{NAME} !~ /^_ZN?St/o;
+
+    # Yes it was.  Squash resource usage to the caller and hide this
+    # function from the call tree.  (Note that the std entry may end
+    # up calling something in the user space again, so we don't want
+    # to lose that information.)
+    my $nodeidx = $$node{INDEX};
+    my $parentidx = $$parent{INDEX};
+    if ($ismax)
+    {
+	$$cnt[$parentidx] = $$cnt[$nodeidx]
+	    if $$cnt[$parentidx] < $$cnt[$nodeidx];
+	$$freq[$parentidx] += $$freq[$nodeidx];
+    }
+    else
+    {
+	$$cnt[$parentidx] += $$cnt[$nodeidx];
+	$$freq[$parentidx] += $$freq[$nodeidx];
+    }
+    $$parent{CHILDREN} = [ grep($_ ne $nodeidx, @{$$parent{CHILDREN}}) ];
+    &merge_to_node ($syms, $nodes, $parent, $$nodes[$_], $cnt, $freq, $ismax)
+	for @{$$node{CHILDREN}};
+}
+
+# Convert profile to per-library scope.
+sub igprof_filter_by_lib_pre
+{
+    my ($syms, $nodes, $parent, $node, $cnt, $freq, $ismax) = @_;
+
+    # Keep filtering my children until we've done it all.
+    #   - Remap symbols to libraries.
+    #   - Merge siblings calling into same library.
+    #   - Merge calls into the same library.
+    my @todo = @{$$node{CHILDREN}};
+    my $nodeidx = $$node{INDEX};
+    $$node{CHILDREN} = [];
+    while (@todo)
+    {
+	my $kididx = shift(@todo);
+	my $kid = $$nodes[$kididx];
+
+        # Convert the symbol name into the library name, then pick the
+        # first symbol with that library name as the symbol for this node.
+        my $lib = $$syms{$$kid{SYMADDR}}{LIB} || "<unknown>"; $lib =~ s|.*/||;
+        my $symaddr = ".lib$lib";
+        $$syms{$symaddr} ||= { %{$$syms{$$kid{SYMADDR}}}, NAME => $lib };
+        $$kid{SYMADDR} = $symaddr;
+
+        # If the child is a call to the same library as this node,
+	# merge and graft the child to this parent node.
+	if ($$kid{SYMADDR} eq $$node{SYMADDR})
+	{
+	     push(@todo, @{$$kid{CHILDREN}});
+	     if ($ismax)
+             {
+	         $$cnt[$nodeidx] = $$cnt[$kididx]
+	             if $$cnt[$nodeidx] < $$cnt[$kididx];
+	         $$freq[$nodeidx] += $$freq[$kididx];
+             }
+             else
+             {
+	         $$cnt[$nodeidx] += $$cnt[$kididx];
+	         $$freq[$nodeidx] += $$freq[$kididx];
+             }
+	}
+
+        # If this call goes to a library we've already processed,
+	# merge to that child instead.
+	elsif (my @same = grep($$nodes[$_]{SYMADDR} eq $$kid{SYMADDR},
+			       @{$$node{CHILDREN}}))
+	{
+	    die if scalar @same != 1;
+	    push(@{$$nodes[$same[0]]{CHILDREN}}, @{$$kid{CHILDREN}});
+            if ($ismax)
+            {
+	        $$cnt[$same[0]] = $$cnt[$kididx]
+	            if $$cnt[$same[0]] < $$cnt[$kididx];
+	        $$freq[$same[0]] += $$freq[$kididx];
+            }
+            else
+            {
+	        $$cnt[$same[0]] += $$cnt[$kididx];
+	        $$freq[$same[0]] += $$freq[$kididx];
+            }
+	}
+
+	# Otherwise keep the child.
+	else
+	{
+	    push(@{$$node{CHILDREN}}, $kididx);
+	}
+    }
+}
+
+######################################################################
+# Read a profile dump.
+sub readDump
+{
+    my ($file) = @_;
+    my %symbyname;
+    my $nodeidx = 0;
+    my $syms = {};
+    my $nodes = [];
+    my $counts = {};
+    my $freqs = {};
+    my $leaks = {};
+    my $leaktable = undef;
+    my @nodestack;
+
+    do { local $|=1; print "Reading profile dump\n" } if $verbose;
+    $$syms{"-1"} = { OFFSET => "", NAME => "<spontaneous>", LIB => "" };
+    $$nodes[0] = { INDEX => 0, SYMADDR => "-1", CHILDREN => [] };
+    push(@nodestack, $$nodes[0]);
+    ++$nodeidx;
+
+    if ($file =~ /\.gz$/)
+    {
+        open (DUMP, "gzip -d -c < $file |") || die "$file: $!\n";
+    }
+    else
+    {
+        open (DUMP, "< $file") || die "$file: $!\n";
+    }
+
+    while (<DUMP>)
+    {
+        chomp;
+	if (m|<sym addr="(.*)" offset="(.*)" name="(.*)" lib="(.*)" liboff="(.*)"/>|o)
+	{
+	    $$syms{$1} = { SYMBOL => $1, OFFSET => $2, NAME => $3, LIB => $4, LIBOFF => $5 };
+	    $symbyname{$3} ||= $1;
+	}
+	elsif (m|<sym addr="(.*)" offset="(.*)" name="(.*)" lib="(.*)"/>|o)
+	{
+	    $$syms{$1} = { SYMBOL => $1, OFFSET => $2, NAME => $3, LIB => $4, LIBOFF => 0 };
+	    $symbyname{$3} ||= $1;
+	}
+	elsif (/(\s+)<node id="[^"]*" symaddr="([^"]*)">/o)
+	{
+	    $#nodestack = length($1)-2;
+	    my $parent = $nodestack[$#nodestack];
+	    my $symaddr = $symbyname{$$syms{$2}{NAME}};
+	    my @same = grep($$nodes[$_]{SYMADDR} eq $symaddr, @{$$parent{CHILDREN}});
+	    if (! @same)
+	    {
+	        my $index = $nodeidx++;
+	        my $node = { INDEX => $index, SYMADDR => $symaddr, CHILDREN => [] };
+	        $$nodes[$index] = $node;
+	        push (@{$$parent{CHILDREN}}, $index);
+	        push (@nodestack, $node);
+	    }
+	    else
+	    {
+		push (@nodestack, $$nodes[$same[0]]);
+	    }
+	}
+	elsif (/<counter name="(.*)" value="(.*)" count="(.*)"\/>/o
+	       && (! $key || $1 eq $key))
+	{
+	    my ($counter, $val, $freq) = ($1, $2, $3);
+	    my $index = $nodestack[$#nodestack]{INDEX};
+	    if (defined $$counts{$counter}[$index])
+	    {
+		$$freqs{$counter}[$index] += $freq;
+	        if ($counter =~ /_MAX$/o) {
+		    $$counts{$counter}[$index] = $val
+		        if $$counts{$counter}[$index] < $val;
+	        } else {
+		    $$counts{$counter}[$index] += $val;
+		}
+	    }
+	    else
+	    {
+	        $$counts{$counter}[$index] = $val;
+	        $$freqs{$counter}[$index] = $freq;
+	    }
+	}
+	elsif (m|<live map="(.*)" size=".*">|o)
+	{
+	    $leaktable = $1;
+	}
+	elsif (m|<leak node="(.*)" resource="(.*)" extra="(.*)"/>|o)
+	{
+	    push(@{$$leaks{$leaktable}}, [ $1, $2, $3 ]);
+	}
+   }
+   close (DUMP);
+   return { SYMS => $syms, COUNTS => $counts, FREQS => $freqs,
+	    NODES => $nodes, LEAKS => $leaks };
+}
+
+######################################################################
+# Invoke GDB and/or demangler to make prettier symbol names.
 sub symremap
 {
      my ($prof) = @_;
@@ -88,143 +424,10 @@ sub symremap
     }
 }
 
-sub readDump
-{
-    my ($file) = @_;
-    my $nodeidx = 0;
-    my $syms = {};
-    my $nodes = [];
-    my $counts = {};
-    my $freqs = {};
-    my $leaks = {};
-    my $leaktable = undef;
-    my @nodestack;
-
-    print "Reading profile dump\n" if $verbose;
-    $$syms{"-1"} = { OFFSET => "", NAME => "<spontaneous>", LIB => "" };
-    $$nodes[0] = { INDEX => 0, SYMADDR => "-1", CHILDREN => [] };
-    push(@nodestack, $$nodes[0]);
-    ++$nodeidx;
-
-    if ($file =~ /\.gz$/)
-    {
-        open (DUMP, "gzip -d -c < $file |") || die "$file: $!\n";
-    }
-    else
-    {
-        open (DUMP, "< $file") || die "$file: $!\n";
-    }
-
-    while (<DUMP>)
-    {
-        chomp;
-	if (m|<sym addr="(.*)" offset="(.*)" name="(.*)" lib="(.*)" liboff="(.*)"/>|o)
-	{
-	    $$syms{$1}{SYMBOL} = $1;
-	    $$syms{$1}{OFFSET} = $2;
-	    $$syms{$1}{NAME} = $3;
-	    $$syms{$1}{LIB} = $4;
-	    $$syms{$1}{LIBOFF} = $5;
-	}
-	elsif (m|<sym addr="(.*)" offset="(.*)" name="(.*)" lib="(.*)"/>|o)
-	{
-	    $$syms{$1}{SYMBOL} = $1;
-	    $$syms{$1}{OFFSET} = $2;
-	    $$syms{$1}{NAME} = $3;
-	    $$syms{$1}{LIB} = $4;
-	    $$syms{$1}{LIBOFF} = 0;
-	}
-	elsif (/(\s+)<node id="[^"]*" symaddr="([^"]*)">/o)
-	{
-	    $#nodestack = length($1)-2;
-	    my $parent = $nodestack[$#nodestack];
-	    my @same = grep($$syms{$$nodes[$_]{SYMADDR}}{NAME} eq $$syms{$2}{NAME},
-			    @{$$parent{CHILDREN}});
-	    if (! @same)
-	    {
-	        my $index = $nodeidx++;
-	        my $node = { INDEX => $index, SYMADDR => $2, CHILDREN => [] };
-	        $$nodes[$index] = $node;
-	        push (@{$$parent{CHILDREN}}, $index);
-	        push (@nodestack, $node);
-	    }
-	    else
-	    {
-		push (@nodestack, $$nodes[$same[0]]);
-	    }
-	}
-	elsif (/<counter name="(.*)" value="(.*)" count="(.*)"\/>/o
-	       && (! $key || $1 eq $key))
-	{
-	    my ($counter, $val, $freq) = ($1, $2, $3);
-	    my $index = $nodestack[$#nodestack]{INDEX};
-	    if (defined $$counts{$counter}[$index])
-	    {
-		$$freqs{$counter}[$index] += $freq;
-	        if ($counter =~ /_MAX$/o) {
-		    $$counts{$counter}[$index] = $val
-		        if $$counts{$counter}[$index] < $val;
-	        } else {
-		    $$counts{$counter}[$index] += $val;
-		}
-	    }
-	    else
-	    {
-	        $$counts{$counter}[$index] = $val;
-	        $$freqs{$counter}[$index] = $freq;
-	    }
-	}
-	elsif (m|<live map="(.*)" size=".*">|o)
-	{
-	    $leaktable = $1;
-	}
-	elsif (m|<leak node="(.*)" resource="(.*)" extra="(.*)"/>|o)
-	{
-	    push(@{$$leaks{$leaktable}}, [ $1, $2, $3 ]);
-	}
-   }
-   close (DUMP);
-   return { SYMS => $syms, COUNTS => $counts, FREQS => $freqs,
-	    NODES => $nodes, LEAKS => $leaks };
-}
-
-sub thousands
-{
-    my @result;
-    foreach my $x (@_)
-    {
-	$x = "$x";
-	1 while $x =~ s/(\d)(\d{3}($|\D))/$1'$2/;
-	push(@result, $x);
-    }
-
-    return $result[0] if scalar @_ == 1;
-    return @result;
-}
-
-
-sub walk
-{
-    my ($pre, $post, $prof) = @_;
-    my @stack = [ undef, 0, undef ];
-    while (@stack)
-    {
-	my ($parentid, $preid, $postid) = @{pop(@stack)};
-	my $parent = (defined $parentid ? $$prof{NODES}[$parentid] : undef);
-	if (defined $preid)
-	{
-	    my $node = $$prof{NODES}[$preid];
-	    &$pre($prof, $parent, $node) if defined $pre;
-	    push(@stack, [ $parentid, undef, $preid ]) if $post;
-	    push(@stack, map { [ $preid, $_, undef ] } @{$$node{CHILDREN}});
-	}
-	else
-	{
-	    &$post($prof, $parent, $$prof{NODES}[$postid]);
-	}
-    }
-}
-
+# Compute a name for a symbol.  If the symbol has already been
+# seen in the current call stack, create an another name by
+# appending an apostrophe and numbers.  This is used to unfold
+# recursive calls when building the call map.
 sub symfor
 {
     my ($prof, $seen, $node) = @_;
@@ -254,21 +457,41 @@ sub symfor
     return ($sym, "$sym$suffix");
 }
 
+######################################################################
+# Analyse a profile dump.
 sub analyse
 {
     my ($prof) = @_;
+    my $ismax = ($key =~ /_MAX$/ ? 1 : 0);
     my $cnt = ($$prof{COUNTS}{$key} ||= []);
     my $freq = ($$prof{FREQS}{$key} ||= []);
     my $ccnt = [];
     my $cfreq = [];
-    my $ismax = ($key =~ /_MAX$/ ? 1 : 0);
+
+    # Make sure every counter has an initialised value.
+    $$cnt[$_] ||= 0 for 0 .. scalar(@{$$prof{NODES}})-1;
+    $$freq[$_] ||= 0 for 0 .. scalar(@{$$prof{NODES}})-1;
+
+    # Apply selected filters.
+    foreach my $filter (@filters)
+    {
+	my $pre = ${::}{"igprof_filter_${filter}_pre"};
+	my $post = ${::}{"igprof_filter_${filter}_post"};
+	die "$filter: no such filter known\n" if ! $pre && ! $post;
+        do { local $|=1; print "Applying filter $filter\n" } if $verbose;
+        &walk($pre && sub { my ($prof, $parent, $node) = @_;
+		            &$pre($$prof{SYMS}, $$prof{NODES},
+			          $parent, $node, $cnt, $freq, $ismax) },
+	      $post && sub { my ($prof, $parent, $node) = @_;
+                             &$post($$prof{SYMS}, $$prof{NODES},
+				    $parent, $node, $cnt, $freq, $ismax) },
+	      $prof);
+    }
 
     # Accumulate values.  Initialise all counters in all nodes, then
     # propagate children's counts to the parent cumulative counts.
-    print "Summing counters\n" if $verbose;
-    $$cnt[$_] ||= 0 for 0 .. scalar(@{$$prof{NODES}})-1;
+    do { local $|=1; print "Summing counters\n" } if $verbose;
     $$ccnt[$_] = $$cnt[$_] for 0 .. scalar(@{$$prof{NODES}})-1;
-    $$freq[$_] ||= 0 for 0 .. scalar(@{$$prof{NODES}})-1;
     $$cfreq[$_] = $$freq[$_] for 0 .. scalar(@{$$prof{NODES}})-1;
     if ($ismax)
     {
@@ -294,39 +517,8 @@ sub analyse
 	      $prof);
     }
 
-    # Suppress filtered symbols: apply counts of filtered
-    # nodes to the self-counts of the parent.
-    print "Suppressing symbols\n" if $verbose;
-    if ($ismax)
-    {
-        &walk(sub { my ($prof, $parent, $node) = @_;
-		    return if ! grep($_ eq $$prof{SYMS}{$$node{SYMADDR}}{NAME}, @filters);
-		    my $parentidx = $$parent{INDEX};
-		    my $nodeidx = $$node{INDEX};
-		    $$node{CHILDREN} = [];
-		    $$parent{CHILDREN} = [ grep($_ ne $nodeidx, @{$$parent{CHILDREN}}) ];
-		    $$freq[$parentidx] += $$cfreq[$nodeidx];
-		    $$cnt[$parentidx] += $$ccnt[$nodeidx]
-			if $$cnt[$parentidx] < $$ccnt[$nodeidx]; },
-	      undef,
-	      $prof);
-    }
-    else
-    {
-        &walk(sub { my ($prof, $parent, $node) = @_;
-		    return if ! grep($_ eq $$prof{SYMS}{$$node{SYMADDR}}{NAME}, @filters);
-		    my $parentidx = $$parent{INDEX};
-		    my $nodeidx = $$node{INDEX};
-		    $$node{CHILDREN} = [];
-		    $$parent{CHILDREN} = [ grep($_ ne $nodeidx, @{$$parent{CHILDREN}}) ];
-		    $$freq[$parentidx] += $$cfreq[$nodeidx];
-		    $$cnt[$parentidx] += $$ccnt[$nodeidx]; },
-	      undef,
-	      $prof);
-    }
-
     # Initialise result table.
-    print "Building call tree map\n" if $verbose;
+    do { local $|=1; print "Building call tree map\n" } if $verbose;
     my $flat = {};
     my $seen = {};
     &walk(sub { my ($prof, $parent, $node) = @_;
@@ -339,7 +531,15 @@ sub analyse
 		    my $parsym = $$parent{REPORT_SYMADDR} || $$parent{SYMADDR};
 		    $$flat{$sym}{CALLERS}{$parsym} = 1;
 		    $$flat{$parsym}{CALLS}{$sym} ||= [ 0, 0 ];
-		    $$flat{$parsym}{CALLS}{$sym}[0] += $$ccnt[$$node{INDEX}];
+		    if ($ismax)
+		    {
+		        $$flat{$parsym}{CALLS}{$sym}[0] = $$ccnt[$$node{INDEX}]
+			    if $$flat{$parsym}{CALLS}{$sym}[0] < $$ccnt[$$node{INDEX}];
+		    }
+		    else
+		    {
+		        $$flat{$parsym}{CALLS}{$sym}[0] += $$ccnt[$$node{INDEX}];
+		    }
 		    $$flat{$parsym}{CALLS}{$sym}[1] += $$cfreq[$$node{INDEX}];
 		    $$flat{$parsym}{CALLS}{$sym}[2]++;
 		}
@@ -368,7 +568,7 @@ sub analyse
 	  $prof);
 
     # Sort the symbols by selected criteria
-    print "Sorting\n" if $verbose;
+    do { local $|=1; print "Sorting\n" } if $verbose;
     my $rank = 1;
     my @sorted = sort { &cmpnodes($flat, $a, $b); } keys %$flat;
     $$flat{$_}{RANK} = $rank++ for @sorted;
@@ -376,12 +576,12 @@ sub analyse
     # Resolve symbols using GDB and/or demangler
     if ($demangle || $gdb)
     {
-        print "Resolving symbols\n" if $verbose;
+        do { local $|=1; print "Resolving symbols\n" } if $verbose;
         &symremap($prof);
     }
 
     # Output result: flat and call tree reports.
-    print "Generating report\n" if $verbose;
+    do { local $|=1; print "Generating report\n" } if $verbose;
     my @table = ();
     my $total = $$flat{"-1"}{CUM_KEY}[0];
     foreach my $sym (@sorted)
@@ -407,6 +607,7 @@ sub analyse
 
 	# Build calling function information.
 	my $div = $key eq 'PERF_TICKS' ? 100 : 1;
+	my $callmax = 0;
 	foreach my $caller (@parents)
 	{
 	    my $thiscall = $$flat{$caller}{CALLS}{$sym};
@@ -423,23 +624,13 @@ sub analyse
 	    push (@{$$row{CALLERS}}, $callrow);
 	}
 
-	# Fill information for this function itself.
-	push (@{$$row{SYM}}, $$flat{$sym}{RANK});
-	push (@{$$row{SYM}}, $$prof{SYMS}{$sym}{NAME});
-	push (@{$$row{SYM}}, $$prof{SYMS}{$sym}{LIB});
-	push (@{$$row{SYM}}, $$prof{SYMS}{$sym}{LIBOFF});
-	push (@{$$row{SYM}}, $$flat{$sym}{CUM_KEY}[0]/$total*100);
-	push (@{$$row{SYM}}, $$flat{$sym}{CUM_KEY}[0]/$div);
-	push (@{$$row{SYM}}, $$flat{$sym}{SELF_KEY}[0]/$div);
-	push (@{$$row{SYM}}, ($$flat{$sym}{CUM_KEY}[0]-$$flat{$sym}{SELF_KEY}[0])/$div);
-	push (@{$$row{SYM}}, $$flat{$sym}{SELF_KEY});
-	push (@{$$row{SYM}}, $$flat{$sym}{CUM_KEY});
-
 	# Build information for called functions.
 	foreach my $callee (@children)
 	{
 	    my $thiscall = $$flat{$sym}{CALLS}{$callee};
 	    next if ! $$thiscall[0];
+
+	    $callmax = $$thiscall[0]/$div if $callmax < $$thiscall[0]/$div;
 
 	    my $callrow = [ $$flat{$callee}{RANK},
 			    $$prof{SYMS}{$callee}{NAME},
@@ -451,6 +642,20 @@ sub analyse
 			      [ $$thiscall[2], $$flat{$callee}{CUM_KEY}[2] ] ] ];
 	    push (@{$$row{CALLS}}, $callrow);
 	}
+
+	# Fill information for this function itself.
+	push (@{$$row{SYM}}, $$flat{$sym}{RANK});
+	push (@{$$row{SYM}}, $$prof{SYMS}{$sym}{NAME});
+	push (@{$$row{SYM}}, $$prof{SYMS}{$sym}{LIB});
+	push (@{$$row{SYM}}, $$prof{SYMS}{$sym}{LIBOFF});
+	push (@{$$row{SYM}}, $$flat{$sym}{CUM_KEY}[0]/$total*100);
+	push (@{$$row{SYM}}, $$flat{$sym}{CUM_KEY}[0]/$div);
+	push (@{$$row{SYM}}, $$flat{$sym}{SELF_KEY}[0]/$div);
+	push (@{$$row{SYM}}, $ismax ? $callmax
+			     : ($$flat{$sym}{CUM_KEY}[0]
+				-$$flat{$sym}{SELF_KEY}[0])/$div);
+	push (@{$$row{SYM}}, $$flat{$sym}{SELF_KEY});
+	push (@{$$row{SYM}}, $$flat{$sym}{CUM_KEY});
     }
 
     if ($output eq 'text')
@@ -462,7 +667,7 @@ sub analyse
 	my $valfmt = "\%${maxval}s / \%-${maxval}s";
 	my $cntfmt = "\%${maxcnt}s / \%-${maxcnt}s";
 
-	print "\n", "-" x 70, "\n", "Flat performance profile (cumulative >= 1\%)\n\n";
+	print "\n", "-" x 70, "\n", "Flat profile (cumulative >= 1\%)\n\n";
 	print "% total  ",
 	      sprintf("\%${maxval}s", "Total"), "  ",
 	      ($showcalls ? (sprintf("\%${maxcnt}s", "Calls"), "  ") : ()),
@@ -481,7 +686,7 @@ sub analyse
 	    last if $pct < 1;
 	}
 
-	print "\n\n", "-" x 70, "\n", "Flat performance profile (self >= 0.01\%)\n\n";
+	print "\n\n", "-" x 70, "\n", "Flat profile (self >= 0.01\%)\n\n";
 	print "% total  ",
 	      sprintf("\%${maxval}s  ", "Self"),
 	      ($showcalls ? sprintf("\%${maxcnt}s  ", "Calls") : ()),
@@ -685,16 +890,20 @@ sub cmpnodes
     return $a cmp $b;
 }
 
+######################################################################
 sub usage
 {
     print STDERR "igprof-analyse\n",
 		 "  [-r/--report KEY[,KEY]...] [-o/--order ORDER]\n",
-		 "  [-f/--filter FILE] [-F/--no-filter]\n",
+		 "  [-F/--filter-module FILE] [ -f FILTER[,FILTER...] ]\n",
+                 "  [-nf/--no-filter] [-lf/--list-filters]\n",
 		 "  { [-x/--xml] | [-h/--html] | [-t/--text] }\n",
 		 "  [--libs] [--demangle] [--gdb] [-v/--verbose]\n",
 		 "  [-p/--paths] [-c/--calls] [--] [FILE]...\n";
 }
 
+my @userfilters = ();
+@filters = @deffilters;
 while (scalar @ARGV)
 {
     if ($ARGV[0] eq '--help')
@@ -702,13 +911,29 @@ while (scalar @ARGV)
     elsif ($ARGV[0] eq '--verbose' || $ARGV[0] eq '-v')
     { $verbose = 1; shift(@ARGV); }
     elsif ($ARGV[0] eq '--report' || $ARGV[0] eq '-r')
-    { shift(@ARGV); $key = shift(@ARGV); }
+    {
+	shift(@ARGV);
+	$key = shift(@ARGV);
+	@filters = @deffilters if @filters;
+	push(@filters, 'malloc') if @filters && substr($key, 0, 4) eq 'MEM_';
+	push(@filters, 'gcc_pool_alloc') if @filters && $key eq 'MEM_LIVE';
+    }
     elsif ($ARGV[0] eq '--order' || $ARGV[0] eq '-o')
     { $order = $ARGV[1] eq 'ascending' ? -1 : 1; shift (@ARGV); shift (@ARGV); }
-    elsif ($ARGV[0] eq '--filter' || $ARGV[0] eq '-f')
+    elsif ($ARGV[0] eq '--filter-file' || $ARGV[0] eq '-F')
     { push (@filterfiles, $ARGV[1]); shift (@ARGV); shift (@ARGV); }
-    elsif ($ARGV[0] eq '--no-filter' || $ARGV[0] eq '-F')
-    { @builtinfilter = (); shift (@ARGV); }
+    elsif ($ARGV[0] eq '--filter' || $ARGV[0] eq '-f')
+    { push (@userfilters, split(/,/, $ARGV[1])); shift (@ARGV); shift (@ARGV); }
+    elsif ($ARGV[0] eq '--no-filter' || $ARGV[0] eq '-nf')
+    { @filters = (); shift (@ARGV); }
+    elsif ($ARGV[0] eq '--list-filters' || $ARGV[0] eq '-lf')
+    {
+	my %filters = map { s/igprof_filter_(.*)_(pre|post)/$1/g; $_ => 1}
+		      grep(/^igprof_filter_.*_(pre|post)$/, keys %{::});
+	print "Available filters are: @{[sort keys %filters]}\n";
+	print "Selected filters are: @filters @userfilters\n";
+	exit(0);
+    }
     elsif ($ARGV[0] eq '--libs' || $ARGV[0] eq '-l')
     { $showlibs = 1; shift (@ARGV); }
     elsif ($ARGV[0] eq '--xml' || $ARGV[0] eq '-x')
@@ -733,19 +958,12 @@ while (scalar @ARGV)
     { last; }
 }
 
-# read in lists of filter symbols
-@filters = @builtinfilter;
-foreach my $file (@filterfiles)
-{
-    open (FILTER, "< $file") || die "$file: $!\n";
-    while (<FILTER>)
-    {
-  	chomp;
-	push (@filters, split(/s+/, $_));
-    }
-    close (FILTER);
-}
+push(@filters, @userfilters);
 
+# Read in lists of filter symbols.
+require $_ for @filterfiles;
+
+# Process profile data.
 foreach my $file (@ARGV)
 {
     my $prof = &readDump ($file);

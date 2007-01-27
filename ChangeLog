@@ -1,3 +1,15 @@
+2007-01-27  Lassi A. Tuura  <lat@iki.fi>
+
+	* igprof-analyse: Replace fixed symbol name filters with custom
+	filter routines and define standard filters 'igprof', 'malloc',
+	'gcc_pool_alloc', 'no_std' and 'by_lib'; also allow user-defined
+	filters.  Correct the reporting of self/children lines in the call
+	graph for max-valued counters.  Correctly unify symbols with
+	several addresses to one when reading in the dumps; the earlier
+	version did the merge correctly within one level, but not across
+	the entire call tree.  Add documentation and shuffle the code
+	around into a bit more logical reading order.
+
 2007-01-26  Lassi A. Tuura  <lat@iki.fi>
 
 	* IgProf.cc: Hook into exit() functions after all, otherwise we
