@@ -1,5 +1,7 @@
 2007-01-27  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProfMem.cc: Improve the number of stack frames dropped.
+
 	* IgProf.cc (doexit): Always merge the per-thread profile tree
 	in multi-threaded applications, even the main thread has one.
 

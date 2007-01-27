@@ -50,6 +50,7 @@ static bool			s_count_leaks	= 0;
 static IgHookLiveMap		*s_live		= 0;
 static int			s_enabled	= 0;
 static bool			s_initialized	= false;
+static pthread_t		s_mainthread	= 0;
 
 /** Record an allocation at @a ptr of @a size bytes.  Increments counters
     in the tree for the allocations as per current configuration and adds
@@ -76,10 +77,11 @@ add (void *ptr, size_t size)
     void	     *addresses [N_STACK];
     IgHookTrace      *node = IgProf::root ();
     int		     depth = IgHookTrace::stacktrace (addresses, N_STACK);
-    int		     drop = 4; // stacktrace, me, two for hook
+    int		     droptop = 4; // stacktrace, me, two for the hook + stub
+    int		     dropbottom = (s_mainthread && pthread_self() == s_mainthread ? 2 : 3);
 
     // Walk the tree
-    for (int i = depth-3, j = 0, valid = 1; i >= drop; --i, ++j)
+    for (int i = depth-dropbottom, j = 0, valid = 1; i >= droptop; --i, ++j)
     {
 	if (valid && nodecache[j].addr == addresses[i])
 	{
@@ -257,6 +259,8 @@ IgProfMem::initialize (void)
         if (dofree_hook_main.raw.chain)      IgHook::hook (dofree_hook_libc.raw);
 #endif
         IgProf::debug ("Memory profiler enabled\n");
+	if (IgProf::isMultiThreaded())
+	    s_mainthread = pthread_self();
 	// This may allocate, so force our flag to remain false
 	// and then set it to a known value.
 	s_enabled = -10;
