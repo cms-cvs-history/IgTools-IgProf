@@ -1,3 +1,8 @@
+2007-01-29  Lassi A. Tuura  <lat@iki.fi>
+
+	* igprof-analyse: Merge profile data from all command line
+	arguments instead of analysing each one separately.
+
 2007-01-27  Lassi A. Tuura  <lat@iki.fi>
 
 	* IgProfPerf.cc (add): Improve the number of stack frames dropped.
