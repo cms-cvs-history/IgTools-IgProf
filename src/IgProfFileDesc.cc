@@ -7,6 +7,7 @@
 #include "Ig_Tools/IgHook/interface/IgHookLiveMap.h"
 #include <cstdlib>
 #include <cstdio>
+#include <cerrno>
 #include <sys/socket.h>
 
 //<<<<<< PRIVATE DEFINES                                                >>>>>>
@@ -61,7 +62,7 @@ add (int fd)
 
     // Walk the tree
     for (int i = depth-2; i >= drop; --i)
-	node = node->child (IgHookTrace::tosymbol (addresses [i]));
+	node = node->child (addresses [i]);
 
     // Increment counters for this node
     if (s_count_used)  node->counter (&s_ct_used)->tick ();
@@ -209,11 +210,13 @@ doopen (IgHook::SafeData<igprof_doopen_t> &hook, const char *fn, int flags, int 
     IGPROF_TRACE (("(%d igopen %s %d %d\n", s_enabled, fn, flags, mode));
     IgProfLock lock (s_enabled);
     int result = (*hook.chain) (fn, flags, mode);
+    int err = errno;
 
     if (lock.enabled () > 0 && result != -1)
 	add (result);
 
     IGPROF_TRACE ((" -> %d)\n", result));
+    errno = err;
     return result;
 }
 
@@ -223,11 +226,13 @@ doopen64 (IgHook::SafeData<igprof_doopen64_t> &hook, const char *fn, int flags, 
     IGPROF_TRACE (("(%d igopen64 %s %d %d\n", s_enabled, fn, flags, mode));
     IgProfLock lock (s_enabled);
     int result = (*hook.chain) (fn, flags, mode);
+    int err = errno;
 
     if (lock.enabled () > 0 && result != -1)
 	add (result);
 
     IGPROF_TRACE ((" -> %d)\n", result));
+    errno = err;
     return result;
 }
 
@@ -237,11 +242,13 @@ doclose (IgHook::SafeData<igprof_doclose_t> &hook, int fd)
     IGPROF_TRACE (("(%d igclose %d\n", s_enabled, fd));
     IgProfLock lock (s_enabled);
     int result = (*hook.chain) (fd);
+    int err = errno;
 
     if (lock.enabled () > 0 && result != -1)
 	remove (fd);
 
     IGPROF_TRACE ((" -> %d)\n", result));
+    errno = err;
     return result;
 }
 
@@ -252,11 +259,13 @@ dodup (IgHook::SafeData<igprof_dodup_t> &hook, int fd)
     IGPROF_TRACE (("(%d igdup %d\n", s_enabled, fd));
     IgProfLock lock (s_enabled);
     int result = (*hook.chain) (fd);
+    int err = errno;
 
     if (lock.enabled () > 0 && result != -1)
 	add (result);
 
     IGPROF_TRACE ((" -> %d)\n", result));
+    errno = err;
     return result;
 }
 
@@ -266,6 +275,7 @@ dodup2 (IgHook::SafeData<igprof_dodup2_t> &hook, int fd, int newfd)
     IGPROF_TRACE (("(%d igdup2 %d %d\n", s_enabled, fd, newfd));
     IgProfLock lock (s_enabled);
     int result = (*hook.chain) (fd, newfd);
+    int err = errno;
 
     if (lock.enabled () > 0 && result != -1)
     {
@@ -274,6 +284,7 @@ dodup2 (IgHook::SafeData<igprof_dodup2_t> &hook, int fd, int newfd)
     }
 
     IGPROF_TRACE ((" -> %d)\n", result));
+    errno = err;
     return result;
 }
 
@@ -283,11 +294,13 @@ dosocket (IgHook::SafeData<igprof_dosocket_t> &hook, int domain, int type, int p
     IGPROF_TRACE (("(%d igsocket %d %d %d\n", s_enabled, domain, type, proto));
     IgProfLock lock (s_enabled);
     int result = (*hook.chain) (domain, type, proto);
+    int err = errno;
 
     if (lock.enabled () > 0 && result != -1)
 	add (result);
 
     IGPROF_TRACE ((" -> %d)\n", result));
+    errno = err;
     return result;
 }
 
@@ -299,11 +312,13 @@ doaccept (IgHook::SafeData<igprof_doaccept_t> &hook,
 		   fd, (void *) addr, (void *) len));
     IgProfLock lock (s_enabled);
     int result = (*hook.chain) (fd, addr, len);
+    int err = errno;
 
     if (lock.enabled () > 0 && result != -1)
 	add (result);
 
     IGPROF_TRACE ((" -> %d)\n", result));
+    errno = err;
     return result;
 }
 

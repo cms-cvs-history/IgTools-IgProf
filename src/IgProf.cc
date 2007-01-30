@@ -6,6 +6,7 @@
 #include "Ig_Tools/IgHook/interface/IgHookTrace.h"
 #include "Ig_Tools/IgHook/interface/IgHookLiveMap.h"
 #include <sys/types.h>
+#include <sys/time.h>
 #include <cstdlib>
 #include <cstdio>
 #include <cstdarg>
@@ -47,6 +48,7 @@ static int		s_enabled	= 0;
 static bool		s_initialized	= false;
 static bool		s_activated	= false;
 static bool		s_pthreads	= false;
+static double		s_clockres	= 0;
 static pthread_t	s_mainthread;
 static pthread_key_t	s_troot;
 static pthread_mutex_t	s_lock;
@@ -116,8 +118,18 @@ IgProf::initialize (void)
 	IgProf::debug ("Current process not selected for profiling\n");
 	return s_activated = false;
     }
-    IgProf::debug ("Profiler core loaded, running %s\n",
-		   s_pthreads ? "multi-threaded" : "without threads");
+
+    itimerval interval = { { 0, 5000 }, { 100, 0 } };
+    itimerval precision;
+    setitimer (ITIMER_PROF, &interval, 0);
+    getitimer (ITIMER_PROF, &precision);
+    interval.it_interval.tv_sec = interval.it_interval.tv_usec = 0;
+    setitimer (ITIMER_PROF, &interval, 0);
+    s_clockres = (precision.it_interval.tv_sec
+		  + 1e-6 * precision.it_interval.tv_usec);
+
+    IgProf::debug ("Profiler core loaded, running %s, timing resolution %lf\n",
+		   s_pthreads ? "multi-threaded" : "without threads", s_clockres);
     IgProf::debug ("Options: %s\n", IgProf::options());
 
     IgHook::hook (doexit_hook_main.raw);
@@ -360,62 +372,153 @@ IgProf::debug (const char *format, ...)
     }
 }
 
-/** Dump out all unique symbols.  */
+/** Dump out the profile data.  */
 static void
-dumpSymbols (FILE *output, IgHookTrace *node, std::set<void *> &addresses)
+dumpProfile (FILE *output, IgHookTrace *node, void *infoptr = 0)
 {
-    if (node->address () && ! addresses.count (node->address ()))
-    { 
-	const char	*sym;
-	const char	*lib;
-	int		offset;
-	int		liboffset;
-	bool		nonheap = node->symbol (sym, lib, offset, liboffset);
+    typedef std::pair<int,unsigned long> SymInfo;
+    typedef std::pair<unsigned long, SymInfo> SymDesc;
+#if __GNUC__
+    typedef __gnu_cxx::hash_map
+	<unsigned long, SymInfo, __gnu_cxx::hash<unsigned long>,
+	 std::equal_to<unsigned long>,
+	 IgHookAlloc< std::pair<unsigned long, SymInfo> > >
+	SymIndex;
+    typedef __gnu_cxx::hash_map
+	<const char *, int, __gnu_cxx::hash<const char *>,
+	 std::equal_to<const char *>,
+	 IgHookAlloc< std::pair<const char *, int> > >
+	CounterIndex;
+    typedef __gnu_cxx::hash_map
+	<const char *, int, __gnu_cxx::hash<const char *>,
+	 std::equal_to<const char *>,
+	 IgHookAlloc< std::pair<const char *, int> > >
+	LibIndex;
+#else
+    typedef std::map
+	<unsigned long, SymInfo, std::less<unsigned long>,
+	 IgHookAlloc< std::pair<unsigned long, SymInfo> > >
+	SymIndex;
+    typedef std::map
+	<const char *, int, std::less<const char *>,
+	 IgHookAlloc< std::pair<const char *, int> > >
+	CounterIndex;
+    typedef std::map
+	<const char *, int, std::less<const char *>,
+	 IgHookAlloc< std::pair<const char *, int> > >
+	LibIndex;
+#endif
 
-	// FIXME: url quote lib name!
-	fprintf (output,
-		 "  <sym addr=\"%p\" offset=\"%d\" name=\"%s\" lib=\"%s\" liboff=\"%d\"/>\n",
-		 node->address (), offset, sym ? sym : "", lib ? lib : "", liboffset);
+    struct Info
+    {
+	CounterIndex	counters;
+	LibIndex	libs;
+	SymIndex	syms;
+	int		depth;
+	int		nsyms;
+    };
 
-	if (! nonheap) delete [] sym;
-
-	addresses.insert (node->address ());
+    Info *info = (Info *) infoptr;
+    if (! info)
+    {
+	info = new Info;
+        info->depth = 1;
+	info->nsyms = 0;
     }
 
-    for (IgHookTrace *kid = node->children (); kid; kid = kid->next ())
-	dumpSymbols (output, kid, addresses);
-}
+    if (node->address ()) // No address at root
+    {
+	unsigned long		calladdr = (unsigned long) node->address ();
+	SymIndex::iterator	sym = info->syms.find (calladdr);
+	if (sym != info->syms.end ())
+	    fprintf (output, "C%d FN%d+%d",
+		     info->depth, sym->second.first,
+		     (int) (calladdr - sym->second.second));
+	else
+	{
+	    const char	*symname;
+	    const char	*libname;
+	    int		offset;
+	    int		liboffset;
+	    bool	fixed;
 
-/** Dump out the trace tree.  */
-static void
-dumpTrace (FILE *output, IgHookTrace *node, int depth)
-{
-    if (depth > 0)
-    { 
-	for (int i = 0; i <= depth; ++i)
-	    fputc (' ', output);
+	    fixed = node->symbol (symname, libname, offset, liboffset);
+	    if (! libname) libname = "";
 
-	fprintf (output, "<node id=\"%p\" symaddr=\"%p\">\n", (void *) node, node->address ());
+	    LibIndex::iterator lib = info->libs.find (libname);
+	    bool	       needlib = false;
+	    int		       libid;
+
+	    if (lib != info->libs.end ())
+		libid = lib->second;
+	    else
+	    {
+		libid = info->libs.size ();
+		info->libs.insert (std::pair<const char *,int>(libname, libid));
+		needlib = true;
+	    }
+
+	    unsigned long	symaddr = calladdr - offset;
+	    bool		needsym = false;
+	    int			symid;
+
+	    sym = info->syms.find (symaddr);
+	    if (sym != info->syms.end ())
+		symid = sym->second.first;
+	    else
+	    {
+		symid = info->nsyms++;
+		info->syms.insert (SymDesc (calladdr, SymInfo (symid, symaddr)));
+		if (offset != 0)
+		    info->syms.insert (SymDesc (symaddr, SymInfo (symid, symaddr)));
+		needsym = true;
+	    }
+
+	    if (needlib)
+		fprintf(output, "C%d FN%d=(F%d=(%s)+%d N=(%s))+%d",
+			info->depth, symid, libid, libname ? libname : "",
+			liboffset, symname ? symname : "", offset);
+	    else if (needsym)
+		fprintf(output, "C%d FN%d=(F%d+%d N=(%s))+%d",
+			info->depth, symid, libid, liboffset,
+			symname ? symname : "", offset);
+	    else
+		fprintf(output, "C%d FN%d+%d", info->depth, symid, offset);
+
+	    if (! fixed) delete [] symname;
+	}
+
 	for (IgHookTrace::CounterValue *val = node->counters (); val; val = val->next ())
 	{
-	    for (int i = 0; i <= depth+1; ++i)
-	        fputc (' ', output);
+	    if (! val->value ())
+		continue;
 
-	    fprintf (output, "<counter name=\"%s\" value=\"%llu\" count=\"%llu\"/>\n",
-		     val->counter ()->m_name, val->value (), val->count ());
+	    const char			*ctrname = val->counter ()->m_name;
+	    CounterIndex::iterator	ctr = info->counters.find (ctrname);
+
+	    if (ctr != info->counters.end ())
+		fprintf (output, " V%d:(%llu,%llu)",
+			 ctr->second, val->value (), val->count ());
+	    else
+	    {
+		int ctrid = info->counters.size ();
+		info->counters.insert (std::pair<const char *, int>
+				       (ctrname, ctrid));
+		fprintf (output, " V%d=(%s):(%llu,%llu)",
+			 ctrid, ctrname, val->value (), val->count ());
+	    }
 	}
+
+	fputc ('\n', output);
     }
 
+    info->depth++;
     for (IgHookTrace *kid = node->children (); kid; kid = kid->next ())
-	dumpTrace (output, kid, depth+1);
+	dumpProfile (output, kid, info);
+    info->depth--;
 
-    if (depth > 0)
-    {
-	for (int i = 0; i <= depth; ++i)
-	    fputc (' ', output);
-
-	fprintf (output, "</node>\n");
-    }
+    if (! infoptr)
+	delete info;
 }
 
 /** Dump out the profiler data: trace tree and live maps.  */
@@ -453,6 +556,9 @@ IgProf::dump (void)
     if (! *outname)
         sprintf (outname, "igprof.%ld", (long) getpid ());
 
+    struct timeval tstart, tend;
+    gettimeofday (&tstart, 0);
+
     FILE *output = (outname[0] == '|'
 		    ? (unsetenv("LD_PRELOAD"), popen(outname+1, "w"))
 		    : fopen (outname, "w+"));
@@ -464,34 +570,32 @@ IgProf::dump (void)
     }
 
     IgProf::debug ("dumping state to %s\n", outname);
-    std::set<void *> addresses;
 #if __linux
-    fprintf (output, "<igprof program=\"%s\" pid=\"%lu\">\n",
-	     program_invocation_name, (unsigned long) getpid ());
+    fprintf (output, "P=(ID=%lu N=(%s) T=%lf)\n",
+	     (unsigned long) getpid (), program_invocation_name, s_clockres);
 #else
-    fprintf (output, "<igprof pid=\"%lu\">\n", (unsigned long) getpid ());
+    fprintf (output, "P=(ID=%lu T=%lf)\n", (unsigned long) getpid (), s_clockres);
 #endif
-    fprintf (output, " <symbols>\n");
-    dumpSymbols (output, IgProf::root (), addresses);
-    fprintf (output, " </symbols>\n");
-    fprintf (output, " <trace>\n");
-    dumpTrace (output, IgProf::root (), 0);
-    fprintf (output, " </trace>\n");
+    dumpProfile (output, IgProf::root ());
     LiveMaps::iterator i = livemaps ().begin ();
     LiveMaps::iterator end = livemaps ().end ();
+    int nmaps = 0;
     for ( ; i != end; ++i)
     {
-        fprintf (output, " <live map=\"%s\" size=\"%lu\">\n", i->first, i->second->size ());
+        fprintf (output, "LM%d=(S=%lu N=(%s))", nmaps++, i->second->size (), i->first);
         IgHookLiveMap::Iterator m = i->second->begin ();
         IgHookLiveMap::Iterator mend = i->second->end ();
         for ( ; m != mend; ++m)
-            fprintf (output, "  <leak node=\"%p\" resource=\"%ld\" info=\"%lu\"/>\n",
+            fprintf (output, " LK=(N=%p R=%ld I=%lu)",
 		     (void *) m->second.first, m->first, m->second.second);
-        fprintf (output, " </live>\n");
+	fputc('\n', output);
     }
 
-    fprintf (output, "</igprof>\n");
     fclose (output);
+    gettimeofday (&tend, 0);
+    IgProf::debug ("dump took %.2lf seconds\n",
+		   (tend.tv_sec + 1e-6 * tend.tv_usec)
+		   - (tstart.tv_sec + 1e-6 * tstart.tv_usec));
     dumping = false;
 }
 
@@ -508,8 +612,8 @@ doexit (IgHook::SafeData<igprof_doexit_t> &hook, int code)
 	pthread_t thread = pthread_self ();
 	if (s_pthreads)
 	{
-	    IgProf::debug ("merging thread %lu profile on %s()\n",
-			   (unsigned long) thread, hook.function);
+	    IgProf::debug ("merging thread %lu profile on %s(%d)\n",
+			   (unsigned long) thread, hook.function, code);
 	    IgProf::exitThread ();
 	}
     }

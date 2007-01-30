@@ -1,3 +1,24 @@
+2007-01-31  Lassi A. Tuura  <lat@iki.fi>
+
+	* IgProf.cc: Produce new style, much more compact, dump.  Include
+	the performance counter tick resolution to the output.  In debug
+	mode print out how long it took us to generate the dump.
+
+	* IgProfFileDesc.cc: Preserve errno across calls.
+
+	* IgProfMem.cc (add): Remove tosymbol() calls, there are too many
+	cases where the calls bomb out or dead-lock on SL4, even without
+	performance profiler; the dynamic linker for example invokes
+	malloc in context when it's not possible to invoke dladdr().
+
+	* IgProfPerf.cc: Add per-thread stack look up cache.  Merge "add"
+	into the profile signal handler.  Request 5ms profiling interval.
+	Invoke stacktrace() at least once in each thread before starting
+	the timer; SL4 seems to play with pthreads inside backtrace(),
+	although with the new tracer in IgHookTrace this is moot for IA32.
+
+	* igprof-analyse: Analyse new style dump.
+
 2007-01-29  Lassi A. Tuura  <lat@iki.fi>
 
 	* igprof-analyse: Merge profile data from all command line

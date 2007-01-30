@@ -60,19 +60,8 @@ add (void *ptr, size_t size)
 {
     IGPROF_TRACE (("[mem add %p %lu\n", ptr, size));
     typedef struct { void *addr; IgHookTrace *node; } NodeCache;
-#if __GNUC__
-    typedef __gnu_cxx::hash_map
-	<unsigned long, void *, __gnu_cxx::hash<unsigned long>,
-	 std::equal_to<unsigned long>,
-	 IgHookAlloc< std::pair<unsigned long, void *> > > SymCache;
-#else
-    typedef std::map
-	<unsigned long, void *, std::less<unsigned long>,
-	 IgHookAlloc< std::pair<unsigned long, void *> > > SymCache;
-#endif
 
     static const int N_STACK = 256;
-    static SymCache  symcache;
     static NodeCache nodecache [N_STACK];
     void	     *addresses [N_STACK];
     IgHookTrace      *node = IgProf::root ();
@@ -89,15 +78,7 @@ add (void *ptr, size_t size)
 	}
 	else
 	{
-            unsigned long	calladdr = (unsigned long) addresses[i];
-	    SymCache::iterator	symaddr = symcache.find (calladdr);
-	    if (symaddr == symcache.end())
-	    {
-		void *addr = IgHookTrace::tosymbol (addresses[i]);
-		symaddr = symcache.insert
-		    (SymCache::value_type (calladdr, addr)).first;
-	    }
-	    node = node->child (symaddr->second);
+	    node = node->child (addresses[i]);
 	    nodecache[j].addr = addresses[i];
 	    nodecache[j].node = node;
 	    valid = 0;

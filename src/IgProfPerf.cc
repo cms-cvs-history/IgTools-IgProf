@@ -23,6 +23,12 @@ struct IgProfPerfWrappedArg
     void *arg;
 };
 
+struct IgProfPerfCache
+{
+    void *addr;
+    IgHookTrace *node;
+};
+
 #ifdef __APPLE__
 typedef sig_t sighandler_t;
 #endif
@@ -57,31 +63,37 @@ IGPROF_LIBHOOK (4, int, dopthread_create, _pthread21,
 	        "pthread_create", "GLIBC_2.1", 0)
 
 // Data for this profiler module
+static const int		N_STACK		= 256;
 static IgHookTrace::Counter	s_ct_ticks	= { "PERF_TICKS" };
 static int			s_enabled	= 0;
 static bool			s_initialized	= false;
 static int			s_signal	= SIGPROF;
 static int			s_itimer	= ITIMER_PROF;
 static pthread_t		s_mainthread	= 0;
+static IgProfPerfCache		*s_cache	= 0;
+static pthread_key_t		s_tcache;
 
-/** Record a tick.  Increments counters in the tree for ticks.  */
-static void 
-add (void)
+/** Setup per-thread address lookup cache. */
+static void
+setupThreadCache (void)
 {
-    void	*addresses [256];
-    IgHookTrace	*node = IgProf::threadRoot ();
-    int		depth = IgHookTrace::stacktrace (addresses, 256);
-    int		droptop = 2 + (IgProf::isMultiThreaded () ? 1 : 0);
-    int		dropbottom = (s_mainthread && pthread_self() == s_mainthread ? 2 : 3);
-    // droptop: one for stacktrace, one for me, one for signal frame.
-    // dropbottom: drop off thread start wrappers, libc start etc.
+    IgProfPerfCache *cache = new IgProfPerfCache [N_STACK];
+    memset (cache, 0, N_STACK * sizeof (IgProfPerfCache));
 
-    // Walk the tree
-    for (int i = depth-dropbottom; node && i >= droptop; --i)
-	node = node->child (addresses[i]);
+    if (! IgProf::isMultiThreaded ())
+	s_cache = cache;
+    else
+	pthread_setspecific (s_tcache, cache);
+}
 
-    // Increment counters for this node
-    node->counter (&s_ct_ticks)->tick ();
+/** Return per-thread cache.  */
+static IgProfPerfCache *
+threadCache (void)
+{
+    if (! IgProf::isMultiThreaded ())
+	return s_cache;
+    else
+	return (IgProfPerfCache *) pthread_getspecific (s_tcache);
 }
 
 /** Performance profiler signal handler, SIGPROF or SIGALRM depending
@@ -91,8 +103,35 @@ add (void)
 static void
 profileSignalHandler (void)
 {
-    if (s_enabled > 0)
-        add ();
+    if (s_enabled <= 0)
+	return;
+
+    // Increment counter for the final leaf of this call tree.
+    void		*addresses [N_STACK];
+    IgProfPerfCache	*nodecache = threadCache ();
+    IgHookTrace		*node = IgProf::threadRoot ();
+    int			depth = IgHookTrace::stacktrace (addresses, N_STACK);
+    const int		droptop = 3; // stack trace, me, signal frame
+    const int		dropbottom = 2; // system + start or thread wrapper
+
+    // Walk the tree
+    for (int i = depth-dropbottom, j = 0, valid = 1; node && i >= droptop; --i, ++j)
+    {
+	if (valid && nodecache[j].addr == addresses[i])
+	{
+	    node = nodecache[j].node;
+	}
+	else
+	{
+	    node = node->child (addresses[i]);
+	    nodecache[j].addr = addresses[i];
+	    nodecache[j].node = node;
+	    valid = 0;
+        }
+    }
+
+    // Increment counters for this node
+    node->counter (&s_ct_ticks)->tick ();
 }
 
 /** Enable profiling timer.  You should have called
@@ -101,7 +140,7 @@ profileSignalHandler (void)
 static void
 enableTimer (void)
 {
-    itimerval interval = { { 0, 1000 }, { 0, 1000 } };
+    itimerval interval = { { 0, 5000 }, { 0, 5000 } };
     setitimer (s_itimer, &interval, 0);
 }
 
@@ -125,6 +164,13 @@ threadWrapper (void *arg)
 
 	// Enable separate profile tree for this thread.
         IgProf::initThread ();
+	setupThreadCache ();
+
+        // Make sure we've called stack trace code at least once in
+	// this thread before the profile signal hits.  Linux's
+	// backtrace() seems to want to call pthread_once() which
+	// can be bad news inside the signal handler.
+	void *dummy = 0; IgHookTrace::stacktrace (&dummy, 1);
 
         // Enable profiling in this thread.
         sigset_t profset;
@@ -153,6 +199,7 @@ threadWrapper (void *arg)
     {
 	// Harvest thread profile result.
 	IgProfLock lock (s_enabled);
+	delete [] threadCache ();
         IgProf::debug ("Perf: exiting thread %lu from profiling (%p, %p)\n",
 		       (unsigned long) pthread_self (),
 		       (void *) start_routine,
@@ -229,7 +276,10 @@ IgProfPerf::initialize (void)
 	// signal to all real user-threads.
 	IgProf::debug ("Performance profiler enabled\n");
 	if (IgProf::isMultiThreaded())
+	{
 	    s_mainthread = pthread_self();
+	    pthread_key_create (&s_tcache, 0);
+	}
 
 	IgHook::hook (dopthread_create_hook_main.raw);
 #if __linux
@@ -242,6 +292,7 @@ IgProfPerf::initialize (void)
 
 	IgProf::root ();
 	IgProf::threadRoot ();
+	setupThreadCache ();
 
 	enableSignalHandler ();
 	enableTimer ();
