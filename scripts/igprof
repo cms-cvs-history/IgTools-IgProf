@@ -9,6 +9,7 @@ usage() {
   echo -e "-o, --output FILE          \toutput to FILE, or pipe if starts with '|'"
   echo -e "-d, --debug                \tenable more details from profiler"
   echo -e "-f, --full                 \tstart all the profilers"
+  echo -e "-t, --target STR           \tonly profile programs with STR in their names"
   echo -e "-mp, --memory-profiler     \tstart the memory profiler"
   echo -e "-pp, --performance-profiler\tstart the performance profile (default)"
   echo -e "-pr, --real-time           \tmeasure real time in performance profiler"
@@ -28,6 +29,10 @@ while [ "$#" != 0 ]; do
 
     -o | --output )
       OUT="out='$2'"; shift; shift ;;
+
+    -t | --target )
+      IGPROF_TARGET="$2"; shift; shift;
+      export IGPROF_TARGET ;;
 
     -d | --debug )
       IGHOOK_DEBUGGING=1 IGPROF_DEBUGGING=1;
