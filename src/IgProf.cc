@@ -646,6 +646,7 @@ dokill (IgHook::SafeData<igprof_dokill_t> &hook, pid_t pid, int sig)
 /** Dump out profile data when application is about to exit. */
 IgProfExitDump::~IgProfExitDump (void)
 {
+    if (! s_activated) return;
     IgProf::deactivate ();
     IgProf::dump ();
     IgProf::debug ("igprof quitting\n");

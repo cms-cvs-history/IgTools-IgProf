@@ -1,5 +1,7 @@
 2007-02-01  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProf.cc: Don't dump if the profiler wasn't activated.
+
 	* igprof: Add -t/--target option to help set profiling target.
 
 2007-01-31  Lassi A. Tuura  <lat@iki.fi>
