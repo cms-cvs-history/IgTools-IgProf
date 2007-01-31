@@ -422,7 +422,7 @@ dumpProfile (FILE *output, IgHookTrace *node, void *infoptr = 0)
     if (! info)
     {
 	info = new Info;
-        info->depth = 1;
+        info->depth = 0;
 	info->nsyms = 0;
     }
 

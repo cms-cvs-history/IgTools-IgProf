@@ -295,32 +295,30 @@ sub readDump
 
     if ($infile =~ /\.gz$/)
     {
-        open (DUMP, "gzip -d -c < $infile |") || die "$infile: $!\n";
+        open (DUMP, "gzip -d -c < $infile |") || die "\n$infile: $!\n";
     }
     elsif ($infile =~ /\|$/)
     {
-        open (DUMP, $infile) || die "$infile: $!\n";
+        open (DUMP, $infile) || die "\n$infile: $!\n";
     }
     else
     {
-        open (DUMP, "< $infile") || die "$infile: $!\n";
+        open (DUMP, "< $infile") || die "\n$infile: $!\n";
     }
 
     do { local $|=1; print " X" } if $verbose;
+    if (defined ($_ = <DUMP>))
+    {
+        die "\nThis does not look like an igprof profile stats:\n  $_\n"
+	    if ! /^P=\(.*T=(.*)\)/o;
+        $res = $1;
+    }
     while (<DUMP>)
     {
         chomp;
         do { local $|=1; print "." } if $verbose && ($. % 10000) == 1;
-	if (/^P=\(.*T=(.*)\)/o)
-	{
-	    $res = $1;
-	    next;
-	}
-        elsif (! /^C(\d+)\s*/go)
-	{
-	    next;
-        }
-	$#nodestack = $1-2;
+        next if ! /^C(\d+)\s*/go;
+	$#nodestack = $1-1;
 
 	my $sym = undef;
 	if (/\GFN(\d+)\+\d+\s*/goc)

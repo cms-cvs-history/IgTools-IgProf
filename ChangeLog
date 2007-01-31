@@ -1,5 +1,9 @@
 2007-01-31  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProf.cc, igprof-analyse: Start the call depth counting from 1,
+	now that we are dropping the unnecessary "fake" top frame.  In
+	analysing read the program prefix separately outside the loop.
+
 	* IgProf.cc: Produce new style, much more compact, dump.  Include
 	the performance counter tick resolution to the output.  In debug
 	mode print out how long it took us to generate the dump.
