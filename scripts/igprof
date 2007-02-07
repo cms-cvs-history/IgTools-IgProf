@@ -88,9 +88,9 @@ fi
 
 case $(uname) in
   Darwin )
-    DYLD_BIND_AT_LAUNCH=1
-    DYLD_INSERT_LIBRARIES=$LOCALRT/lib/`scram arch`/libIgProf.dylib
-    export DYLD_BIND_AT_LAUNCH DYLD_INSERT_LIBRARIES ;;
+    # DYLD_INSERT_LIBRARIES=$LOCALRT/lib/`scramv1 arch`/libIgProf.dylib
+    DYLD_INSERT_LIBRARIES=./libIgProf.dylib
+    export DYLD_INSERT_LIBRARIES ;;
   * )
     LD_PRELOAD=${LD_PRELOAD:+${LD_PRELOAD}:}libIgProf.so;
     export LD_PRELOAD ;;

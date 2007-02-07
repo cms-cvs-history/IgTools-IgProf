@@ -1,3 +1,8 @@
+2007-02-07  Lassi A. Tuura  <root@maccms02.cern.ch>
+
+	* igprof: Set variables correctly for working on OS X.  The
+	library path is a hack however as there's no scram.
+
 2007-02-01  Lassi A. Tuura  <lat@iki.fi>
 
 	* IgProf.cc: Don't dump if the profiler wasn't activated.
