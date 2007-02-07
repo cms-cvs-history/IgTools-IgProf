@@ -19,6 +19,11 @@
 #include <pthread.h>
 #include <dlfcn.h>
 
+#ifdef __APPLE__
+# include <crt_externs.h>
+# define program_invocation_name **_NSGetArgv()
+#endif
+
 //<<<<<< PRIVATE DEFINES                                                >>>>>>
 //<<<<<< PRIVATE CONSTANTS                                              >>>>>>
 //<<<<<< PRIVATE TYPES                                                  >>>>>>
@@ -115,7 +120,9 @@ IgProf::initialize (void)
     s_mainthread = pthread_self ();
     if (target && ! strstr (program_invocation_name, target))
     {
-	IgProf::debug ("Current process not selected for profiling\n");
+	IgProf::debug ("Current process not selected for profiling:"
+		       " process '%s' does not match '%s'\n",
+		       program_invocation_name, target);
 	return s_activated = false;
     }
 
@@ -128,9 +135,11 @@ IgProf::initialize (void)
     s_clockres = (precision.it_interval.tv_sec
 		  + 1e-6 * precision.it_interval.tv_usec);
 
-    IgProf::debug ("Profiler core loaded, running %s, timing resolution %lf\n",
-		   s_pthreads ? "multi-threaded" : "without threads", s_clockres);
+    IgProf::debug ("Profiler core loaded in %s, timing resolution %f, running %s\n",
+		   program_invocation_name, s_clockres,
+		   s_pthreads ? "multi-threaded" : "without threads");
     IgProf::debug ("Options: %s\n", IgProf::options());
+    IgProf::root ();
 
     IgHook::hook (doexit_hook_main.raw);
     IgHook::hook (doexit_hook_main2.raw);
@@ -363,7 +372,7 @@ IgProf::debug (const char *format, ...)
     static const char *debugging = getenv ("IGPROF_DEBUGGING");
     if (debugging)
     {
-	fprintf (stderr, "*** IgProf: ");
+	fprintf (stderr, "*** IgProf(%lu): ", (unsigned long) getpid());
 
 	va_list args;
 	va_start (args, format);
@@ -570,12 +579,8 @@ IgProf::dump (void)
     }
 
     IgProf::debug ("dumping state to %s\n", outname);
-#if __linux
-    fprintf (output, "P=(ID=%lu N=(%s) T=%lf)\n",
+    fprintf (output, "P=(ID=%lu N=(%s) T=%f)\n",
 	     (unsigned long) getpid (), program_invocation_name, s_clockres);
-#else
-    fprintf (output, "P=(ID=%lu T=%lf)\n", (unsigned long) getpid (), s_clockres);
-#endif
     dumpProfile (output, IgProf::root ());
     LiveMaps::iterator i = livemaps ().begin ();
     LiveMaps::iterator end = livemaps ().end ();
@@ -593,7 +598,7 @@ IgProf::dump (void)
 
     fclose (output);
     gettimeofday (&tend, 0);
-    IgProf::debug ("dump took %.2lf seconds\n",
+    IgProf::debug ("dump took %.2f seconds\n",
 		   (tend.tv_sec + 1e-6 * tend.tv_usec)
 		   - (tstart.tv_sec + 1e-6 * tstart.tv_usec));
     dumping = false;

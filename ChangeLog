@@ -1,5 +1,13 @@
 2007-02-07  Lassi A. Tuura  <root@maccms02.cern.ch>
 
+	* IgProf.cc (initialize): If process wasn't selected for
+	profiling, print the names that were used in matching.  If the
+	process was selected for profiling, print out the program name.
+	Initialise profile root early in order not to initialise it at a
+	time we really shouldn't.  Use %f not %lf to format floats.
+	(debug): Print the process id.
+	(dump): Print process name on all platforms.  Use %f, not %lf.
+
 	* igprof: Set variables correctly for working on OS X.  The
 	library path is a hack however as there's no scram.
 
