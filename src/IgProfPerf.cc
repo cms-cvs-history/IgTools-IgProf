@@ -112,7 +112,7 @@ profileSignalHandler (void)
     IgHookTrace		*node = IgProf::threadRoot ();
     int			depth = IgHookTrace::stacktrace (addresses, N_STACK);
     const int		droptop = 3; // stack trace, me, signal frame
-    const int		dropbottom = 2; // system + start or thread wrapper
+    const int		dropbottom = 2; // --depth + start or thread wrapper
 
     // Walk the tree
     for (int i = depth-dropbottom, j = 0, valid = 1; node && i >= droptop; --i, ++j)

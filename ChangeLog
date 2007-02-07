@@ -1,5 +1,8 @@
 2007-02-07  Lassi A. Tuura  <root@maccms02.cern.ch>
 
+	* IgProfPerf.cc (profileSignalHandler): Correct comment on why we
+	remove two levels from the bottom of the stack trace.
+
 	* IgProf.cc (initialize): If process wasn't selected for
 	profiling, print the names that were used in matching.  If the
 	process was selected for profiling, print out the program name.
