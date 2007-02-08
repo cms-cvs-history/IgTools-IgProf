@@ -101,7 +101,7 @@ sub igprof_filter_malloc_post
 
     # Check if it's a memory allocation function we know about.
     my @allocs = qw(malloc calloc realloc memalign posix_memalign valloc
-		    zmalloc zcalloc zrealloc _Znwj _Znaj);
+		    zmalloc zcalloc zrealloc _Znwj _Znaj _Znam);
     return if ! grep ($$syms{$$node{SYMIDX}}{NAME} eq $_, @allocs);
 
     # Yes it was.  Squash the resource usage to the caller.
