@@ -358,6 +358,12 @@ sub readDump
 	            . "  $_\n  " . (" " x $pos) . "^\n";
 	    }
 
+	    if (substr($symname, 0, 2) eq '@?' && $$file{NAME} && $fileoff >= 0)
+	    {
+		my ($basename) = ($$file{NAME} =~ m|(?:.*/)?(.*)|);
+		$symname = "\@($basename+$fileoff)";
+	    }
+
 	    $sym = $symbyname{$symname};
 	    if (! $sym)
 	    {
