@@ -1,5 +1,12 @@
 2007-02-10  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProfPool.h, IgProfPool.cc: Handle better situations where the
+	pool fills up faster than the collector can empty it, to avoid
+	burning large amounts of /tmp space.  Yield the CPU every few
+	allocations, not just when the buffer is full, and in case that
+	doesn't help, for example on a SMP system with free CPU capacity,
+	force the thread off CPU by sleeping a bit every now and then.
+
 	* IgProf.h, IgProf.cc, IgProfMem.cc, IgProfPerf.h, IgProfPerf.cc,
 	IgProfFileDesc.cc: Simplify profiler module implementation and fix
 	various minor issues in profiler initialisation and exit handling.

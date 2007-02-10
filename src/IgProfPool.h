@@ -110,6 +110,8 @@ private:
     int			m_currentmap;
     bool		m_buffered;
     bool		m_shared;
+    bool		m_slow;
+    int			m_nslow;
 };
 
 //<<<<<< INLINE PUBLIC FUNCTIONS                                        >>>>>>

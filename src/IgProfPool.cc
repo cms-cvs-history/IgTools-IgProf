@@ -106,7 +106,9 @@ IgProfPool::IgProfPool (int id, bool buffered, bool shared,
     m_id (id),
     m_currentmap (-1),
     m_buffered (buffered),
-    m_shared (shared)
+    m_shared (shared),
+    m_slow (false),
+    m_nslow (0)
 {
     initFile (m_fd, id);
 
@@ -176,8 +178,25 @@ IgProfPool::push (void **stack, int depth, Entry *counters, int ncounters)
 	*m_current++ = counters[i].resource;
     }
 
+    // Yield every 64 allocations and snooze every 1024.
+    int yieldcycle = (m_slow ? (++m_nslow % 1024) : 0);
+    bool yieldsome = (m_slow && (yieldcycle % 32) == 1);
+    bool yieldmore = (m_slow && (yieldcycle == 1));
+
     if (m_shared)
 	pthread_mutex_unlock (&m_lock);
+
+    // If we have outrun the collector, pace ourselves to give the
+    // collector more time.  This does not work if we are holding
+    // locks preventing the collector from running, but helps most
+    // of the time the collector to follow aggressive allocation.
+    // We occasionally sleep to force ourselves off the processor
+    // on SMP systems with free CPU capacity.
+    if (yieldsome)
+	if (yieldmore)
+	    usleep (1000);
+	else
+	    sched_yield ();
 }
 
 /** Switch to mapping @a i. */
@@ -294,6 +313,9 @@ IgProfPool::flush (void)
 
 	// Switch mappings now.
 	mapping (free);
+
+	// Tell push() we don't need to run slowly now.
+	m_slow = false;
     }
 
     // Either we are unbuffered or we are out of free mappings.
@@ -317,8 +339,8 @@ IgProfPool::flush (void)
 	// Mark this buffer same available again.
         m_current = m_buffer;
 
-	// If we the outran collector, voluntarily give it a chance.
-	if (m_buffered) sched_yield ();
+	// Tell push() to pace itself if we outran the collector.
+	if (m_buffered) m_slow = true, m_nslow = 0;
     }
 }
 
