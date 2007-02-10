@@ -10,6 +10,9 @@
 //<<<<<< PUBLIC CONSTANTS                                               >>>>>>
 //<<<<<< PUBLIC TYPES                                                   >>>>>>
 
+class IgProfLock;
+class IgProfPool;
+class IgProfReadBuf;
 class IgHookTrace;
 class IgHookLiveMap;
 
@@ -26,61 +29,65 @@ public:
 	    			       const char *func, const char *expr);
     static void			debug (const char *format, ...);
     static const char *		options (void);
-    static IgHookTrace *	root (void);
-    static IgHookTrace *	threadRoot (void);
-    static IgHookLiveMap *	liveMap (const char *label);
 
-    static bool			initialize (void);
-    static void			dump (void);
-
-    static void			onactivate (void (*func) (void));
-    static void			ondeactivate (void (*func) (void));
-
-    static void			activate (void);
-    static void			deactivate (void);
+    static bool			initialize (int *moduleid,
+					    void (*threadinit) (void),
+					    bool perthread);
 
     static void			initThread (void);
-    static void			exitThread (void);
+    static void			exitThread (bool final);
     static bool			isMultiThreaded (void);
+
+    static bool			enabled (void);
+    static bool			enable (void);
+    static bool			disable (void);
+    static IgProfPool *		pool (int moduleid);
+
+    static void			dump (void);
 
 private:
     friend class IgProfLock;
     static bool			lock (void);
     static void			unlock (void);
 
-    static void			enable (void);
-    static void			disable (void);
+    static int			profileReadHunk (int &fd,
+		    				 IgProfReadBuf &buf,
+						 IgProfReadBuf &zbuf);
+    static void *		profileListenThread (void *);
+
+    static IgHookTrace *	root (void);
+    static IgHookLiveMap *	liveMap (const char *label);
 };
 
-/** Acquire a lock on the profiling system.  Obtains the
-    lock and deactivates all profiler modules.  */
+/** Acquire a lock on the profiling system.  Obtains the lock and
+    disables the profile data gathering.  Profiling modules making
+    use of the #IgProf::pool() method (only) should in general just
+    use #IgProf::enable() and #IgProf::disable(); this class should
+    be used only for access to the rest of guts of the profilers.  */
 class IgProfLock
 {
 public:
-    IgProfLock (int &enabled);
+    IgProfLock (void);
     ~IgProfLock (void);
 
-    int		enabled (void);
+    bool	enabled (void);
 
 private:
     IgProfLock (const IgProfLock &);
     IgProfLock &operator= (const IgProfLock &);
 
     bool	m_locked;
-    int		m_enabled;
+    bool	m_enabled;
 };
 
 //<<<<<< INLINE PUBLIC FUNCTIONS                                        >>>>>>
 //<<<<<< INLINE MEMBER FUNCTIONS                                        >>>>>>
 
-/** Return the state of this profiler module after the lock has been
-    acquired.  Value greater than zero indicates the module was active
-    before the lock was obtained and the caller can proceed to record
-    information.  If the return value is zero or less, caller should
-    only do whatever is minimally required to mimic what ever function
-    it trapped, or ignore the request.  */
-inline int
+/** Return @c true if the profiler system was active at the time the
+    lock was acquired.  If this function returns @c false, the caller
+    should avoid recording anything in the profiler system.  */
+inline bool
 IgProfLock::enabled (void)
-{ return m_locked ? m_enabled : 0; }
+{ return m_enabled && m_locked; }
 
 #endif // IG_PROF_IG_PROF_H

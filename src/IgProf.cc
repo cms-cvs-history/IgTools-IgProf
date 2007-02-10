@@ -1,7 +1,8 @@
 //<<<<<< INCLUDES                                                       >>>>>>
 
 #include "Ig_Tools/IgProf/src/IgProf.h"
-#include "Ig_Tools/IgProf/src/IgProfMem.h"
+#include "Ig_Tools/IgProf/src/IgProfPool.h"
+#include "Ig_Tools/IgProf/src/IgProfAtomic.h"
 #include "Ig_Tools/IgHook/interface/IgHook.h"
 #include "Ig_Tools/IgHook/interface/IgHookTrace.h"
 #include "Ig_Tools/IgHook/interface/IgHookLiveMap.h"
@@ -13,9 +14,10 @@
 #include <cerrno>
 #include <list>
 #include <map>
-#include <set>
 #include <unistd.h>
 #include <sys/signal.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <dlfcn.h>
 
@@ -28,9 +30,26 @@
 //<<<<<< PRIVATE CONSTANTS                                              >>>>>>
 //<<<<<< PRIVATE TYPES                                                  >>>>>>
 
+// Used to capture real user start arguments in our custom thread wrapper
+struct IgProfWrappedArg { void * (*start_routine) (void *); void *arg; };
+struct IgProfPoolAlloc { IgProfPool *pool; int fd; bool perthread; };
+struct IgProfNodeCache { void *addr; IgHookTrace *node; };
+struct IgProfReadBuf { size_t size; size_t n; char *data; char *pos; off_t off; };
 class IgProfExitDump { public: ~IgProfExitDump (); };
-typedef std::map<const char *, IgHookLiveMap *> LiveMaps;
-typedef std::list<void (*) (void)>		ActivationList;
+
+typedef std::map<const char *, IgHookLiveMap *> IgProfLiveMaps;
+typedef std::list<IgProfAtomic *>		IgProfGuardList;
+typedef std::list<void (*) (void)>		IgProfCallList;
+#if __GNUC__
+typedef __gnu_cxx::hash_map
+    <unsigned long, void *, __gnu_cxx::hash<unsigned long>,
+     std::equal_to<unsigned long>,
+     IgHookAlloc< std::pair<unsigned long, void *> > > IgProfSymCache;
+#else
+typedef std::map
+    <unsigned long, void *, std::less<unsigned long>,
+     IgHookAlloc< std::pair<unsigned long, void *> > > IgProfSymCache;
+#endif
 
 //<<<<<< PRIVATE VARIABLE DEFINITIONS                                   >>>>>>
 //<<<<<< PUBLIC VARIABLE DEFINITIONS                                    >>>>>>
@@ -48,45 +67,141 @@ IGPROF_DUAL_HOOK (2, int,  dokill, _main, _libc,
 		  (pid_t pid, int sig), (pid, sig),
 		  "kill", 0, "libc.so.6")
 
+IGPROF_LIBHOOK (4, int, dopthread_create, _main,
+	        (pthread_t *thread, const pthread_attr_t *attr,
+		 void * (*start_routine)(void *), void *arg),
+		(thread, attr, start_routine, arg),
+	        "pthread_create", 0, 0)
+
+IGPROF_LIBHOOK (4, int, dopthread_create, _pthread20,
+	        (pthread_t *thread, const pthread_attr_t *attr,
+		 void * (*start_routine)(void *), void *arg),
+		(thread, attr, start_routine, arg),
+	        "pthread_create", "GLIBC_2.0", 0)
+
+IGPROF_LIBHOOK (4, int, dopthread_create, _pthread21,
+	        (pthread_t *thread, const pthread_attr_t *attr,
+		 void * (*start_routine)(void *), void *arg),
+		(thread, attr, start_routine, arg),
+	        "pthread_create", "GLIBC_2.1", 0)
+
 // Data for this profiler module
-static int		s_enabled	= 0;
+static const int	N_POOLS		= 8;
+static const unsigned	MAX_DATA	= 512;
+static IgProfAtomic	s_enabled	= 0;
 static bool		s_initialized	= false;
 static bool		s_activated	= false;
 static bool		s_pthreads	= false;
+static bool		s_quitting	= 0;
 static double		s_clockres	= 0;
+static IgProfPoolAlloc	*s_pools	= 0;
 static pthread_t	s_mainthread;
-static pthread_key_t	s_troot;
+static pthread_t	s_readthread;
+static fd_set		s_poolfd;
+static pthread_key_t	s_poolkey;
+static pthread_mutex_t	s_poollock;
 static pthread_mutex_t	s_lock;
+static IgProfNodeCache	s_nodecache [MAX_DATA];
+static IgProfSymCache	*s_symcache;
 
 // Static data that needs to be constructed lazily on demand
-static LiveMaps &livemaps (void)
-{ static LiveMaps *s = new LiveMaps; return *s; }
+static IgProfLiveMaps &livemaps (void)
+{ static IgProfLiveMaps *s = new IgProfLiveMaps; return *s; }
 
-static ActivationList &activations (void)
-{ static ActivationList *s = new ActivationList; return *s; }
+static IgProfCallList &threadinits (void)
+{ static IgProfCallList *s = new IgProfCallList; return *s; }
 
-static ActivationList &deactivations (void)
-{ static ActivationList *s = new ActivationList; return *s; }
+// Helper function to initialise pools.
+static void
+initPool (IgProfPoolAlloc *pools, int pool, bool perthread)
+{
+    IgProfPool *p = new IgProfPool (pool, s_pthreads, s_pthreads && !perthread);
+    pools [pool].pool = p;
+    pools [pool].fd = p->readfd ();
+    pools [pool].perthread = perthread;
+
+    if (s_pthreads)
+    {
+	pthread_mutex_lock (&s_poollock);
+	FD_SET (pools[pool].fd, &s_poolfd);
+	pthread_mutex_unlock (&s_poollock);
+    }
+}
+
+static bool
+readsafe (IgProfReadBuf &buf, int fd, void *into, size_t n, bool end, const char *msg)
+{
+    // If the buffer is underfilled, fill it now.
+    if (buf.n < n && fd != -1)
+    {
+	memmove (buf.data, buf.pos, buf.n);
+	buf.pos = buf.data;
+
+	while (buf.n < buf.size)
+	{
+	    ssize_t m = read (fd, buf.data + buf.n, buf.size - buf.n);
+	    if (m < 0 && errno == EINTR)
+		continue;
+	    else if (m < 0)
+	    {
+		IgProf::debug ("INTERNAL ERROR: %s (fd %d, errno %d)\n",
+			       msg, fd, errno);
+		abort ();
+	    }
+	    if (m == 0)
+		break;
+	    buf.n += m;
+	}
+
+	buf.off = lseek (fd, 0, SEEK_CUR);
+    }
+
+    // Now read from our buffer.  It's always guaranteed to be larger
+    // than any actual profile data read we are going to make.  The
+    // only reason it might not have enough data is that our read
+    // came short, meaning there is no more data in the file.
+    if (buf.n < n && end)
+    {
+	IgProf::debug ("End of profile data on descriptor %d pos %lld, buffered %lu\n",
+		       fd, (long long) lseek (fd, 0, SEEK_CUR), (unsigned long) buf.n);
+	return false;
+    }
+
+    if (buf.n < n)
+    {
+	IgProf::debug ("INTERNAL ERROR: %s (fd %d, expected %lu, have %lu)\n",
+		       msg, fd, (unsigned long) n, (unsigned long) buf.n);
+	abort ();
+    }
+
+    memcpy (into, buf.pos, n);
+    buf.pos += n;
+    buf.n -= n;
+    return true;
+}
 
 //<<<<<< PUBLIC FUNCTION DEFINITIONS                                    >>>>>>
 //<<<<<< MEMBER FUNCTION DEFINITIONS                                    >>>>>>
 
-/** Lock profiling system and grab the value of @a enabled.
-    Later calls to #enabled() will indicate if the calling
-    module has already been disabled by someone else.
+/** Lock and disable the profiling system, but grab the
+    global enabled flag just before that.  Later calls
+    to #enabled() will indicate if profiling is enabled.
     Never call this from asynchronous signals! */
-IgProfLock::IgProfLock (int &enabled)
+IgProfLock::IgProfLock (void)
 {
-    m_locked = IgProf::lock ();
-    m_enabled = enabled;
-    IgProf::deactivate ();
+    if ((m_enabled = IgProf::disable ()))
+	m_locked = IgProf::lock ();
+    else
+	m_locked = false;
 }
 
 /** Release the lock on the profiling system.  */
 IgProfLock::~IgProfLock (void)
 {
-    IgProf::activate ();
-    IgProf::unlock ();
+    if (m_locked)
+	IgProf::unlock ();
+
+    IgProf::enable ();
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -98,61 +213,112 @@ IgProfLock::~IgProfLock (void)
 
     Returns @c true if profiling is activated in this process.  */
 bool
-IgProf::initialize (void)
+IgProf::initialize (int *moduleid, void (*threadinit) (void), bool perthread)
 {
-    if (s_initialized) return s_activated;
-    s_initialized = true;
-
-    void *program = dlopen (0, RTLD_NOW);
-    if (program && dlsym (program, "pthread_create"))
+    if (! s_initialized)
     {
-	s_pthreads = true;
-	pthread_mutexattr_t attrs;
-	pthread_mutexattr_init (&attrs);
-	pthread_mutexattr_settype (&attrs, PTHREAD_MUTEX_RECURSIVE);
-	pthread_mutex_init (&s_lock, &attrs);
-	pthread_key_create (&s_troot, 0);
-	initThread ();
-    }
-    dlclose (program);
+	s_initialized = true;
 
-    const char *target = getenv ("IGPROF_TARGET");
-    s_mainthread = pthread_self ();
-    if (target && ! strstr (program_invocation_name, target))
-    {
-	IgProf::debug ("Current process not selected for profiling:"
-		       " process '%s' does not match '%s'\n",
-		       program_invocation_name, target);
-	return s_activated = false;
-    }
+	const char *options = IgProf::options ();
+	if (! options || ! *options)
+	{
+	    IgProf::debug ("$IGPROF not set, not profiling this process\n");
+	    return s_activated = false;
+	}
 
-    itimerval interval = { { 0, 5000 }, { 100, 0 } };
-    itimerval precision;
-    setitimer (ITIMER_PROF, &interval, 0);
-    getitimer (ITIMER_PROF, &precision);
-    interval.it_interval.tv_sec = interval.it_interval.tv_usec = 0;
-    setitimer (ITIMER_PROF, &interval, 0);
-    s_clockres = (precision.it_interval.tv_sec
-		  + 1e-6 * precision.it_interval.tv_usec);
+	s_pools = new IgProfPoolAlloc [N_POOLS];
+	memset (s_pools, 0, N_POOLS * sizeof (*s_pools));
 
-    IgProf::debug ("Profiler core loaded in %s, timing resolution %f, running %s\n",
-		   program_invocation_name, s_clockres,
-		   s_pthreads ? "multi-threaded" : "without threads");
-    IgProf::debug ("Options: %s\n", IgProf::options());
-    IgProf::root ();
+	void *program = dlopen (0, RTLD_NOW);
+	if (program && dlsym (program, "pthread_create"))
+	{
+	    s_pthreads = true;
+	    pthread_mutexattr_t attrs;
+	    pthread_mutexattr_init (&attrs);
+	    pthread_mutexattr_settype (&attrs, PTHREAD_MUTEX_RECURSIVE);
+	    pthread_mutex_init (&s_lock, &attrs);
+	    pthread_mutex_init (&s_poollock, &attrs);
+	    pthread_key_create (&s_poolkey, 0);
+	    pthread_create (&s_readthread, 0, &IgProf::profileListenThread, 0);
+	}
+	dlclose (program);
 
-    IgHook::hook (doexit_hook_main.raw);
-    IgHook::hook (doexit_hook_main2.raw);
-    IgHook::hook (dokill_hook_main.raw);
+	const char *target = getenv ("IGPROF_TARGET");
+	s_mainthread = pthread_self ();
+	if (target && ! strstr (program_invocation_name, target))
+	{
+	    IgProf::debug ("Current process not selected for profiling:"
+		       	    " process '%s' does not match '%s'\n",
+		       	    program_invocation_name, target);
+	    return s_activated = false;
+    	}
+
+	itimerval precision;
+	itimerval interval = { { 0, 10000 }, { 100, 0 } };
+	itimerval nullified = { { 0, 0 }, { 0, 0 } };
+	setitimer (ITIMER_PROF, &interval, 0);
+	getitimer (ITIMER_PROF, &precision);
+	setitimer (ITIMER_PROF, &nullified, 0);
+	s_clockres = (precision.it_interval.tv_sec
+		      + 1e-6 * precision.it_interval.tv_usec);
+
+	IgProf::debug ("Activated in %s, timing resolution %f, %s,"
+		       " main thread id 0x%lx\n",
+		       program_invocation_name, s_clockres,
+		       s_pthreads ? "multi-threaded" : "no threads",
+		       s_mainthread);
+	IgProf::debug ("Options: %s\n", options);
+
+	IgHook::hook (doexit_hook_main.raw);
+	IgHook::hook (doexit_hook_main2.raw);
+	IgHook::hook (dokill_hook_main.raw);
  #if __linux
-    if (doexit_hook_main.raw.chain)  IgHook::hook (doexit_hook_libc.raw);
-    if (doexit_hook_main2.raw.chain) IgHook::hook (doexit_hook_libc2.raw);
-    if (dokill_hook_main.raw.chain)  IgHook::hook (dokill_hook_libc.raw);
+	if (doexit_hook_main.raw.chain)  IgHook::hook (doexit_hook_libc.raw);
+	if (doexit_hook_main2.raw.chain) IgHook::hook (doexit_hook_libc2.raw);
+	if (dokill_hook_main.raw.chain)  IgHook::hook (dokill_hook_libc.raw);
 #endif
-    IgProf::onactivate (&IgProf::enable);
-    IgProf::ondeactivate (&IgProf::disable);
+	if (s_pthreads)
+	{
+	    IgHook::hook (dopthread_create_hook_main.raw);
+#if __linux
+	    IgHook::hook (dopthread_create_hook_pthread20.raw);
+	    IgHook::hook (dopthread_create_hook_pthread21.raw);
+#endif
+	}
+	s_activated = true;
+	s_enabled = 1;
+    }
+
+    if (! s_activated)
+	return false;
+
+    if (! moduleid)
+	return true;
+
+    IgProf::disable ();
+
+    int pool;
+    for (pool = 0; pool < N_POOLS; ++pool)
+	if (! s_pools [pool].pool)
+	{
+	    initPool (s_pools, pool, perthread);
+	    *moduleid = pool;
+	    break;
+	}
+
+    if (pool == N_POOLS)
+    {
+	 IgProf::debug ("Too many profilers enabled (%d), need to"
+			" rebuild IgProf with larger N_POOLS\n",
+			N_POOLS);
+	 abort ();
+    }
+
+    if (threadinit)
+	threadinits ().push_back (threadinit);
+
     IgProf::enable ();
-    return s_activated = true;
+    return true;
 }
 
 /** Return @c true if the process was linked against threading package.  */
@@ -164,36 +330,109 @@ IgProf::isMultiThreaded (void)
     called for every thread that will participate in profiling.  */
 void
 IgProf::initThread (void)
-{ threadRoot (); }
+{
+    IgProfPoolAlloc *pools = new IgProfPoolAlloc [N_POOLS];
+    memset (pools, 0, N_POOLS * sizeof (*pools));
+    pthread_setspecific (s_poolkey, pools);
+
+    for (int i = 0; i < N_POOLS && s_pools[i].pool; ++i)
+	if (s_pools[i].perthread)
+	    initPool (pools, i, true);
+}
 
 /** Finalise a thread.  */
 void
-IgProf::exitThread (void)
+IgProf::exitThread (bool final)
 {
-    if (! s_pthreads)
+    if (! s_pthreads && ! final)
 	return;
 
-    IgHookTrace *troot = (IgHookTrace *) pthread_getspecific (s_troot);
-    if (! troot)
-	return;
+    IgProfReadBuf   buf = { 32*1024, 0, 0, 0, 0 };
+    IgProfReadBuf   zbuf = { 1024*1024, 0, 0, 0, 0 };
+    pthread_t       thread = pthread_self ();
+    IgProfPoolAlloc *pools
+	= (thread == s_mainthread ? s_pools
+	   : (IgProfPoolAlloc *) pthread_getspecific (s_poolkey));
 
-    pthread_setspecific (s_troot, 0);
-    pthread_mutex_lock (&s_lock);
-    root ()->merge (troot);
-    pthread_mutex_unlock (&s_lock);
+    if (! s_pthreads && final)
+    {
+	buf.data = (char *) malloc (buf.size);
+	zbuf.data = (char *) malloc (zbuf.size);
+    }
+
+    for (int i = 0; i < N_POOLS && pools; ++i)
+    {
+	IgProfPool *p = pools[i].pool;
+	if (! p) continue;
+
+	p->finish ();
+	pools [i].pool = 0;
+	delete p;
+
+        if (! s_pthreads && final)
+	{
+	    struct stat info;
+	    if (fstat (pools [i].fd, &info))
+	        continue;
+
+	    while (true)
+	    {
+	        if (profileReadHunk (pools [i].fd, buf, zbuf)
+	            || lseek (pools [i].fd, 0, SEEK_CUR) >= info.st_size)
+		    break;
+            }
+
+	    if (pools[i].fd >= 0)
+	        close (pools [i].fd);
+	}
+    }
+
+    if (thread == s_mainthread)
+	s_pools = 0;
+    else
+        pthread_setspecific (s_poolkey, 0);
+
+    delete [] pools;
+    free (buf.data);
+    free (zbuf.data);
+}
+
+/** Return a profile accumulation pool for a profiler in the
+    current thread.  It is safe to call this function from any
+    thread and in asynchronous signal handlers at any time, no
+    locks on the profiling system need to be taken.
+    
+    Returns the pool to use or a null to indicate no data should
+    be gathered in the calling context, for example if the profile
+    core itself has already been destroyed.  */
+IgProfPool *
+IgProf::pool (int moduleid)
+{
+    // Check which pool to return.  We return the one from s_pools
+    // in non-threaded applications and always in the main thread.
+    // We never return a pool in the read thread.  In other threads
+    // we return the main thread pool if a single pool was requested,
+    // otherwise a per-thread pool.
+    pthread_t thread = pthread_self ();
+    IgProfPoolAlloc *pools = s_pools;
+    if (! s_initialized || thread == s_readthread)
+	pools = 0;
+    else if (thread != s_mainthread && s_pools [moduleid].perthread)
+	pools = (IgProfPoolAlloc *) pthread_getspecific (s_poolkey);
+
+    return pools ? pools[moduleid].pool : 0;
 }
 
 /** Acquire a lock on the profiler system.  All profiling modules
     should call this method (through use of #IgProfLock) before
-    messing with global state, such as recording call traces.
+    messing with significant portions of the profiler global state.
+    However calls to #pool() do not need to be protected by locks.
 
-    Returns @c true to indicate that a lock was successfully acquired.
-    May return @c false for some systems in some rather obscure (but
-    frequently occuring) circumstances to indicate that the calling
-    thread is already in the process of trying to obtain the lock
-    and trying to re-acquire it might cause dead-lock.  This can
-    happen if profiler modules "stop on each other" through signal
-    handlers.  */
+    Returns @c true to indicate that a lock was successfully acquired,
+    @c false otherwise, for example before and after the profiling
+    system is properly initialised.
+
+    This function must not be called from asynchronous signals.  */
 bool
 IgProf::lock (void)
 {
@@ -214,62 +453,39 @@ IgProf::unlock (void)
 	pthread_mutex_unlock (&s_lock);
 }
 
-/** Enable this profiling module.  Only call within #IgProfLock.
-    Normally called automatically through activation by #IgProfLock.
-    Allows recursive enable/disable.  */
-void
-IgProf::enable (void)
-{ s_enabled++; }
-
-/** Disable this profiling module.  Only call within #IgProfLock.
-    Normally called automatically through activation by #IgProfLock.
-    Allows recursive enable/disable.  */
-void
-IgProf::disable (void)
-{ s_enabled--; }
-
-/** Register @a func to be run when a lock on the profiling system
-    is about to be released and all all profiling modules need to
-    be reactivated.  Note that the activation functions must support
-    recursive activation; incrementing an @c int is sufficient.  */
-void
-IgProf::onactivate (void (*func) (void))
-{ activations ().push_back (func); }
-
-/** Register @a func to be run when a lock on the profiling system
-    has just been acquired and all all profiling modules need to
-    be deactivated.  Note that the deactivation functions must support
-    recursive deactivation; decrementing an @c int is sufficient.  */
-void
-IgProf::ondeactivate (void (*func) (void))
-{ deactivations ().push_back (func); }
-
-/** Activate all profiler modules.  Only use through #IgProfLock.  */
-void
-IgProf::activate (void)
+/** Check if the profiler is currently enabled.  This function should
+    be called by asynchronous signal handlers to check whether they
+    should record profile data -- not for the actual running where
+    the value of the flag has little useful value, but to make sure
+    no data is gathered after the system has started to close down.  */
+bool
+IgProf::enabled (void)
 {
-    if (! s_initialized)
-	return;
-
-    ActivationList		&l = activations ();
-    ActivationList::iterator	i = l.begin ();
-    ActivationList::iterator	end = l.end ();
-    for ( ; i != end; ++i)
-	(*i) ();
+    return s_enabled > 0;
 }
 
-/** Deactivate all profiler modules.  Only use through #IgProfLock.  */
-void
-IgProf::deactivate (void)
+/** Enable the profiling system.  This is safe to call from anywhere,
+    but note that profiling system will only be enabled, not unlocked.
+    Use #IgProfLock instead if you need to manage exclusive access.
+    
+    Returns @c true if the profiler is enabled after the call. */
+bool
+IgProf::enable (void)
 {
-    if (! s_initialized)
-	return;
+    IgProfAtomic newval = IgProfAtomicInc (&s_enabled);
+    return newval > 0;
+}
 
-    ActivationList			&l = deactivations ();
-    ActivationList::reverse_iterator	i = l.rbegin ();
-    ActivationList::reverse_iterator	end = l.rend ();
-    for ( ; i != end; ++i)
-	(*i) ();
+/** Disable the profiling system.  This is safe to call from anywhere,
+    but note that profiling system will only be disabled, not locked.
+    Use #IgProfLock instead if you need to manage exclusive access.
+    
+    Returns @c true if the profiler was enabled before the call.  */
+bool
+IgProf::disable (void)
+{
+    IgProfAtomic newval = IgProfAtomicDec (&s_enabled);
+    return newval >= 0;
 }
 
 /** Get user-provided profiling options.  */
@@ -293,34 +509,6 @@ IgProf::root (void)
     return s_root;
 }
 
-/** Get thread-specific stack trace root.  Use this instead of #root()
-    in asynchronous signals.  However you must then not use #IgProfLock
-    or call anything that might call it.  Thread-specific trace trees
-    are automatically merged to the main tree when the thread exits.  */
-IgHookTrace *
-IgProf::threadRoot (void)
-{
-    // It is unsafe to use pthread primitives in asynchronous signals.
-    // The only allowed operation is sem_post(), and in fact experience
-    // shows that using pthread locks with the performance profiler in
-    // fact does break sooner or later.  So provide profiler modules
-    // traces they can modify with interlocking with the rest of the
-    // system.
-    if (s_pthreads)
-    {
-	IgHookTrace *troot = (IgHookTrace *) pthread_getspecific (s_troot);
-	if (! troot)
-	{
-	    troot = new IgHookTrace;
-	    pthread_setspecific (s_troot, troot);
-	}
-
-	return troot;
-    }
-
-    return root ();
-}
-
 /** Get leak/live tracking map named @a label.  The argument must be
     statically allocated (a string literal will do).  Returns pointer
     to the named map.  In general, only call this method when the
@@ -339,7 +527,7 @@ IgProf::liveMap (const char *label)
 int
 IgProf::panic (const char *file, int line, const char *func, const char *expr)
 {
-    IgProf::deactivate ();
+    IgProf::disable ();
 
 #if __linux
     fprintf (stderr, "%s: ", program_invocation_name);
@@ -360,7 +548,7 @@ IgProf::panic (const char *file, int line, const char *func, const char *expr)
     }
 
     // abort ();
-    IgProf::activate ();
+    IgProf::enable ();
     return 1;
 }
 
@@ -379,6 +567,257 @@ IgProf::debug (const char *format, ...)
 	vfprintf (stderr, format, args);
 	va_end (args);
     }
+}
+
+/** Helper function to read one profile entry.
+    This function can be called from one thread only, ever.  */
+int
+IgProf::profileReadHunk (int &fd, IgProfReadBuf &buf, IgProfReadBuf &zbuf)
+{
+    unsigned long words;
+    unsigned long data [MAX_DATA];
+
+    if (! s_symcache)
+	s_symcache = new IgProfSymCache;
+
+    if (! readsafe (buf, fd, &words, sizeof (words), true,
+		    "Failed to read profile header"))
+	return -1;
+
+    if (words > MAX_DATA)
+    {
+	IgProf::debug ("INTERNAL ERROR: Too much profile data in"
+		       " profile fd %d (%lu > %lu)\n",
+		       fd, words, MAX_DATA);
+	abort ();
+    }
+
+    readsafe (buf, fd, data, words * sizeof (data[0]), false,
+	      "Failed to read profile data");
+
+    IgHookTrace *node = 0;
+    for (unsigned long i = 0; i < words; )
+    {
+	unsigned long type = data[i++];
+	switch (type)
+	{
+	case IgProfPool::END:
+	    if (fd != -1)
+	    {
+		close (fd);
+	        fd = -1;
+	    }
+	    return 1;
+
+	case IgProfPool::FILEREF:
+	    {
+		IGPROF_ASSERT (&zbuf != &buf);
+
+		int fd = data[i++];
+
+		zbuf.n = 0;
+		zbuf.off = 0;
+		zbuf.pos = zbuf.data;
+
+		while (! profileReadHunk (fd, zbuf, zbuf))
+		    ;
+	    }
+	    break;
+
+	case IgProfPool::MEMREF:
+	    {
+		unsigned long	info = data[i++];
+		char		*buffer = (char *) data[i++];
+		unsigned long	size = data[i++];
+		IgProfReadBuf	thisbuf = { size, size, buffer, buffer, size };
+		int		fd = -1;
+
+		while (! profileReadHunk (fd, thisbuf, zbuf))
+		    ;
+
+		IgProfPool::release (info);
+	    }
+	    break;
+
+	case IgProfPool::STACK:
+	    {
+	        node = root ();
+		unsigned int start = i-1;
+		unsigned int depth = data[i++];
+	        for (unsigned int j = 0, valid = 1; j < depth; ++j, ++i)
+	        {
+		    if (i >= words)
+		    {
+			IgProf::debug ("OOPS: stack trace went beyond end of available data: "
+				       " FD=%d DEPTH=%u START=%u WORDS=%lu\n",
+				       fd, depth, start, words);
+			node = 0;
+			break;
+		    }
+
+		    void *addr = (void *) data[i];
+		    if (valid && s_nodecache [j].addr == addr)
+			node = s_nodecache [j].node;
+		    else
+		    {
+			IgProfSymCache::iterator symaddr = s_symcache->find (data[i]);
+			if (symaddr == s_symcache->end())
+			{
+			    void *mapped = IgHookTrace::tosymbol (addr);
+			    symaddr = s_symcache->insert
+				(IgProfSymCache::value_type (data[i], mapped)).first;
+			}
+			node = node->child (symaddr->second);
+			s_nodecache[j].addr = addr;
+			s_nodecache[j].node = node;
+			valid = 0;
+		    }
+	        }
+	    }
+	    break;
+
+	case IgProfPool::TICK:
+	case IgProfPool::MAX:
+	case IgProfPool::ACQUIRE:
+	case IgProfPool::RELEASE:
+	    {
+		IgHookTrace::Counter *counter = (IgHookTrace::Counter *) data[i++];
+		IgHookTrace::Counter *pcounter = (IgHookTrace::Counter *) data[i++];
+		unsigned long	     amount = data[i++];
+		unsigned long	     resource = data[i++];
+		unsigned long long   val = 0;
+
+		if (type == IgProfPool::TICK || type == IgProfPool::ACQUIRE)
+		    val = node->counter (counter)->add (amount);
+		else if (type == IgProfPool::MAX)
+		    val = node->counter (counter)->max (amount);
+
+		if (pcounter)
+		    node->counter (pcounter)->max (val);
+
+		if (type == IgProfPool::ACQUIRE)
+		{
+		    IgHookLiveMap *live = IgProf::liveMap (counter->m_name);
+		    IgHookLiveMap::Iterator pos = live->find (resource);
+		    if (pos != live->end ())
+		    {
+		        IgProf::debug ("New %s resource %lu was never freed, previously from\n",
+				       counter->m_name, resource);
+			int nnn = 0;
+			for (IgHookTrace *n = pos->second.first; n; n = n->parent ())
+			    fprintf (stderr, "  %10p%s", n->address (), ++nnn % 6 ? "   " : "\n");
+			fputc ('\n', stderr);
+
+		        size_t      size = pos->second.second;
+		        IgHookTrace *resnode = pos->second.first;
+		        IGPROF_ASSERT (resnode->counter (counter)->value () >= size);
+		        resnode->counter (counter)->sub (size);
+		        live->remove (pos);
+		    }
+		    live->insert (resource, node, amount);
+		}
+		else if (type == IgProfPool::RELEASE)
+		{
+		    IgHookLiveMap *live = IgProf::liveMap (counter->m_name);
+		    IgHookLiveMap::Iterator info = live->find (resource);
+		    if (info == live->end ())
+			// Probably allocated before our tracking.
+			break;
+
+		    size_t      size = info->second.second;
+		    IgHookTrace *resnode = info->second.first;
+		    IGPROF_ASSERT (resnode->counter (counter)->value () >= size);
+		    resnode->counter (counter)->sub (size);
+		    live->remove (info);
+		}
+	    }
+	    break;
+
+	default:
+	    IgProf::debug ("INTERNAL ERROR: unexpected profile type %lu"
+			   " in profile descriptor %d at hunk index %lu of %lu\n",
+			   type, fd, i, words);
+	    abort ();
+	}
+   }
+
+   return 0;
+}
+
+/** Helper thread function to receive profile data from other threads. */
+void *
+IgProf::profileListenThread (void *)
+{
+    IgProfReadBuf buf = { 32*1024, 0, 0, 0, 0 };
+    IgProfReadBuf zbuf = { 1024*1024, 0, 0, 0, 0 };
+    buf.data = (char *) malloc (buf.size);
+    zbuf.data = (char *) malloc (zbuf.size);
+
+    while (true)
+    {
+	fd_set current;
+
+	// Capture a copy of current set of file descriptors.
+	pthread_mutex_lock (&s_poollock);
+        memcpy (&current, &s_poolfd, sizeof (s_poolfd));
+	pthread_mutex_unlock (&s_poollock);
+
+	// Check how many descriptors we have in use.
+	int maxfd = -1;
+	int nset = 0;
+	for (int i = 0; i < FD_SETSIZE; ++i)
+	    if (FD_ISSET (i, &current))
+	    {
+		maxfd = i;
+		nset++;
+	    }
+
+	// Read profile data from all files ready with data.
+	// If we read the end-of-stream marker, remove the
+	// file descriptor from the available ones; it has
+	// already been closed by profileReadHunk().
+	for (int lastfd = 0; nset > 0; ++lastfd, --nset)
+	{
+	    while (! FD_ISSET (lastfd, &current))
+		++lastfd;
+
+	    buf.off = lseek (lastfd, 0, SEEK_CUR);
+	    buf.pos = buf.data;
+	    buf.n = 0;
+
+	    int done;
+	    do
+	    {
+	        struct stat st;
+	        if (fstat (lastfd, &st) || buf.off >= st.st_size)
+		{
+		    // Reset file position and buffer.
+		    lseek (lastfd, buf.off - buf.n, SEEK_SET);
+		    break;
+		}
+
+		int fd = lastfd;
+		done = profileReadHunk (fd, buf, zbuf);
+		if (done == 1)
+		{
+		    pthread_mutex_lock (&s_poollock);
+		    FD_CLR (lastfd, &s_poolfd);
+		    if (fd >= 0) FD_SET (fd, &s_poolfd);
+		    pthread_mutex_unlock (&s_poollock);
+		}
+	    } while (! done);
+	}
+
+	// If we are done processing, quit.  Give threads max ~1s to quit.
+	if (s_quitting && (maxfd < 0 || ++s_quitting > 100))
+	    break;
+
+	usleep (10000);
+    }
+
+    free (buf.data);
+    free (zbuf.data);
+    return 0;
 }
 
 /** Dump out the profile data.  */
@@ -521,6 +960,8 @@ dumpProfile (FILE *output, IgHookTrace *node, void *infoptr = 0)
 	fputc ('\n', output);
     }
 
+    // FIXME: Dump out leaks from the function here.
+
     info->depth++;
     for (IgHookTrace *kid = node->children (); kid; kid = kid->next ())
 	dumpProfile (output, kid, info);
@@ -582,8 +1023,8 @@ IgProf::dump (void)
     fprintf (output, "P=(ID=%lu N=(%s) T=%f)\n",
 	     (unsigned long) getpid (), program_invocation_name, s_clockres);
     dumpProfile (output, IgProf::root ());
-    LiveMaps::iterator i = livemaps ().begin ();
-    LiveMaps::iterator end = livemaps ().end ();
+    IgProfLiveMaps::iterator i = livemaps ().begin ();
+    IgProfLiveMaps::iterator end = livemaps ().end ();
     int nmaps = 0;
     for ( ; i != end; ++i)
     {
@@ -606,6 +1047,78 @@ IgProf::dump (void)
 
 
 //////////////////////////////////////////////////////////////////////
+/** A wrapper for starting user threads to enable profiling.  */
+static void *
+threadWrapper (void *arg)
+{
+    // Get arguments.
+    IgProfWrappedArg *wrapped = (IgProfWrappedArg *) arg;
+    void *(*start_routine) (void*) = wrapped->start_routine;
+    void *start_arg = wrapped->arg;
+    delete wrapped;
+
+    // Report the thread and enable per-thread profiling pools.
+    if (s_initialized)
+    {
+        IgProf::debug ("captured thread id 0x%lx for profiling (%p, %p)\n",
+		       (unsigned long) pthread_self (),
+		       (void *) start_routine,
+		       start_arg);
+
+	IgProf::initThread ();
+    }
+
+    // Make sure we've called stack trace code at least once in
+    // this thread before the profile signal hits.  Linux's
+    // backtrace() seems to want to call pthread_once() which
+    // can be bad news inside the signal handler.
+    void *dummy = 0; IgHookTrace::stacktrace (&dummy, 1);
+
+    // Run per-profiler initialisation.
+    if (s_initialized)
+    {
+        IgProfCallList				&l = threadinits ();
+        IgProfCallList::reverse_iterator	i = l.rbegin ();
+        IgProfCallList::reverse_iterator	end = l.rend ();
+        for ( ; i != end; ++i)
+	    (*i) ();
+    }
+
+    // Run the user thread.
+    void *ret = (*start_routine) (start_arg);
+
+    // Harvest thread profile result.
+    if (s_initialized)
+    {
+        IgProf::debug ("leaving thread id 0x%lx from profiling (%p, %p)\n",
+		       (unsigned long) pthread_self (),
+		       (void *) start_routine,
+		       start_arg);
+        IgProf::exitThread (false);
+    }
+    return ret;
+}
+
+/** Trap thread creation to run per-profiler initialisation.  */
+static int
+dopthread_create (IgHook::SafeData<igprof_dopthread_create_t> &hook,
+		  pthread_t *thread,
+		  const pthread_attr_t *attr,
+		  void * (*start_routine) (void *),
+		  void *arg)
+{
+    // Pass the actual arguments to our wrapper in a temporary memory
+    // structure.  We need to hide the creation from memory profiler
+    // in case it's running concurrently with this profiler.
+    IgProf::disable ();
+    IgProfWrappedArg *wrapped = new IgProfWrappedArg;
+    wrapped->start_routine = start_routine;
+    wrapped->arg = arg;
+    IgProf::enable ();
+    int ret = hook.chain (thread, attr, &threadWrapper, wrapped);
+    return ret;
+}
+
 /** Trapped calls to exit() and _exit().  */
 static void
 doexit (IgHook::SafeData<igprof_doexit_t> &hook, int code)
@@ -613,13 +1126,13 @@ doexit (IgHook::SafeData<igprof_doexit_t> &hook, int code)
     // Force the merge of per-thread profile tree into the main tree
     // if a thread calls exit().  Then forward the call.
     {
-        IgProfLock lock (s_enabled);
-	pthread_t thread = pthread_self ();
-	if (s_pthreads)
+        IgProfLock lock;
+	pthread_t  thread = pthread_self ();
+	if (s_pthreads && thread != s_mainthread)
 	{
-	    IgProf::debug ("merging thread %lu profile on %s(%d)\n",
+	    IgProf::debug ("merging thread id 0x%lx profile on %s(%d)\n",
 			   (unsigned long) thread, hook.function, code);
-	    IgProf::exitThread ();
+	    IgProf::exitThread (false);
 	}
     }
     hook.chain (code);
@@ -637,7 +1150,7 @@ dokill (IgHook::SafeData<igprof_dokill_t> &hook, pid_t pid, int sig)
 	    || sig == SIGALRM || sig == SIGTERM || sig == SIGUSR1
 	    || sig == SIGUSR2 || sig == SIGBUS || sig == SIGIOT))
     {
-        IgProfLock lock (s_enabled);
+        IgProfLock lock;
 	if (lock.enabled () > 0)
 	{
 	    IgProf::debug ("kill(%d,%d) called, dumping state\n", (int) pid, sig);
@@ -652,7 +1165,13 @@ dokill (IgHook::SafeData<igprof_dokill_t> &hook, pid_t pid, int sig)
 IgProfExitDump::~IgProfExitDump (void)
 {
     if (! s_activated) return;
-    IgProf::deactivate ();
+    IgProf::debug ("merging thread id 0x%lx profile on final exit\n",
+		   (unsigned long) pthread_self ());
+    IgProf::exitThread (true);
+    s_activated = false;
+    s_quitting = 1;
+    if (s_pthreads) pthread_join (s_readthread, 0);
+    IgProf::disable ();
     IgProf::dump ();
     IgProf::debug ("igprof quitting\n");
     s_initialized = false; // signal local data is unsafe to use
@@ -660,5 +1179,5 @@ IgProfExitDump::~IgProfExitDump (void)
 }
 
 //////////////////////////////////////////////////////////////////////
-static bool autoboot = IgProf::initialize ();
+static bool autoboot = IgProf::initialize (0, 0, false);
 static IgProfExitDump exitdump;

@@ -15,6 +15,9 @@ public:
     static void initialize (void);
     static void enable (void);
     static void disable (void);
+
+private:
+    static void threadInit (void);
 };
 
 //<<<<<< INLINE PUBLIC FUNCTIONS                                        >>>>>>

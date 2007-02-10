@@ -2,9 +2,13 @@
 
 #include "Ig_Tools/IgProf/src/IgProfMem.h"
 #include "Ig_Tools/IgProf/src/IgProf.h"
+#include "Ig_Tools/IgProf/src/IgProfPool.h"
+#include "Ig_Tools/IgHook/interface/IgHook.h"
 #include "Ig_Tools/IgHook/interface/IgHookTrace.h"
-#include "Ig_Tools/IgHook/interface/IgHookLiveMap.h"
 #include <cstdlib>
+#include <cstring>
+#include <cstdio>
+#include <pthread.h>
 
 //<<<<<< PRIVATE DEFINES                                                >>>>>>
 //<<<<<< PRIVATE CONSTANTS                                              >>>>>>
@@ -42,15 +46,12 @@ IGPROF_DUAL_HOOK (1, void, dofree, _main, _libc,
 static IgHookTrace::Counter	s_ct_total	= { "MEM_TOTAL" };
 static IgHookTrace::Counter	s_ct_largest	= { "MEM_MAX" };
 static IgHookTrace::Counter	s_ct_live	= { "MEM_LIVE" };
-static IgHookTrace::Counter	s_ct_peaklive	= { "MEM_LIVE_PEAK" };
+static IgHookTrace::Counter	s_ct_live_peak	= { "MEM_LIVE_PEAK" };
 static bool			s_count_total	= 0;
 static bool			s_count_largest	= 0;
 static bool			s_count_live	= 0;
-static bool			s_count_leaks	= 0;
-static IgHookLiveMap		*s_live		= 0;
-static int			s_enabled	= 0;
 static bool			s_initialized	= false;
-static pthread_t		s_mainthread	= 0;
+static int			s_moduleid	= -1;
 
 /** Record an allocation at @a ptr of @a size bytes.  Increments counters
     in the tree for the allocations as per current configuration and adds
@@ -58,49 +59,48 @@ static pthread_t		s_mainthread	= 0;
 static void 
 add (void *ptr, size_t size)
 {
-    IGPROF_TRACE (("[mem add %p %lu\n", ptr, size));
-    typedef struct { void *addr; IgHookTrace *node; } NodeCache;
+    static const int	STACK_DEPTH = 256;
+    void		*addresses [STACK_DEPTH];
+    int			depth = IgHookTrace::stacktrace (addresses, STACK_DEPTH);
+    IgProfPool		*pool = IgProf::pool (s_moduleid);
+    IgProfPool::Entry	entries [3];
+    int			nentries = 0;
 
-    static const int N_STACK = 256;
-    static NodeCache nodecache [N_STACK];
-    void	     *addresses [N_STACK];
-    IgHookTrace      *node = IgProf::root ();
-    int		     depth = IgHookTrace::stacktrace (addresses, N_STACK);
-    int		     droptop = 4; // stacktrace, me, two for the hook + stub
-    int		     dropbottom = (s_mainthread && pthread_self() == s_mainthread ? 2 : 3);
+    if (! pool)
+	return;
 
-    // Walk the tree
-    for (int i = depth-dropbottom, j = 0, valid = 1; i >= droptop; --i, ++j)
+    if (s_count_total)
     {
-	if (valid && nodecache[j].addr == addresses[i])
-	{
-	    node = nodecache[j].node;
-	}
-	else
-	{
-	    node = node->child (addresses[i]);
-	    nodecache[j].addr = addresses[i];
-	    nodecache[j].node = node;
-	    valid = 0;
-        }
+	entries[nentries].type = IgProfPool::TICK;
+	entries[nentries].counter = &s_ct_total;
+	entries[nentries].peakcounter = 0;
+	entries[nentries].amount = size;
+	entries[nentries].resource = 0;
+	nentries++;
     }
 
-    // Increment counters for this node
-    if (s_count_total)   node->counter (&s_ct_total)->add (size);
-    if (s_count_largest) node->counter (&s_ct_largest)->max (size);
+    if (s_count_largest)
+    {
+	entries[nentries].type = IgProfPool::MAX;
+	entries[nentries].counter = &s_ct_largest;
+	entries[nentries].peakcounter = 0;
+	entries[nentries].amount = size;
+	entries[nentries].resource = 0;
+	nentries++;
+    }
+
     if (s_count_live)
     {
-	IgHookTrace::CounterValue *ctr = node->counter (&s_ct_live);
-	ctr->add (size);
-	node->counter (&s_ct_peaklive)->max (ctr->value ());
-    }
-    if (s_count_leaks || s_count_live)
-    {
-	IGPROF_ASSERT (s_live->find ((unsigned long) ptr) == s_live->end ());
-	s_live->insert ((unsigned long) ptr, node, size);
+	entries[nentries].type = IgProfPool::ACQUIRE;
+	entries[nentries].counter = &s_ct_live;
+	entries[nentries].peakcounter = &s_ct_live_peak;
+	entries[nentries].amount = size;
+	entries[nentries].resource = (unsigned long) ptr;
+	nentries++;
     }
 
-    IGPROF_TRACE (("]\n"));
+    // Drop two bottom frames, four top ones (stacktrace, me, two for hook).
+    pool->push (addresses+4, depth-6, entries, nentries);
 }
 
 /** Remove knowledge about allocation.  If we are tracking leaks,
@@ -109,28 +109,15 @@ add (void *ptr, size_t size)
 static void
 remove (void *ptr)
 {
-    IGPROF_TRACE (("[mem rm %p\n", ptr));
-
-    if (s_count_leaks || s_count_live)
+    if (s_count_live)
     {
-	IgHookLiveMap::Iterator	info = s_live->find ((unsigned long) ptr);
-	if (info == s_live->end ())
-	    // Unknown to us, probably allocated before we started.
-	    // This happens for instance with GCC 3.4+ as libstdc++
-	    // allocates memory and is invoked before we start.
-	    // IGPROF_ASSERT (info != s_live->end ());
-	    return;
+        IgProfPool *pool = IgProf::pool (s_moduleid);
+	if (! pool) return;
 
-	IgHookTrace	*node = info->second.first;
-	size_t		size = info->second.second;
-
-	IGPROF_ASSERT (node->counter (&s_ct_live)->value () >= size);
-	node->counter (&s_ct_live)->sub (size);
-
-	s_live->remove (info);
+	IgProfPool::Entry entry
+	    = { IgProfPool::RELEASE, &s_ct_live, 0, 0, (unsigned long) ptr };
+        pool->push (0, 0, &entry, 1);
     }
-
-    IGPROF_TRACE (("]\n", ptr));
 }
 
 //<<<<<< PUBLIC FUNCTION DEFINITIONS                                    >>>>>>
@@ -143,9 +130,6 @@ IgProfMem::initialize (void)
 {
     if (s_initialized) return;
     s_initialized = true;
-
-    if (! IgProf::initialize ()) return;
-    IgProf::debug ("Memory profiler loaded\n");
 
     const char	*options = IgProf::options ();
     bool	enable = false;
@@ -164,40 +148,27 @@ IgProfMem::initialize (void)
 	    {
 		if (! strncmp (options, ":total", 6))
 	        {
-		    IgProf::debug ("Memory: enabling total counting\n");
 		    s_count_total = 1;
 		    options += 6;
 		    opts = true;
 	        }
 		else if (! strncmp (options, ":largest", 8))
 	        {
-		    IgProf::debug ("Memory: enabling max counting\n");
 		    s_count_largest = 1;
 		    options += 8;
 		    opts = true;
 	        }
 		else if (! strncmp (options, ":live", 5))
 		{
-		    IgProf::debug ("Memory: enabling live counting\n");
 		    s_count_live = 1;
 		    options += 5;
 		    opts = true;
 		}
-		else if (! strncmp (options, ":leaks", 6))
-		{
-		    IgProf::debug ("Memory: enabling leak table and live counting\n");
-		    s_count_live = 1;
-		    s_count_leaks = 1;
-		    options += 6;
-		    opts = true;
-		}
 		else if (! strncmp (options, ":all", 4))
 		{
-		    IgProf::debug ("Memory: enabling everything\n");
 		    s_count_total = 1;
 		    s_count_largest = 1;
 		    s_count_live = 1;
-		    s_count_leaks = 1;
 		    options += 4;
 		    opts = true;
 		}
@@ -212,131 +183,113 @@ IgProfMem::initialize (void)
 	    options++;
     }
 
-    if (enable && !opts)
+    if (! enable)
+	return;
+
+    if (! IgProf::initialize (&s_moduleid, 0, false))
+	return;
+
+    IgProf::disable ();
+    if (! opts)
     {
 	IgProf::debug ("Memory: defaulting to total memory counting\n");
 	s_count_total = 1;
     }
-
-    if (enable)
+    else
     {
-        if (s_count_leaks || s_count_live)
-	    s_live = IgProf::liveMap ("Memory Leaks");
-
-        IgHook::hook (domalloc_hook_main.raw);
-        IgHook::hook (docalloc_hook_main.raw);
-        IgHook::hook (dorealloc_hook_main.raw);
-        IgHook::hook (dopmemalign_hook_main.raw);
-        IgHook::hook (domemalign_hook_main.raw);
-        IgHook::hook (dovalloc_hook_main.raw);
-        IgHook::hook (dofree_hook_main.raw);
-#if __linux
-        if (domalloc_hook_main.raw.chain)    IgHook::hook (domalloc_hook_libc.raw);
-        if (docalloc_hook_main.raw.chain)    IgHook::hook (docalloc_hook_libc.raw);
-        if (dorealloc_hook_main.raw.chain)   IgHook::hook (dorealloc_hook_libc.raw);
-        if (dopmemalign_hook_main.raw.chain) IgHook::hook (dopmemalign_hook_libc.raw);
-        if (domemalign_hook_main.raw.chain)  IgHook::hook (domemalign_hook_libc.raw);
-        if (dovalloc_hook_main.raw.chain)    IgHook::hook (dovalloc_hook_libc.raw);
-        if (dofree_hook_main.raw.chain)      IgHook::hook (dofree_hook_libc.raw);
-#endif
-        IgProf::debug ("Memory profiler enabled\n");
-	if (IgProf::isMultiThreaded())
-	    s_mainthread = pthread_self();
-	// This may allocate, so force our flag to remain false
-	// and then set it to a known value.
-	s_enabled = -10;
-	IgProf::onactivate (&IgProfMem::enable);
-	IgProf::ondeactivate (&IgProfMem::disable);
-	s_enabled = 1;
+	if (s_count_total)
+	    IgProf::debug ("Memory: enabling total counting\n");
+	if (s_count_largest)
+	    IgProf::debug ("Memory: enabling max counting\n");
+	if (s_count_live)
+	    IgProf::debug ("Memory: enabling live counting\n");
     }
+
+    IgHook::hook (domalloc_hook_main.raw);
+    IgHook::hook (docalloc_hook_main.raw);
+    IgHook::hook (dorealloc_hook_main.raw);
+    IgHook::hook (dopmemalign_hook_main.raw);
+    IgHook::hook (domemalign_hook_main.raw);
+    IgHook::hook (dovalloc_hook_main.raw);
+    IgHook::hook (dofree_hook_main.raw);
+#if __linux
+    if (domalloc_hook_main.raw.chain)    IgHook::hook (domalloc_hook_libc.raw);
+    if (docalloc_hook_main.raw.chain)    IgHook::hook (docalloc_hook_libc.raw);
+    if (domemalign_hook_main.raw.chain)  IgHook::hook (domemalign_hook_libc.raw);
+    if (dovalloc_hook_main.raw.chain)    IgHook::hook (dovalloc_hook_libc.raw);
+    if (dofree_hook_main.raw.chain)      IgHook::hook (dofree_hook_libc.raw);
+#endif
+    IgProf::debug ("Memory profiler enabled\n");
+    IgProf::enable ();
 }
-
-/** Enable this profiling module.  Only call within #IgProfLock.
-    Normally called automatically through activation by #IgProfLock.
-    Allows recursive enable/disable.  */
-void
-IgProfMem::enable (void)
-{ s_enabled++; }
-
-/** Disable this profiling module.  Only call within #IgProfLock.
-    Normally called automatically through activation by #IgProfLock.
-    Allows recursive enable/disable.  */
-void
-IgProfMem::disable (void)
-{ s_enabled--; }
 
 //////////////////////////////////////////////////////////////////////
 // Traps for this profiler module.  Track memory allocation routines.
 static void *
 domalloc (IgHook::SafeData<igprof_domalloc_t> &hook, size_t n)
 {
-    IGPROF_TRACE (("(%d igmalloc %lu\n", s_enabled, n));
-    IgProfLock lock (s_enabled);
+    bool enabled = IgProf::disable ();
     void *result = (*hook.chain) (n);
 
-    if (lock.enabled () > 0 && result)
+    if (enabled && result)
 	add (result, n);
 
-    IGPROF_TRACE ((" -> %p)\n", result));
+    IgProf::enable ();
     return result;
 }
 
 static void *
 docalloc (IgHook::SafeData<igprof_docalloc_t> &hook, size_t n, size_t m)
 {
-    IGPROF_TRACE (("(%d igcalloc %lu %lu\n", s_enabled, n, m));
-    IgProfLock lock (s_enabled);
+    bool enabled = IgProf::disable ();
     void *result = (*hook.chain) (n, m);
 
-    if (lock.enabled () > 0 && result)
+    if (enabled && result)
 	add (result, n * m);
 
-    IGPROF_TRACE ((" -> %p)\n", result));
+    IgProf::enable ();
     return result;
 }
 
 static void *
 dorealloc (IgHook::SafeData<igprof_dorealloc_t> &hook, void *ptr, size_t n)
 {
-    IGPROF_TRACE (("(%d igrealloc %p %lu\n", s_enabled, ptr, n));
-    IgProfLock lock (s_enabled);
+    bool enabled = IgProf::disable ();
     void *result = (*hook.chain) (ptr, n);
 
-    if (lock.enabled () > 0)
+    if (result)
     {
 	if (ptr) remove (ptr);
-	if (result) add (result, n);
+	if (enabled && result) add (result, n);
     }
 
-    IGPROF_TRACE ((" -> %p)\n", result));
+    IgProf::enable ();
     return result;
 }
 
 static void *
 domemalign (IgHook::SafeData<igprof_domemalign_t> &hook, size_t alignment, size_t size)
 {
-    IGPROF_TRACE (("(%d igmemalign %lu %lu\n", s_enabled, alignment, size));
-    IgProfLock lock (s_enabled);
+    bool enabled = IgProf::disable ();
     void *result = (*hook.chain) (alignment, size);
 
-    if (lock.enabled () > 0 && result)
+    if (enabled && result)
 	add (result, size);
 
-    IGPROF_TRACE ((" -> %p)\n", result));
+    IgProf::enable ();
     return result;
 }
 
 static void *
 dovalloc (IgHook::SafeData<igprof_dovalloc_t> &hook, size_t size)
 {
-    IGPROF_TRACE (("(%d igvalloc %lu\n", s_enabled, size));
-    IgProfLock lock (s_enabled);
+    bool enabled = IgProf::disable ();
     void *result = (*hook.chain) (size);
 
-    if (lock.enabled () > 0 && result)
+    if (enabled && result)
 	add (result, size);
 
-    IGPROF_TRACE ((" -> %p)\n", result));
+    IgProf::enable ();
     return result;
 }
 
@@ -344,28 +297,23 @@ static int
 dopmemalign (IgHook::SafeData<igprof_dopmemalign_t> &hook,
 	     void **ptr, size_t alignment, size_t size)
 {
-    IGPROF_TRACE (("(%d igpmemalign %p %lu %lu\n", s_enabled, ptr, alignment, size));
-    IgProfLock lock (s_enabled);
+    bool enabled = IgProf::disable ();
     int result = (*hook.chain) (ptr, alignment, size);
 
-    if (lock.enabled () > 0 && ptr && *ptr)
+    if (enabled && ptr && *ptr)
 	add (*ptr, size);
 
-    IGPROF_TRACE ((" -> %p %d)\n", *ptr, result));
+    IgProf::enable ();
     return result;
 }
 
 static void
 dofree (IgHook::SafeData<igprof_dofree_t> &hook, void *ptr)
 {
-    IGPROF_TRACE (("(%d igfree %p\n", s_enabled, ptr));
-    IgProfLock lock (s_enabled);
+    IgProf::disable ();
     (*hook.chain) (ptr);
-
-    if (lock.enabled () > 0)
-	remove (ptr);
-
-    IGPROF_TRACE ((")\n"));
+    remove (ptr);
+    IgProf::enable ();
 }
 
 //////////////////////////////////////////////////////////////////////

@@ -1,5 +1,22 @@
 2007-02-10  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProf.h, IgProf.cc, IgProfMem.cc, IgProfPerf.h, IgProfPerf.cc,
+	IgProfFileDesc.cc: Simplify profiler module implementation and fix
+	various minor issues in profiler initialisation and exit handling.
+	Improve debugging output and diagnostics.  Always capture threads
+	in the main profiler module instead of the performance profiler,
+	then notify profiling modules about the threads.  Use basic atomic
+	instructions instead of mutexes for profiler re-entry guards.  Use
+	intermediate pools for collecting profile data for better memory
+	profiling performance and to restore use of tosymbol() to reduce
+	profile output.  Process intermediate profile data in parallel if
+	threads are available.  Make sure externally visible names from
+	the profiler include IgProf.  Record deleted entities in leak
+	checking mode even if the profiler is inactive in order not to
+	flag leaks incorrectly.  Use 10ms timer for performance profiling,
+	asking for less makes reporting inaccurate: the signal may be
+	delivered every 10ms even if setitimer() claims better resolution.
+
 	* IgProfPool.h, IgProfPool.cc: New, implement a high-performance
 	profile data gathering pool.  Used as an intermediate pool between
 	the profilers and the collector sides in order to avoid all dead

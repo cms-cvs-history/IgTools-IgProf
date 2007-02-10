@@ -2,13 +2,15 @@
 
 #include "Ig_Tools/IgProf/src/IgProfFileDesc.h"
 #include "Ig_Tools/IgProf/src/IgProf.h"
+#include "Ig_Tools/IgProf/src/IgProfPool.h"
 #include "Ig_Tools/IgHook/interface/IgHook.h"
 #include "Ig_Tools/IgHook/interface/IgHookTrace.h"
-#include "Ig_Tools/IgHook/interface/IgHookLiveMap.h"
 #include <cstdlib>
+#include <cstring>
 #include <cstdio>
 #include <cerrno>
 #include <sys/socket.h>
+#include <pthread.h>
 
 //<<<<<< PRIVATE DEFINES                                                >>>>>>
 //<<<<<< PRIVATE CONSTANTS                                              >>>>>>
@@ -44,30 +46,48 @@ IGPROF_DUAL_HOOK (3, int, doaccept, _main, _libc,
 // Data for this profiling module
 static IgHookTrace::Counter	s_ct_used	= { "FD_USED" };
 static IgHookTrace::Counter	s_ct_live	= { "FD_LIVE" };
+static IgHookTrace::Counter	s_ct_live_peak	= { "FD_LIVE_PEAK" };
 static bool			s_count_used	= 0;
 static bool			s_count_live	= 0;
-static bool			s_count_leaks	= 0;
-static IgHookLiveMap		*s_live		= 0;
-static int			s_enabled	= 0;
 static bool			s_initialized	= false;
+static int			s_moduleid	= -1;
 
 /** Record file descriptor.  Increments counters in the tree. */
 static void 
 add (int fd)
 {
-    int		drop = 4; // one for stacktrace, one for me, two for hook
-    IgHookTrace	*node = IgProf::root ();
-    void	*addresses [256];
-    int		depth = IgHookTrace::stacktrace (addresses, 256);
+    static const int	STACK_DEPTH = 256;
+    void		*addresses [STACK_DEPTH];
+    int			depth = IgHookTrace::stacktrace (addresses, STACK_DEPTH);
+    IgProfPool		*pool = IgProf::pool (s_moduleid);
+    IgProfPool::Entry	entries [2];
+    int			nentries = 0;
 
-    // Walk the tree
-    for (int i = depth-2; i >= drop; --i)
-	node = node->child (addresses [i]);
+    if (! pool)
+	return;
 
-    // Increment counters for this node
-    if (s_count_used)  node->counter (&s_ct_used)->tick ();
-    if (s_count_live)  node->counter (&s_ct_live)->tick ();
-    if (s_count_leaks) s_live->insert (fd, node);
+    if (s_count_used)
+    {
+	entries[nentries].type = IgProfPool::TICK;
+	entries[nentries].counter = &s_ct_used;
+	entries[nentries].peakcounter = 0;
+	entries[nentries].amount = 1;
+	entries[nentries].resource = 0;
+	nentries++;
+    }
+
+    if (s_count_live)
+    {
+	entries[nentries].type = IgProfPool::ACQUIRE;
+	entries[nentries].counter = &s_ct_live;
+	entries[nentries].peakcounter = &s_ct_live_peak;
+	entries[nentries].amount = 1;
+	entries[nentries].resource = fd;
+	nentries++;
+    }
+
+    // Drop two bottom frames, four top ones (stacktrace, me, two for hook).
+    pool->push (addresses+4, depth-6, entries, nentries);
 }
 
 /** Remove knowledge about the file descriptor.  If we are tracking
@@ -76,20 +96,14 @@ add (int fd)
 static void
 remove (int fd)
 {
-    if (s_count_leaks)
+    if (s_count_live)
     {
-	IgHookLiveMap::Iterator	info = s_live->find (fd);
-	if (info == s_live->end ())
-	    // Unknown to us, probably allocated before we started.
-	    // IGPROF_ASSERT (info != s_live->end ());
-	    return;
+        IgProfPool *pool = IgProf::pool (s_moduleid);
+	if (! pool) return;
 
-	IgHookTrace	*node = info->second.first;
-
-	IGPROF_ASSERT (node->counter (&s_ct_live)->value () >= 1);
-	node->counter (&s_ct_live)->untick ();
-
-	s_live->remove (info);
+	IgProfPool::Entry entry
+	    = { IgProfPool::RELEASE, &s_ct_live, 0, 0, fd };
+        pool->push (0, 0, &entry, 1);
     }
 }
 
@@ -103,9 +117,6 @@ IgProfFileDesc::initialize (void)
 {
     if (s_initialized) return;
     s_initialized = true;
-
-    if (! IgProf::initialize ()) return;
-    IgProf::debug ("File descriptor profiler loaded\n");
 
     const char	*options = IgProf::options ();
     bool	enable = false;
@@ -124,23 +135,21 @@ IgProfFileDesc::initialize (void)
 	    {
 	        if (! strncmp (options, ":used", 5))
 	        {
-		    IgProf::debug ("FD: enabling usage counting\n");
 		    s_count_used = 1;
 		    options += 5;
 		    opts = true;
 	        }
 		else if (! strncmp (options, ":live", 5))
 	        {
-		    IgProf::debug ("FD: enabling live counting\n");
 		    s_count_live = 1;
 		    options += 5;
 		    opts = true;
 	        }
-		else if (! strncmp (options, ":leaks", 6))
+		else if (! strncmp (options, ":all", 4))
 		{
-		    IgProf::debug ("FD: enabling leak table\n");
-		    s_count_leaks = 1;
-		    options += 6;
+		    s_count_used = 1;
+		    s_count_live = 1;
+		    options += 4;
 		    opts = true;
 		}
 		else
@@ -154,101 +163,91 @@ IgProfFileDesc::initialize (void)
 	    options++;
     }
 
-    if (enable && !opts)
+    if (! enable)
+	return;
+
+    if (! IgProf::initialize (&s_moduleid, 0, false))
+	return;
+
+    IgProf::disable ();
+    if (!opts)
     {
 	IgProf::debug ("FD: defaulting to total descriptor counting\n");
 	s_count_used = 1;
     }
-
-    if (enable)
+    else
     {
-        if (s_count_leaks)
-	    s_live = IgProf::liveMap ("File Descriptor Leaks");
-
-        IgHook::hook (doopen_hook_main.raw);
-        IgHook::hook (doopen64_hook_main.raw);
-        IgHook::hook (doclose_hook_main.raw);
-        IgHook::hook (dodup_hook_main.raw);
-        IgHook::hook (dodup2_hook_main.raw);
-        IgHook::hook (dosocket_hook_main.raw);
-        IgHook::hook (doaccept_hook_main.raw);
-#if __linux
-        if (doopen_hook_main.raw.chain)   IgHook::hook (doopen_hook_libc.raw);
-        if (doopen64_hook_main.raw.chain) IgHook::hook (doopen64_hook_libc.raw);
-        if (doclose_hook_main.raw.chain)  IgHook::hook (doclose_hook_libc.raw);
-        if (dodup_hook_main.raw.chain)    IgHook::hook (dodup_hook_libc.raw);
-        if (dodup2_hook_main.raw.chain)   IgHook::hook (dodup2_hook_libc.raw);
-        if (dosocket_hook_main.raw.chain) IgHook::hook (dosocket_hook_libc.raw);
-        if (doaccept_hook_main.raw.chain) IgHook::hook (doaccept_hook_libc.raw);
-#endif
-        IgProf::debug ("File descriptor profiler enabled\n");
-        IgProf::onactivate (&IgProfFileDesc::enable);
-        IgProf::ondeactivate (&IgProfFileDesc::disable);
-	IgProfFileDesc::enable ();
+	if (s_count_used)
+	    IgProf::debug ("FD: enabling usage counting\n");
+	if (s_count_live)
+	    IgProf::debug ("FD: enabling live counting\n");
     }
+
+
+    IgHook::hook (doopen_hook_main.raw);
+    IgHook::hook (doopen64_hook_main.raw);
+    IgHook::hook (doclose_hook_main.raw);
+    IgHook::hook (dodup_hook_main.raw);
+    IgHook::hook (dodup2_hook_main.raw);
+    IgHook::hook (dosocket_hook_main.raw);
+    IgHook::hook (doaccept_hook_main.raw);
+#if __linux
+    if (doopen_hook_main.raw.chain)   IgHook::hook (doopen_hook_libc.raw);
+    if (doopen64_hook_main.raw.chain) IgHook::hook (doopen64_hook_libc.raw);
+    if (doclose_hook_main.raw.chain)  IgHook::hook (doclose_hook_libc.raw);
+    if (dodup_hook_main.raw.chain)    IgHook::hook (dodup_hook_libc.raw);
+    if (dodup2_hook_main.raw.chain)   IgHook::hook (dodup2_hook_libc.raw);
+    if (dosocket_hook_main.raw.chain) IgHook::hook (dosocket_hook_libc.raw);
+    if (doaccept_hook_main.raw.chain) IgHook::hook (doaccept_hook_libc.raw);
+#endif
+    IgProf::debug ("File descriptor profiler enabled\n");
+    IgProf::enable ();
 }
-
-/** Enable this profiling module.  Only call within #IgProfLock.
-    Normally called automatically through activation by #IgProfLock.
-    Allows recursive enable/disable.  */
-void
-IgProfFileDesc::enable (void)
-{ s_enabled++; }
-
-/** Disable this profiling module.  Only call within #IgProfLock.
-    Normally called automatically through activation by #IgProfLock.
-    Allows recursive enable/disable.  */
-void
-IgProfFileDesc::disable (void)
-{ s_enabled--; }
 
 //////////////////////////////////////////////////////////////////////
 // Trapped system calls.  Track live file descriptor usage.
 static int
 doopen (IgHook::SafeData<igprof_doopen_t> &hook, const char *fn, int flags, int mode)
 {
-    IGPROF_TRACE (("(%d igopen %s %d %d\n", s_enabled, fn, flags, mode));
-    IgProfLock lock (s_enabled);
+    bool enabled = IgProf::disable ();
     int result = (*hook.chain) (fn, flags, mode);
     int err = errno;
 
-    if (lock.enabled () > 0 && result != -1)
+    if (enabled && result != -1)
 	add (result);
 
-    IGPROF_TRACE ((" -> %d)\n", result));
     errno = err;
+    IgProf::enable ();
     return result;
 }
 
 static int
 doopen64 (IgHook::SafeData<igprof_doopen64_t> &hook, const char *fn, int flags, int mode)
 {
-    IGPROF_TRACE (("(%d igopen64 %s %d %d\n", s_enabled, fn, flags, mode));
-    IgProfLock lock (s_enabled);
+    bool enabled = IgProf::disable ();
     int result = (*hook.chain) (fn, flags, mode);
     int err = errno;
 
-    if (lock.enabled () > 0 && result != -1)
+    if (enabled && result != -1)
 	add (result);
 
-    IGPROF_TRACE ((" -> %d)\n", result));
     errno = err;
+    IgProf::enable ();
     return result;
 }
 
 static int
 doclose (IgHook::SafeData<igprof_doclose_t> &hook, int fd)
 {
-    IGPROF_TRACE (("(%d igclose %d\n", s_enabled, fd));
-    IgProfLock lock (s_enabled);
+    IgProf::disable ();
     int result = (*hook.chain) (fd);
     int err = errno;
 
-    if (lock.enabled () > 0 && result != -1)
+    if (result != -1)
 	remove (fd);
 
-    IGPROF_TRACE ((" -> %d)\n", result));
     errno = err;
+    IgProf::enable ();
     return result;
 }
 
@@ -256,51 +255,49 @@ doclose (IgHook::SafeData<igprof_doclose_t> &hook, int fd)
 static int
 dodup (IgHook::SafeData<igprof_dodup_t> &hook, int fd)
 {
-    IGPROF_TRACE (("(%d igdup %d\n", s_enabled, fd));
-    IgProfLock lock (s_enabled);
+    bool enabled = IgProf::disable ();
     int result = (*hook.chain) (fd);
     int err = errno;
 
-    if (lock.enabled () > 0 && result != -1)
+    if (enabled && result != -1)
 	add (result);
 
-    IGPROF_TRACE ((" -> %d)\n", result));
     errno = err;
+    IgProf::enable ();
     return result;
 }
 
 static int
 dodup2 (IgHook::SafeData<igprof_dodup2_t> &hook, int fd, int newfd)
 {
-    IGPROF_TRACE (("(%d igdup2 %d %d\n", s_enabled, fd, newfd));
-    IgProfLock lock (s_enabled);
+    bool enabled = IgProf::disable ();
     int result = (*hook.chain) (fd, newfd);
     int err = errno;
 
-    if (lock.enabled () > 0 && result != -1)
+    if (result != -1)
     {
-	remove (newfd);
-	add (newfd);
+	remove (fd);
+	if (enabled)
+	    add (newfd);
     }
 
-    IGPROF_TRACE ((" -> %d)\n", result));
     errno = err;
+    IgProf::enable ();
     return result;
 }
 
 static int
 dosocket (IgHook::SafeData<igprof_dosocket_t> &hook, int domain, int type, int proto)
 {
-    IGPROF_TRACE (("(%d igsocket %d %d %d\n", s_enabled, domain, type, proto));
-    IgProfLock lock (s_enabled);
+    bool enabled = IgProf::disable ();
     int result = (*hook.chain) (domain, type, proto);
     int err = errno;
 
-    if (lock.enabled () > 0 && result != -1)
+    if (enabled && result != -1)
 	add (result);
 
-    IGPROF_TRACE ((" -> %d)\n", result));
     errno = err;
+    IgProf::enable ();
     return result;
 }
 
@@ -308,17 +305,15 @@ static int
 doaccept (IgHook::SafeData<igprof_doaccept_t> &hook,
 	  int fd, struct sockaddr *addr, socklen_t *len)
 {
-    IGPROF_TRACE (("(%d igaccept %d %p %p\n", s_enabled,
-		   fd, (void *) addr, (void *) len));
-    IgProfLock lock (s_enabled);
+    bool enabled = IgProf::disable ();
     int result = (*hook.chain) (fd, addr, len);
     int err = errno;
 
-    if (lock.enabled () > 0 && result != -1)
+    if (enabled && result != -1)
 	add (result);
 
-    IGPROF_TRACE ((" -> %d)\n", result));
     errno = err;
+    IgProf::enable ();
     return result;
 }
 
