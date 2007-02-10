@@ -1,5 +1,11 @@
 2007-02-10  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProfAtomic.h: New, implement a light-weight locking mechanism
+	to manage profiler re-entrancy.  The reason for abandoning pthread
+	locks for this is that they are not re-entrant themselves and so
+	cannot be re-entered in signal handlers, and may allocate memory
+	when contended and so cannot be re-entered in memory profiler.
+
 	* igprof-analyse: Convert unidentified (@?0xADDRESS) symbols to
 	file+offset pseudo-label when reading in the dumps.  This makes
 	more sense to users and allows us to identify identical functions
