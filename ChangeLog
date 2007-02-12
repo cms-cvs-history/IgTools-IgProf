@@ -1,5 +1,10 @@
 2007-02-12  Lassi A. Tuura  <lat@iki.fi>
 
+	* test/test_load.cc: Try to push the system harder with deeper
+	stacks and more aggressive allocation rate.  Still no match to
+	Geant4 however, have not been able to overflow the profile pools
+	with this test.
+
 	* igprof: Accept new option -T to set temporary directory for
 	intermediate data files.  In extreme cases several gigabytes may
 	need to be allocated  and it's not appropriate to fill /tmp.
