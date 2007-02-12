@@ -1,5 +1,9 @@
 2007-02-12  Lassi A. Tuura  <lat@iki.fi>
 
+	* igprof: Accept new option -T to set temporary directory for
+	intermediate data files.  In extreme cases several gigabytes may
+	need to be allocated  and it's not appropriate to fill /tmp.
+
 	* IgProf.cc (pool): Do not check thread id when no threads used.
 	(profileReadHunk): Reset "node" when returning from nested pool.
 	(debug): Print current time after process id.

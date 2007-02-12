@@ -10,6 +10,7 @@ usage() {
   echo -e "-d, --debug                \tenable more details from profiler"
   echo -e "-f, --full                 \tstart all the profilers"
   echo -e "-t, --target STR           \tonly profile programs with STR in their names"
+  echo -e "-T, --tmpdir DIR           \tuse DIR for temporary profile data files"
   echo -e "-mp, --memory-profiler     \tstart the memory profiler"
   echo -e "-pp, --performance-profiler\tstart the performance profile (default)"
   echo -e "-pr, --real-time           \tmeasure real time in performance profiler"
@@ -33,6 +34,10 @@ while [ "$#" != 0 ]; do
     -t | --target )
       IGPROF_TARGET="$2"; shift; shift;
       export IGPROF_TARGET ;;
+
+    -T | --tmpdir )
+      IGPROF_TMPDIR="$2"; shift; shift;
+      export IGPROF_TMPDIR ;;
 
     -d | --debug )
       IGHOOK_DEBUGGING=1 IGPROF_DEBUGGING=1;
