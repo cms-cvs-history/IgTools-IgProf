@@ -53,10 +53,10 @@ static bool			s_initialized	= false;
 static int			s_moduleid	= -1;
 
 /** Record file descriptor.  Increments counters in the tree. */
-static void 
+static void __attribute__((noinline))
 add (int fd)
 {
-    static const int	STACK_DEPTH = 256;
+    static const int	STACK_DEPTH = 400;
     void		*addresses [STACK_DEPTH];
     int			depth = IgHookTrace::stacktrace (addresses, STACK_DEPTH);
     IgProfPool		*pool = IgProf::pool (s_moduleid);

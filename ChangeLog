@@ -1,5 +1,11 @@
 2007-02-12  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProfFileDesc.cc, IgProfMem.cc, IgProfPerf.cc
+	(add, profileSignalHandler): Allow deeper stacks, ROOT seems to
+	indulge some very deep ones.  Mark the functions calling stack
+	trace as no-inline to avoid surprise changes in number of stack
+	frames to drop.
+
 	* IgProfPool.cc (initFile): Create files in $IGPROF_TMPDIR if set.
 	(push): Fix a bug in writing out the entry descriptor when stack
 	depth is negative.  We protected everywhere else, but then claimed

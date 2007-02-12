@@ -56,10 +56,10 @@ static int			s_moduleid	= -1;
 /** Record an allocation at @a ptr of @a size bytes.  Increments counters
     in the tree for the allocations as per current configuration and adds
     the pointer to current live memory map if we are tracking leaks.  */
-static void 
+static void  __attribute__((noinline))
 add (void *ptr, size_t size)
 {
-    static const int	STACK_DEPTH = 256;
+    static const int	STACK_DEPTH = 400;
     void		*addresses [STACK_DEPTH];
     int			depth = IgHookTrace::stacktrace (addresses, STACK_DEPTH);
     IgProfPool		*pool = IgProf::pool (s_moduleid);

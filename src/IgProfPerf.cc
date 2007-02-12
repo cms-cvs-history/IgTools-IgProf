@@ -47,7 +47,7 @@ profileSignalHandler (void)
     if (! IgProf::enabled ())
 	return;
 
-    static const int	STACK_DEPTH = 256;
+    static const int	STACK_DEPTH = 400;
     void		*addresses [STACK_DEPTH];
     int			depth = IgHookTrace::stacktrace (addresses, STACK_DEPTH);
     IgProfPool::Entry	entry = { IgProfPool::TICK, &s_ct_ticks, 0, 1, 0 };
