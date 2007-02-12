@@ -40,8 +40,11 @@ static IgProfPool::Released	*s_free = 0;
 static void
 initFile (int *fd, int pool)
 {
-    char fname [64];
-    sprintf (fname, "/tmp/igprof-data.%ld.%d.XXXXXX", (long) getpid(), pool);
+    static const char *mytmpdir = getenv ("IGPROF_TMPDIR");
+    char fname [1024];
+    sprintf (fname, "%.900s/igprof-data.%ld.%d.XXXXXX",
+	     (mytmpdir ? mytmpdir : "/tmp"),
+	     (long) getpid(), pool);
     if ((fd [0] = mkstemp (fname)) < 0) abort ();
     if ((fd [1] = open (fname, O_RDONLY, 0)) < 0) abort ();
     unlink (fname);
@@ -159,15 +162,16 @@ IgProfPool::push (void **stack, int depth, Entry *counters, int ncounters)
     if (m_shared)
 	pthread_mutex_lock (&m_lock);
 
+    if (depth < 0) depth = 0;
     int words = 1 + 2 + depth + 5 * ncounters;
     if (m_end - m_current < words+2) flush ();
     if (m_end - m_current < words+2) abort ();
 
     *m_current++ = words-1;
     *m_current++ = STACK;
-    *m_current++ = depth >= 0 ? depth : 0;
-    for (int i = depth-1; i >= 0; --i)
-        *m_current++ = (unsigned long) stack[i];
+    *m_current++ = depth;
+    while (--depth >= 0)
+        *m_current++ = (unsigned long) stack[depth];
 
     for (int i = 0; i < ncounters; ++i)
     {
@@ -178,7 +182,7 @@ IgProfPool::push (void **stack, int depth, Entry *counters, int ncounters)
 	*m_current++ = counters[i].resource;
     }
 
-    // Yield every 64 allocations and snooze every 1024.
+    // Yield every 32 allocations and snooze every 1024.
     int yieldcycle = (m_slow ? (++m_nslow % 1024) : 0);
     bool yieldsome = (m_slow && (yieldcycle % 32) == 1);
     bool yieldmore = (m_slow && (yieldcycle == 1));
