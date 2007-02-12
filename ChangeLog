@@ -1,5 +1,10 @@
 2007-02-12  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProf.cc (pool): Do not check thread id when no threads used.
+	(profileReadHunk): Reset "node" when returning from nested pool.
+	(debug): Print current time after process id.
+	(dump): No more need to print out how long the dump took.
+	
 	* IgProfFileDesc.cc, IgProfMem.cc, IgProfPerf.cc
 	(add, profileSignalHandler): Allow deeper stacks, ROOT seems to
 	indulge some very deep ones.  Mark the functions calling stack

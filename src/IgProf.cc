@@ -415,7 +415,7 @@ IgProf::pool (int moduleid)
     // otherwise a per-thread pool.
     pthread_t thread = pthread_self ();
     IgProfPoolAlloc *pools = s_pools;
-    if (! s_initialized || thread == s_readthread)
+    if (! s_initialized || (s_pthreads && thread == s_readthread))
 	pools = 0;
     else if (thread != s_mainthread && s_pools [moduleid].perthread)
 	pools = (IgProfPoolAlloc *) pthread_getspecific (s_poolkey);
@@ -560,7 +560,11 @@ IgProf::debug (const char *format, ...)
     static const char *debugging = getenv ("IGPROF_DEBUGGING");
     if (debugging)
     {
-	fprintf (stderr, "*** IgProf(%lu): ", (unsigned long) getpid());
+	timeval tv;
+	gettimeofday (&tv, 0);
+	fprintf (stderr, "*** IgProf(%lu, %.3f): ",
+		 (unsigned long) getpid(),
+		 tv.tv_sec + 1e-6*tv.tv_usec);
 
 	va_list args;
 	va_start (args, format);
@@ -622,6 +626,7 @@ IgProf::profileReadHunk (int &fd, IgProfReadBuf &buf, IgProfReadBuf &zbuf)
 		while (! profileReadHunk (fd, zbuf, zbuf))
 		    ;
 	    }
+	    node = 0;
 	    break;
 
 	case IgProfPool::MEMREF:
@@ -637,6 +642,7 @@ IgProf::profileReadHunk (int &fd, IgProfReadBuf &buf, IgProfReadBuf &zbuf)
 
 		IgProfPool::release (info);
 	    }
+	    node = 0;
 	    break;
 
 	case IgProfPool::STACK:
@@ -1038,10 +1044,6 @@ IgProf::dump (void)
     }
 
     fclose (output);
-    gettimeofday (&tend, 0);
-    IgProf::debug ("dump took %.2f seconds\n",
-		   (tend.tv_sec + 1e-6 * tend.tv_usec)
-		   - (tstart.tv_sec + 1e-6 * tstart.tv_usec));
     dumping = false;
 }
 
