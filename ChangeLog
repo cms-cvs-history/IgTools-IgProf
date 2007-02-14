@@ -1,3 +1,9 @@
+2007-02-15  Lassi A. Tuura  <lat@iki.fi>
+
+	* igprof: Add support for option "-z" for simpler output file
+	compression and "-D" option to specify a flag file to trigger
+	an intermediate profile output dump.
+
 2007-02-12  Lassi A. Tuura  <lat@iki.fi>
 
 	* test/test_load.cc: Try to push the system harder with deeper
