@@ -127,8 +127,9 @@ IgProfPool::IgProfPool (int id, bool buffered, bool shared,
 	m_released [i].index = i;
     }
 
-    // Create the first mapping and point our write pointer there.
+    // Create the first two mappings and point our write pointer.
     mapping (0);
+    initMapping (m_mappings [1]);
 
     // If we are shared (= multi-threaded single pool), have a lock.
     if (m_shared) pthread_mutex_init (&m_lock, 0);
