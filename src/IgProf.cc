@@ -88,6 +88,7 @@ IGPROF_LIBHOOK (4, int, dopthread_create, _pthread21,
 // Data for this profiler module
 static const int	N_POOLS		= 8;
 static const unsigned	MAX_DATA	= 512;
+static const int	MAX_FNAME	= 1024;
 static IgProfAtomic	s_enabled	= 0;
 static bool		s_initialized	= false;
 static bool		s_activated	= false;
@@ -103,6 +104,8 @@ static pthread_mutex_t	s_poollock;
 static pthread_mutex_t	s_lock;
 static IgProfNodeCache	s_nodecache [MAX_DATA];
 static IgProfSymCache	*s_symcache;
+static char		s_outname [MAX_FNAME];
+static char		s_dumpflag [MAX_FNAME];
 
 // Static data that needs to be constructed lazily on demand
 static IgProfLiveMaps &livemaps (void)
@@ -225,6 +228,38 @@ IgProf::initialize (int *moduleid, void (*threadinit) (void), bool perthread)
 	    IgProf::debug ("$IGPROF not set, not profiling this process\n");
 	    return s_activated = false;
 	}
+
+	const char *opts = options;
+	while (*opts)
+	{
+	    while (*opts == ' ' || *opts == ',')
+		++opts;
+
+	    if (! strncmp (opts, "igprof:out='", 12))
+	    {
+		int i = 0;
+		opts += 12;
+		while (i < MAX_FNAME-1 && *opts && *opts != '\'')
+		    s_outname[i++] = *opts++;
+		s_outname[i] = 0;
+	    }
+	    else if (! strncmp (opts, "igprof:dump='", 13))
+	    {
+		int i = 0;
+		options += 13;
+		while (i < MAX_FNAME-1 && *opts && *opts != '\'')
+		    s_dumpflag[i++] = *opts++;
+		s_dumpflag[i] = 0;
+	    }
+	    else
+		opts++;
+
+	    while (*opts && *opts != ',' && *opts != ' ')
+		opts++;
+	}
+
+	if (! s_outname[0])
+	    sprintf (s_outname, "igprof.%ld", (long) getpid ());
 
 	s_pools = new IgProfPoolAlloc [N_POOLS];
 	memset (s_pools, 0, N_POOLS * sizeof (*s_pools));
@@ -617,13 +652,13 @@ IgProf::profileReadHunk (int &fd, IgProfReadBuf &buf, IgProfReadBuf &zbuf)
 	    {
 		IGPROF_ASSERT (&zbuf != &buf);
 
-		int fd = data[i++];
+		int newfd = data[i++];
 
 		zbuf.n = 0;
 		zbuf.off = 0;
 		zbuf.pos = zbuf.data;
 
-		while (! profileReadHunk (fd, zbuf, zbuf))
+		while (! profileReadHunk (newfd, zbuf, zbuf))
 		    ;
 	    }
 	    node = 0;
@@ -635,9 +670,9 @@ IgProf::profileReadHunk (int &fd, IgProfReadBuf &buf, IgProfReadBuf &zbuf)
 		char		*buffer = (char *) data[i++];
 		unsigned long	size = data[i++];
 		IgProfReadBuf	thisbuf = { size, size, buffer, buffer, size };
-		int		fd = -1;
+		int		newfd = -1;
 
-		while (! profileReadHunk (fd, thisbuf, zbuf))
+		while (! profileReadHunk (newfd, thisbuf, zbuf))
 		    ;
 
 		IgProfPool::release (info);
@@ -754,6 +789,7 @@ IgProf::profileReadHunk (int &fd, IgProfReadBuf &buf, IgProfReadBuf &zbuf)
 void *
 IgProf::profileListenThread (void *)
 {
+    int		  dodump = 0;
     IgProfReadBuf buf = { 32*1024, 0, 0, 0, 0 };
     IgProfReadBuf zbuf = { 1024*1024, 0, 0, 0, 0 };
     buf.data = (char *) malloc (buf.size);
@@ -771,6 +807,7 @@ IgProf::profileListenThread (void *)
 	// Check how many descriptors we have in use.
 	int maxfd = -1;
 	int nset = 0;
+	struct stat st;
 	for (int i = 0; i < FD_SETSIZE; ++i)
 	    if (FD_ISSET (i, &current))
 	    {
@@ -794,7 +831,6 @@ IgProf::profileListenThread (void *)
 	    int done;
 	    do
 	    {
-	        struct stat st;
 	        if (fstat (lastfd, &st) || buf.off >= st.st_size)
 		{
 		    // Reset file position and buffer.
@@ -818,6 +854,15 @@ IgProf::profileListenThread (void *)
 	if (s_quitting && (maxfd < 0 || ++s_quitting > 100))
 	    break;
 
+	// Check every once in a while if a dump has been requested.
+	if (s_dumpflag[0] && ! (++dodump % 128) && ! stat (s_dumpflag, &st))
+	{
+	    unlink (s_dumpflag);
+	    IgProf::dump ();
+	    dodump = 0;
+	}
+
+	// Have a nap.
 	usleep (10000);
     }
 
@@ -985,50 +1030,21 @@ IgProf::dump (void)
     if (dumping) return;
     dumping = true;
 
-    const char *options = IgProf::options ();
-    char       outname [1024];
-
-    outname [0] = 0;
-    while (options && *options)
-    {
-	while (*options == ' ' || *options == ',')
-	    ++options;
-
-	if (! strncmp (options, "out='", 5))
-	{
-	    int i = 0;
-	    options += 5;
-	    while (i < 1023 && *options && *options != '\'')
-		outname[i++] = *options++;
-	    outname[i] = 0;
-	}
-	else
-	    options++;
-
-	while (*options && *options != ',' && *options != ' ')
-	    options++;
-    }
-
-    if (! *outname)
-        sprintf (outname, "igprof.%ld", (long) getpid ());
-
-    struct timeval tstart, tend;
-    gettimeofday (&tstart, 0);
-
-    FILE *output = (outname[0] == '|'
-		    ? (unsetenv("LD_PRELOAD"), popen(outname+1, "w"))
-		    : fopen (outname, "w+"));
+    FILE *output = (s_outname[0] == '|'
+		    ? (unsetenv("LD_PRELOAD"), popen(s_outname+1, "w"))
+		    : fopen (s_outname, "w+"));
     if (! output)
     {
-	IgProf::debug ("can't write to output %s: %d\n", outname, errno);
+	IgProf::debug ("can't write to output %s: %d\n", s_outname, errno);
 	dumping = false;
 	return;
     }
 
-    IgProf::debug ("dumping state to %s\n", outname);
+    IgProf::debug ("dumping state to %s\n", s_outname);
     fprintf (output, "P=(ID=%lu N=(%s) T=%f)\n",
 	     (unsigned long) getpid (), program_invocation_name, s_clockres);
     dumpProfile (output, IgProf::root ());
+#if 0
     IgProfLiveMaps::iterator i = livemaps ().begin ();
     IgProfLiveMaps::iterator end = livemaps ().end ();
     int nmaps = 0;
@@ -1042,6 +1058,7 @@ IgProf::dump (void)
 		     (void *) m->second.first, m->first, m->second.second);
 	fputc('\n', output);
     }
+#endif
 
     fclose (output);
     dumping = false;

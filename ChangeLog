@@ -1,5 +1,13 @@
 2007-02-15  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProf.cc (initialize): Move all options parsing here including
+	output file name.  Add new option to specify a file whose
+	existence triggers an intermediate profile dump.
+	(profileReadHunk): Don't shadow "fd" variable name.
+	(profileListenThread): Dump if profile dump trigger file exists.
+	(dump): Remove parsing of profile options, now in initialisation.
+	Disable leak map output, it's currently just waste of space.
+
 	* IgProfPerf.cc (profileSignalHandler): Drop one less frame from
 	the bottom of the stack.  Not sure if this was changed with the
 	IgHookTrace::stacktrace() improvements, but definitely now better.
