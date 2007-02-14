@@ -1,5 +1,10 @@
 2007-02-15  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProfPerf.cc (profileSignalHandler): Drop one less frame from
+	the bottom of the stack.  Not sure if this was changed with the
+	IgHookTrace::stacktrace() improvements, but definitely now better.
+	(enableSignalHandler): Use sigaction(SA_RESTART), not signal().
+
 	* IgProfPool.cc: Initialise two mappings in constructor so we
 	initially have a buffer to swap to when the first buffer fills up.
 	Rationale is to avoid anything even potentially fragile.

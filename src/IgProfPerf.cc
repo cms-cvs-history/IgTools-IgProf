@@ -54,7 +54,7 @@ profileSignalHandler (void)
     IgProfPool		*pool = IgProf::pool (s_moduleid);
 
     // Drop two bottom frames, three top ones (stacktrace, me, signal frame).
-    if (pool) pool->push (addresses+3, depth-5, &entry, 1);
+    if (pool) pool->push (addresses+3, depth-4, &entry, 1);
 }
 
 /** Enable profiling timer.  You should have called
@@ -78,7 +78,12 @@ enableSignalHandler (void)
         pthread_sigmask (SIG_UNBLOCK, &profset, 0);
     else
         sigprocmask (SIG_UNBLOCK, &profset, 0);
-    signal (s_signal, (sighandler_t) &profileSignalHandler);
+
+    struct sigaction sa;
+    sigemptyset (&sa.sa_mask);
+    sa.sa_handler = (sighandler_t) &profileSignalHandler;
+    sa.sa_flags = SA_RESTART;
+    sigaction (s_signal, &sa, 0);
 }
 
 //<<<<<< PUBLIC FUNCTION DEFINITIONS                                    >>>>>>
