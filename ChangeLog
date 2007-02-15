@@ -1,5 +1,8 @@
 2007-02-15  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProf.cc (initialize): Increment the right pointer in handling
+	the dump flag option.
+
 	* IgProf.cc (initialize): Move all options parsing here including
 	output file name.  Add new option to specify a file whose
 	existence triggers an intermediate profile dump.

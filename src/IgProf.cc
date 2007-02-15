@@ -229,8 +229,7 @@ IgProf::initialize (int *moduleid, void (*threadinit) (void), bool perthread)
 	    return s_activated = false;
 	}
 
-	const char *opts = options;
-	while (*opts)
+	for (const char *opts = options; *opts; )
 	{
 	    while (*opts == ' ' || *opts == ',')
 		++opts;
@@ -246,7 +245,7 @@ IgProf::initialize (int *moduleid, void (*threadinit) (void), bool perthread)
 	    else if (! strncmp (opts, "igprof:dump='", 13))
 	    {
 		int i = 0;
-		options += 13;
+		opts += 13;
 		while (i < MAX_FNAME-1 && *opts && *opts != '\'')
 		    s_dumpflag[i++] = *opts++;
 		s_dumpflag[i] = 0;
