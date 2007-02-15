@@ -1,5 +1,8 @@
 2007-02-15  Lassi A. Tuura  <lat@iki.fi>
 
+	* igprof-analyse (merge_to_node): Merge to parent's structure from
+	the source node, not from the parent itself (duh!).
+
 	* IgProf.cc (initialize): Increment the right pointer in handling
 	the dump flag option.
 

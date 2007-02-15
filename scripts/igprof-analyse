@@ -73,7 +73,7 @@ sub merge_to_node
 
     # Continue merging down the tree.
     &merge_to_node ($syms, $nodes, $$nodes[$other], $$nodes[$_], $cnt, $freq, $ismax)
-	for @{$$nodes[$other]{CHILDREN}};
+	for @{$$kid{CHILDREN}};
 }
 
 # Support routine to convert all numerical values in the arguments to
