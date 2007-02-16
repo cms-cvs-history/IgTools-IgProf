@@ -1,3 +1,7 @@
+2007-02-16  Lassi A. Tuura  <lat@iki.fi>
+
+	* igprof-analyse: Add option to convert data to callgrind format.
+
 2007-02-15  Lassi A. Tuura  <lat@iki.fi>
 
 	* igprof-analyse (merge_to_node): Merge to parent's structure from

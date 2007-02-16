@@ -8,6 +8,7 @@ my $demangle = 0;
 my $gdb = 0;
 my $showlibs = 0;
 my $verbose = 0;
+my $callgrind = 0;
 my $key;
 my @allkeys;
 my $order = 1;
@@ -265,7 +266,7 @@ sub readAllDumps
     my $prof = { FILES => [], SYMS => {}, NODES => [],
 		 COUNTS => {}, FREQS => {}, LEAKS => {} };
     
-    $$prof{FILES}[0] = { NAME => "<unknwon>" };
+    $$prof{FILES}[0] = { NAME => "<unknown>" };
     $$prof{SYMS}{0} = { INDEX => 0, NAME => "<spontaneous>",
 			FILE => $$prof{FILES}[0], FILEOFF => 0 };
     $$prof{NODES}[0] = { INDEX => 0, SYMIDX => 0, CHILDREN => [] };
@@ -432,7 +433,7 @@ sub readDump
 	    $$counts{$ctrname} ||= [];
 	    next if $key && $ctrname ne $key;
 	    next if ! $key && scalar keys %$counts > 1;
-	    $ctrval *= $res if $ctrname eq 'PERF_TICKS';
+	    $ctrval *= $res if $ctrname eq 'PERF_TICKS' && ! $callgrind;
 	    if (defined $$counts{$ctrname}[$index])
 	    {
 		$$freqs{$ctrname}[$index] += $ctrfreq;
@@ -557,15 +558,10 @@ sub symfor
 }
 
 ######################################################################
-# Analyse a profile dump.
-sub analyse
+# Common code to pre-process data for analysis.
+sub prepdata
 {
-    my ($prof) = @_;
-    my $ismax = ($key =~ /_MAX$/ ? 1 : 0);
-    my $cnt = ($$prof{COUNTS}{$key} ||= []);
-    my $freq = ($$prof{FREQS}{$key} ||= []);
-    my $ccnt = [];
-    my $cfreq = [];
+    my ($prof, $ismax, $cnt, $ccnt, $freq, $cfreq) = @_;
 
     # Make sure every counter has an initialised value.
     $$cnt[$_] ||= 0 for 0 .. scalar(@{$$prof{NODES}})-1;
@@ -615,6 +611,110 @@ sub analyse
 		    $$ccnt[$parentidx] += $$ccnt[$nodeidx]; },
 	      $prof);
     }
+}
+
+######################################################################
+# Generate call-grind output.
+sub callgrind
+{
+    my ($prof) = @_;
+    my $ismax = ($key =~ /_MAX$/ ? 1 : 0);
+    my $cnt = ($$prof{COUNTS}{$key} ||= []);
+    my $freq = ($$prof{FREQS}{$key} ||= []);
+    my $ccnt = [];
+    my $cfreq = [];
+
+    # Prepare data.
+    &prepdata ($prof, $ismax, $cnt, $ccnt, $freq, $cfreq);
+    if ($demangle || $gdb)
+    {
+        do { local $|=1; print "Resolving symbols\n" } if $verbose;
+        &symremap($prof);
+    }
+
+    my $files = $$prof{FILES};
+    my $syms = $$prof{SYMS};
+    my $nodes = $$prof{NODES};
+    my $nsym = 0;
+    my %seenfile;
+    my %seensym;
+
+    # Give each file an id, just it's index in the array.
+    map { $$files[$_]{ID} = $_ } 0 .. $#$files;
+    map { $$_{CGINDEX} = ++$nsym } values %$syms;
+
+    # Generate callgrind output.
+    print "events: $key\n";
+    foreach my $nidx (0 .. $#$nodes)
+    {
+	my $n = $$nodes[$nidx];
+	my $sym = $$syms{$$n{SYMIDX}};
+	my $file = $$sym{FILE};
+	print "\n\n";
+	if (! exists $seenfile{$file})
+	{
+	    print "ob=($$file{ID}) $$file{NAME}\n";
+	    $seenfile{$file} = 1;
+	}
+	else
+	{
+	    print "ob=($$file{ID})\n";
+	}
+	if (! exists $seensym{$sym})
+	{
+	    print "fn=($$sym{CGINDEX}) $$sym{NAME}\n";
+	    $seensym{$sym} = 1;
+	}
+	else
+	{
+	    print "fn=($$sym{CGINDEX})\n";
+	}
+	print "0 $$cnt[$nidx]\n\n";
+	foreach my $cidx (@{$$n{CHILDREN}})
+	{
+	    my $cn = $$nodes[$cidx];
+	    my $csym = $$syms{$$cn{SYMIDX}};
+	    my $cfile = $$sym{FILE};
+	    print "\n";
+	    if ($cfile ne $file)
+	    {
+	        if (! exists $seenfile{$cfile})
+	        {
+		    print "cob=($$cfile{ID}) $$cfile{NAME}\n";
+		    $seenfile{$cfile} = 1;
+	        }
+	        else
+	        {
+		    print "cob=($$cfile{ID})\n";
+	        }
+	    }
+	    if (! exists $seensym{$csym})
+	    {
+		print "cfn=($$csym{CGINDEX}) $$csym{NAME}\n";
+		$seensym{$csym} = 1;
+	    }
+	    else
+	    {
+		print "cfn=($$csym{CGINDEX})\n";
+	    }
+	    print "calls=$$cfreq[$cidx] 0\n0 $$ccnt[$cidx]\n";
+	}
+    }
+}
+
+######################################################################
+# Generate gprof-type output analysis.
+sub analyse
+{
+    my ($prof) = @_;
+    my $ismax = ($key =~ /_MAX$/ ? 1 : 0);
+    my $cnt = ($$prof{COUNTS}{$key} ||= []);
+    my $freq = ($$prof{FREQS}{$key} ||= []);
+    my $ccnt = [];
+    my $cfreq = [];
+
+    # Prepare data.
+    &prepdata ($prof, $ismax, $cnt, $ccnt, $freq, $cfreq);
 
     # Initialise result table.
     do { local $|=1; print "Building call tree map\n" } if $verbose;
@@ -1034,6 +1134,8 @@ while (scalar @ARGV)
     }
     elsif ($ARGV[0] eq '--libs' || $ARGV[0] eq '-l')
     { $showlibs = 1; shift (@ARGV); }
+    elsif ($ARGV[0] eq '--callgrind' || $ARGV[0] eq '-C')
+    { $callgrind = 1; shift (@ARGV); }
     elsif ($ARGV[0] eq '--xml' || $ARGV[0] eq '-x')
     { $output = "xml"; shift (@ARGV); }
     elsif ($ARGV[0] eq '--html' || $ARGV[0] eq '-h')
@@ -1078,5 +1180,12 @@ if (! defined $key)
 }
 
 $showcalls = ($key =~ /MEM/ ? 1 : 0) if ! defined $showcalls;
-&analyse ($prof);
+if ($callgrind)
+{
+    &callgrind ($prof);
+}
+else
+{
+    &analyse ($prof);
+}
 exit 0;
