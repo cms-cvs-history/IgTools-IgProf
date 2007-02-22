@@ -42,7 +42,7 @@ static int			s_moduleid	= -1;
     location.  Assumes the signal handler is registered for the correct
     thread.  Skip ticks when this profiler is not enabled.  */
 static void
-profileSignalHandler (void)
+profileSignalHandler (int /* nsig */, siginfo_t * /* info */, void * /* ctx */)
 {
     if (! IgProf::enabled ())
 	return;
@@ -82,7 +82,7 @@ enableSignalHandler (void)
     struct sigaction sa;
     sigemptyset (&sa.sa_mask);
     sa.sa_handler = (sighandler_t) &profileSignalHandler;
-    sa.sa_flags = SA_RESTART;
+    sa.sa_flags = SA_RESTART | SA_SIGINFO;
     sigaction (s_signal, &sa, 0);
 }
 

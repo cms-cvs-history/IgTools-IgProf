@@ -1,3 +1,7 @@
+2007-02-22  Lassi A. Tuura  <lat@iki.fi>
+
+	* IgProfPerf.cc: Set SA_SIGINFO when setting up the signal.
+
 2007-02-16  Lassi A. Tuura  <lat@iki.fi>
 
 	* igprof-analyse: Add option to convert data to callgrind format.
