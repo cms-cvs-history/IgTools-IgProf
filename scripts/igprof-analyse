@@ -208,7 +208,7 @@ sub igprof_filter_by_lib_pre
         # Convert the symbol name into the library name, then pick the
         # first symbol with that library name as the symbol for this node.
         my $lib = $$syms{$$kid{SYMIDX}}{FILE}{NAME} || "<unknown>"; $lib =~ s|.*/||;
-        my $symdix = ".lib$lib";
+        my $symidx = ".lib$lib";
         $$syms{$symidx} ||= { %{$$syms{$$kid{SYMIDX}}}, NAME => $lib };
         $$kid{SYMIDX} = $symidx;
 
@@ -362,7 +362,7 @@ sub readDump
 	    if (substr($symname, 0, 2) eq '@?' && $$file{NAME} && $fileoff >= 0)
 	    {
 		my ($basename) = ($$file{NAME} =~ m|(?:.*/)?(.*)|);
-		$symname = "\@($basename+$fileoff)";
+		$symname = "\@{$basename+$fileoff}";
 	    }
 
 	    $sym = $symbyname{$symname};
