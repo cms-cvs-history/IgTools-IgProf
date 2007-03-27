@@ -31,7 +31,7 @@ IGPROF_LIBHOOK (3, int, dopthread_sigmask, _main,
 	        "pthread_sigmask", 0, 0)
 
 // Data for this profiler module
-static IgHookTrace::Counter	s_ct_ticks	= { "PERF_TICKS" };
+static IgProfTrace::CounterDef	s_ct_ticks	= { "PERF_TICKS", IgProfTrace::TICK, -1 };
 static bool			s_initialized	= false;
 static int			s_signal	= SIGPROF;
 static int			s_itimer	= ITIMER_PROF;
@@ -47,10 +47,9 @@ profileSignalHandler (int /* nsig */, siginfo_t * /* info */, void * /* ctx */)
     if (! IgProf::enabled ())
 	return;
 
-    static const int	STACK_DEPTH = 400;
-    void		*addresses [STACK_DEPTH];
-    int			depth = IgHookTrace::stacktrace (addresses, STACK_DEPTH);
-    IgProfPool::Entry	entry = { IgProfPool::TICK, &s_ct_ticks, 0, 1, 0 };
+    void		*addresses [IgProfTrace::MAX_DEPTH];
+    int			depth = IgHookTrace::stacktrace (addresses, IgProfTrace::MAX_DEPTH);
+    IgProfTrace::Record	entry = { IgProfTrace::COUNT, &s_ct_ticks, 1, 1, 0 };
     IgProfPool		*pool = IgProf::pool (s_moduleid);
 
     // Drop two bottom frames, three top ones (stacktrace, me, signal frame).

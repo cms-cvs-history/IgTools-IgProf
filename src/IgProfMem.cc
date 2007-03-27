@@ -43,10 +43,9 @@ IGPROF_DUAL_HOOK (1, void, dofree, _main, _libc,
 		  "free", 0, "libc.so.6")
 
 // Data for this profiler module
-static IgHookTrace::Counter	s_ct_total	= { "MEM_TOTAL" };
-static IgHookTrace::Counter	s_ct_largest	= { "MEM_MAX" };
-static IgHookTrace::Counter	s_ct_live	= { "MEM_LIVE" };
-static IgHookTrace::Counter	s_ct_live_peak	= { "MEM_LIVE_PEAK" };
+static IgProfTrace::CounterDef	s_ct_total	= { "MEM_TOTAL",    IgProfTrace::TICK, -1 };
+static IgProfTrace::CounterDef	s_ct_largest	= { "MEM_MAX",      IgProfTrace::MAX, -1 };
+static IgProfTrace::CounterDef	s_ct_live	= { "MEM_LIVE",     IgProfTrace::TICK_PEAK, -1 };
 static bool			s_count_total	= 0;
 static bool			s_count_largest	= 0;
 static bool			s_count_live	= 0;
@@ -59,11 +58,10 @@ static int			s_moduleid	= -1;
 static void  __attribute__((noinline))
 add (void *ptr, size_t size)
 {
-    static const int	STACK_DEPTH = 400;
-    void		*addresses [STACK_DEPTH];
-    int			depth = IgHookTrace::stacktrace (addresses, STACK_DEPTH);
+    void		*addresses [IgProfTrace::MAX_DEPTH];
+    int			depth = IgHookTrace::stacktrace (addresses, IgProfTrace::MAX_DEPTH);
     IgProfPool		*pool = IgProf::pool (s_moduleid);
-    IgProfPool::Entry	entries [3];
+    IgProfTrace::Record	entries [3];
     int			nentries = 0;
 
     if (! pool)
@@ -71,36 +69,34 @@ add (void *ptr, size_t size)
 
     if (s_count_total)
     {
-	entries[nentries].type = IgProfPool::TICK;
-	entries[nentries].counter = &s_ct_total;
-	entries[nentries].peakcounter = 0;
+	entries[nentries].type = IgProfTrace::COUNT;
+	entries[nentries].def = &s_ct_total;
 	entries[nentries].amount = size;
-	entries[nentries].resource = 0;
+	entries[nentries].ticks = 1;
 	nentries++;
     }
 
     if (s_count_largest)
     {
-	entries[nentries].type = IgProfPool::MAX;
-	entries[nentries].counter = &s_ct_largest;
-	entries[nentries].peakcounter = 0;
+	entries[nentries].type = IgProfTrace::COUNT;
+	entries[nentries].def = &s_ct_largest;
 	entries[nentries].amount = size;
-	entries[nentries].resource = 0;
+	entries[nentries].ticks = 1;
 	nentries++;
     }
 
     if (s_count_live)
     {
-	entries[nentries].type = IgProfPool::ACQUIRE;
-	entries[nentries].counter = &s_ct_live;
-	entries[nentries].peakcounter = &s_ct_live_peak;
+	entries[nentries].type = IgProfTrace::COUNT | IgProfTrace::ACQUIRE;
+	entries[nentries].def = &s_ct_live;
 	entries[nentries].amount = size;
-	entries[nentries].resource = (unsigned long) ptr;
+	entries[nentries].ticks = 1;
+	entries[nentries].resource = (IgProfTrace::Address) ptr;
 	nentries++;
     }
 
     // Drop two bottom frames, four top ones (stacktrace, me, two for hook).
-    pool->push (addresses+4, depth-6, entries, nentries);
+    pool->push (addresses+4, depth-5, entries, nentries);
 }
 
 /** Remove knowledge about allocation.  If we are tracking leaks,
@@ -109,13 +105,13 @@ add (void *ptr, size_t size)
 static void
 remove (void *ptr)
 {
-    if (s_count_live)
+    if (s_count_live && ptr)
     {
         IgProfPool *pool = IgProf::pool (s_moduleid);
 	if (! pool) return;
 
-	IgProfPool::Entry entry
-	    = { IgProfPool::RELEASE, &s_ct_live, 0, 0, (unsigned long) ptr };
+	IgProfTrace::Record entry
+	    = { IgProfTrace::RELEASE, &s_ct_live, 0, 0, (IgProfTrace::Address) ptr };
         pool->push (0, 0, &entry, 1);
     }
 }

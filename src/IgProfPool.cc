@@ -9,7 +9,6 @@
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
-#include <pthread.h>
 #include <sched.h>
 
 #if ! defined MAP_ANONYMOUS && defined MAP_ANON
@@ -91,25 +90,15 @@ flushwrite (int fd, void *data, size_t n)
     side file desciptor for accessing the profile data.
 
     @a id	An identifier for this buffer, used for file names.
-    @a buffered	Flag to indicate data can be buffered in memory, as
-                opposed to writing everything on disk.  If enabled,
-		as much data as possible is kept in memory mapped
-		regions and only information about the mapping is
-		is written to the file.  Up to #MAPPING times #size
-		bytes of data will be buffered in memory.  If the
-		flag is disabled, all data written to the file.  
+    @a options  IgProfTrace and IgProfPool options.
     @a size	The pool size in bytes.  */
 
-IgProfPool::IgProfPool (int id, bool buffered, bool shared,
-		        unsigned int size /* = DEFAULT_SIZE */)
+IgProfPool::IgProfPool (int id, int options, unsigned int size /* = DEFAULT_SIZE */)
   : m_released (new Released [MAPPINGS]), // See release()/flush()/finish() re leak
-    m_buffer (0),
-    m_current (0),
-    m_end (0),
     m_id (id),
-    m_currentmap (-1),
-    m_buffered (buffered),
-    m_shared (shared),
+    m_options (options),
+    m_current (-1),
+    m_dirty (false),
     m_slow (false),
     m_nslow (0)
 {
@@ -132,7 +121,7 @@ IgProfPool::IgProfPool (int id, bool buffered, bool shared,
     initMapping (m_mappings [1]);
 
     // If we are shared (= multi-threaded single pool), have a lock.
-    if (m_shared) pthread_mutex_init (&m_lock, 0);
+    if (m_options & OptShared) pthread_mutex_init (&m_lock, 0);
 }
 
 /** Release a profiling buffer.  This is a no-op, everything else
@@ -155,40 +144,28 @@ IgProfPool::readfd (void)
     @a counters		The counter value changes.
     @a ncounters	The number of entries in #counters. */
 void
-IgProfPool::push (void **stack, int depth, Entry *counters, int ncounters)
+IgProfPool::push (void **stack, int depth, IgProfTrace::Record *recs, int nrecs)
 {
     if (m_fd [0] == -1)
 	return;
 
-    if (m_shared)
+    if (m_options & OptShared)
 	pthread_mutex_lock (&m_lock);
 
-    if (depth < 0) depth = 0;
-    int words = 1 + 2 + depth + 5 * ncounters;
-    if (m_end - m_current < words+2) flush ();
-    if (m_end - m_current < words+2) abort ();
-
-    *m_current++ = words-1;
-    *m_current++ = STACK;
-    *m_current++ = depth;
-    while (--depth >= 0)
-        *m_current++ = (unsigned long) stack[depth];
-
-    for (int i = 0; i < ncounters; ++i)
+    if (! m_mappings [m_current].buffer.push (stack, depth, recs, nrecs))
     {
-        *m_current++ = counters[i].type;
-	*m_current++ = (unsigned long) counters[i].counter;
-	*m_current++ = (unsigned long) counters[i].peakcounter;
-	*m_current++ = counters[i].amount;
-	*m_current++ = counters[i].resource;
+	flush ();
+	m_mappings [m_current].buffer.push (stack, depth, recs, nrecs);
     }
+
+    m_dirty = true;
 
     // Yield every 32 allocations and snooze every 1024.
     int yieldcycle = (m_slow ? (++m_nslow % 1024) : 0);
     bool yieldsome = (m_slow && (yieldcycle % 32) == 1);
     bool yieldmore = (m_slow && (yieldcycle == 1));
 
-    if (m_shared)
+    if (m_options & OptShared)
 	pthread_mutex_unlock (&m_lock);
 
     // If we have outrun the collector, pace ourselves to give the
@@ -208,20 +185,22 @@ IgProfPool::push (void **stack, int depth, Entry *counters, int ncounters)
 void
 IgProfPool::mapping (int i)
 {
+    IGPROF_ASSERT (m_mappings[i].status == VOID
+		   || m_mappings[i].status == READY);
+
     // Switch to the other mapping.  Set up if necessary.
     // If we fail to allocate memory for new mappings, crash.
     if (m_mappings[i].status == VOID && ! initMapping (m_mappings [i]))
 	abort ();
 
     // Point our pointers to this mapping now.
-    m_buffer = (unsigned long *) m_mappings [i].data;
-    m_current = m_buffer;
-    m_end = m_buffer + m_mappings [i].size / sizeof (*m_buffer);
+    m_mappings [i].buffer.setup (m_mappings[i].data,
+				 m_mappings[i].size,
+				 m_options);
     m_mappings [i].status = ACTIVE;
-    m_currentmap = i;
+    m_current = i;
+    m_dirty = false;
 }
-
-/** Collect returned free mappings for this pool.  */
 
 /** Flush the pool, the current write area has filled up.  */
 void
@@ -262,26 +241,33 @@ IgProfPool::flush (void)
     // it would need to complete the task.  We  do require a buffer
     // with guaranteed "infinite" capacity to avoid such dead locks.
 
-    // Add an end marker for this region (file, memory) so the
-    // reader knows to close up and release the resources.  Our
-    // callers make sure there is always space for this.
-    *m_current++ = 1;
-    *m_current++ = END;
-
     // See if any of our buffers have been returned.
-    if (m_buffered)
+    if (m_options & OptBuffered)
     {
 	pthread_mutex_lock (&s_lock);
 	Released **r = &s_free;
+	int nreleased = 0;
 	while (*r)
 	{
 	    // If it's one of ours, mark it free and remove from list.
 	    // Otherwise move forward in the linked list.  (We don't
 	    // actually ever delete anything, the Released objects
 	    // were created in our constructor and are reused again.)
+	    // However if we are picking up many released buffers,
+	    // free some as we go, to relieve memory pressure.
 	    if ((*r)->owner == this)
 	    {
-		m_mappings [(*r)->index].status = READY;
+		int i = (*r)->index;
+		if (++nreleased > 16)
+		{
+		    munmap (m_mappings [i].data, m_mappings [i].size);
+		    m_mappings [i].status = VOID;
+		    m_mappings [i].data = 0;
+		}
+		else
+		{
+		    m_mappings [i].status = READY;
+		}
 		*r = (*r)->next;
 	    }
 	    else
@@ -298,23 +284,20 @@ IgProfPool::flush (void)
 	    free = i;
 
     // If we are buffered, switch mappings if we can.
-    if (m_buffered && free >= 0)
+    if ((m_options & OptBuffered) && free >= 0)
     {
 	// Mark the mapping full and waiting for release().
-	m_mappings [m_currentmap].status = FULL;
+	m_mappings [m_current].status = FULL;
+	m_mappings [m_current].buffer.detach ();
 
 	// Write out a reference to this buffer.
-	unsigned long entry [5] = {
-	    // Entry header: number of elements and type.
-	    // Details to get back to me for release() call.
-	    4, MEMREF, (unsigned long) &m_released [m_currentmap],
-
-	    // Buffer address and number of bytes to read.
-	    (unsigned long) m_buffer,
-	    (unsigned long) (m_current - m_buffer) * sizeof (unsigned long)
+	uintptr_t header [3] = {
+	    MEMREF,
+	    (uintptr_t) m_mappings [m_current].data,
+	    (uintptr_t) &m_released [m_current]
 	};
 
-	flushwrite (m_fd [0], entry, sizeof (entry));
+	flushwrite (m_fd [0], header, sizeof (header));
 
 	// Switch mappings now.
 	mapping (free);
@@ -331,44 +314,48 @@ IgProfPool::flush (void)
 	// Yes, we write the file descriptor itself to the file...
 	// The reader will close that file (which is what makes
 	// this less than optimal for unbuffered case!).
-	size_t bytes = (m_current - m_buffer) * sizeof (*m_buffer);
-        int    fds [2];
+        int fds [2];
 
         initFile (fds, m_id);
-        flushwrite (fds[0], m_buffer, bytes);
+        flushwrite (fds[0], m_mappings[m_current].data,
+		    m_mappings[m_current].size);
         close (fds[0]);
 
-        unsigned long entry [3] = { 2, FILEREF, fds[1] };
-        flushwrite (m_fd [0], entry, sizeof (entry));
+	uintptr_t header [3] = { FILEREF, fds [1], 0 };
+	flushwrite (m_fd [0], header, sizeof (header));
 
 	// Mark this buffer same available again.
-        m_current = m_buffer;
+        m_mappings [m_current].buffer.detach ();
+	m_mappings [m_current].buffer.setup (m_mappings[m_current].data,
+					     m_mappings[m_current].size,
+					     m_options);
 
 	// Tell push() to pace itself if we outran the collector.
-	if (m_buffered) m_slow = true, m_nslow = 0;
+	if (m_options & OptBuffered) m_slow = true, m_nslow = 0;
     }
+
+    m_dirty = false;
 }
 
 /** Close up the profiling pool.  */
 void
 IgProfPool::finish (void)
 {
-    if (m_shared) pthread_mutex_lock (&m_lock);
+    if (m_options & OptShared) pthread_mutex_lock (&m_lock);
 
     // Flush out any pending data.
-    if (m_current > m_buffer)
+    if (m_dirty)
 	flush ();
 
     // Send an end marker on the main file.
-    *m_current++ = 1;
-    *m_current++ = END;
-    flushwrite (m_fd [0], m_buffer, 2*sizeof(*m_buffer));
+    uintptr_t entry [3] = { END, 0, 0 };
+    flushwrite (m_fd [0], entry, sizeof (entry));
 
     // If we are not buffered, release the memory.  If we
     // are buffered, m_released may be leaked as it needs
     // to stay alive beyond the life time of this pool.
     // The same applies to the memory mapped regions.
-    if (! m_buffered)
+    if (! (m_options & OptBuffered))
     {
 	delete [] m_released;
 	munmap (m_mappings[0].data, m_mappings [0].size);
@@ -377,7 +364,7 @@ IgProfPool::finish (void)
     // Close out the write side.
     int fd = m_fd [0];
     m_fd [0] = -1;
-    if (m_shared) pthread_mutex_unlock (&m_lock);
+    if (m_options & OptShared) pthread_mutex_unlock (&m_lock);
     close (fd);
 }
 
@@ -388,7 +375,7 @@ IgProfPool::finish (void)
     on a local list.  It may either be picked up by next flush(),
     or simply dropped on the floor if the pool has been destroyed. */
 void
-IgProfPool::release (unsigned long info)
+IgProfPool::release (uintptr_t info)
 {
     // The info was actually a pointer to one of the "Released"
     // allocated in the IgProfPool constructor.  We just stick

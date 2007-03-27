@@ -44,9 +44,8 @@ IGPROF_DUAL_HOOK (3, int, doaccept, _main, _libc,
 		  "accept", 0, "libc.so.6")
 
 // Data for this profiling module
-static IgHookTrace::Counter	s_ct_used	= { "FD_USED" };
-static IgHookTrace::Counter	s_ct_live	= { "FD_LIVE" };
-static IgHookTrace::Counter	s_ct_live_peak	= { "FD_LIVE_PEAK" };
+static IgProfTrace::CounterDef	s_ct_used	= { "FD_USED", IgProfTrace::TICK, -1 };
+static IgProfTrace::CounterDef	s_ct_live	= { "FD_LIVE", IgProfTrace::TICK_PEAK, -1 };
 static bool			s_count_used	= 0;
 static bool			s_count_live	= 0;
 static bool			s_initialized	= false;
@@ -56,11 +55,10 @@ static int			s_moduleid	= -1;
 static void __attribute__((noinline))
 add (int fd)
 {
-    static const int	STACK_DEPTH = 400;
-    void		*addresses [STACK_DEPTH];
-    int			depth = IgHookTrace::stacktrace (addresses, STACK_DEPTH);
+    void		*addresses [IgProfTrace::MAX_DEPTH];
+    int			depth = IgHookTrace::stacktrace (addresses, IgProfTrace::MAX_DEPTH);
     IgProfPool		*pool = IgProf::pool (s_moduleid);
-    IgProfPool::Entry	entries [2];
+    IgProfTrace::Record	entries [2];
     int			nentries = 0;
 
     if (! pool)
@@ -68,26 +66,25 @@ add (int fd)
 
     if (s_count_used)
     {
-	entries[nentries].type = IgProfPool::TICK;
-	entries[nentries].counter = &s_ct_used;
-	entries[nentries].peakcounter = 0;
+	entries[nentries].type = IgProfTrace::COUNT;
+	entries[nentries].def = &s_ct_used;
 	entries[nentries].amount = 1;
-	entries[nentries].resource = 0;
+	entries[nentries].ticks = 1;
 	nentries++;
     }
 
     if (s_count_live)
     {
-	entries[nentries].type = IgProfPool::ACQUIRE;
-	entries[nentries].counter = &s_ct_live;
-	entries[nentries].peakcounter = &s_ct_live_peak;
+	entries[nentries].type = IgProfTrace::COUNT | IgProfTrace::ACQUIRE;
+	entries[nentries].def = &s_ct_live;
 	entries[nentries].amount = 1;
+	entries[nentries].ticks = 1;
 	entries[nentries].resource = fd;
 	nentries++;
     }
 
     // Drop two bottom frames, four top ones (stacktrace, me, two for hook).
-    pool->push (addresses+4, depth-6, entries, nentries);
+    pool->push (addresses+4, depth-5, entries, nentries);
 }
 
 /** Remove knowledge about the file descriptor.  If we are tracking
@@ -101,8 +98,8 @@ remove (int fd)
         IgProfPool *pool = IgProf::pool (s_moduleid);
 	if (! pool) return;
 
-	IgProfPool::Entry entry
-	    = { IgProfPool::RELEASE, &s_ct_live, 0, 0, fd };
+	IgProfTrace::Record entry
+	    = { IgProfTrace::RELEASE, &s_ct_live, 0, 0, fd };
         pool->push (0, 0, &entry, 1);
     }
 }

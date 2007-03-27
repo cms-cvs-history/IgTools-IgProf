@@ -3,6 +3,7 @@
 
 //<<<<<< INCLUDES                                                       >>>>>>
 
+# include "Ig_Tools/IgProf/src/IgProfTrace.h"
 # include <pthread.h>
 
 //<<<<<< PUBLIC DEFINES                                                 >>>>>>
@@ -29,32 +30,17 @@ class IgProfPool
 {
 public:
     /// Default profile data pool size.
-    static const unsigned int	DEFAULT_SIZE = 32*1024*1024;
+    static const unsigned int	DEFAULT_SIZE = 512*1024;
 
     /// Maximum number of live #Mapping buffers.
-    static const int		MAPPINGS = 32;
+    static const int		MAPPINGS = 128;
 
-    /// Type of pool entry.
-    enum EntryType
+    /// Type of information entry written to output stream.
+    enum HeaderType 
     {
-	END,		//< Profile data end marker (internal use only).
-	FILEREF,	//< Data in a separate file (internal use only).
-	MEMREF,		//< Data in a memory region (internal use only).
-	STACK,		//< Stack trace (internal use only).
-	TICK,		//< Tick a counter.
-	MAX,		//< Max a counter.
-	ACQUIRE,	//< Acquire a resource.
-	RELEASE		//< Release a resource.
-    };
-
-    /// Parameter data for counter entries (TICK, MAX, ACQUIRE, RELEASE).
-    struct Entry
-    {
-	EntryType	type;		//< Entry type.
-	void		*counter;	//< Address of the value counter.
-	void		*peakcounter;	//< Address of the peak counter.
-	unsigned long	amount;		//< Resource size.
-	unsigned long	resource;	//< Resource id.
+	END,		//< End of profile data, nothing follows header.
+	FILEREF,	//< Reference to a pool in another file.
+	MEMREF		//< Reference to a pool in a memory region.
     };
 
     /// Status of memory mapping.
@@ -72,6 +58,7 @@ public:
 	MappingStatus	status;		//< Current status.
 	void		*data;		//< Start of mapping.
 	unsigned long	size;		//< Size of mapping.
+	IgProfTrace	buffer;		//< Trace buffer.
     };
 
     /// Information about released mappings.
@@ -82,18 +69,29 @@ public:
 	 int		index;
     };
 
-    IgProfPool (int id, bool buffered, bool shared,
-		unsigned int size = DEFAULT_SIZE);
+    // Options
+    /** Flag to indicate data can be buffered in memory, as opposed to
+	writing everything on disk.  If enabled, as much data as
+	possible is kept in memory mapped regions and only information
+	about the mapping is is written to the file.  Up to #MAPPING
+	times #size bytes of data will be buffered in memory.  If the
+	flag is disabled, all data written to the file.  */
+    static const int OptBuffered = 256;
+
+    /** Flag to indicate the pool is shared among threads.  */
+    static const int OptShared = 512;
+
+    IgProfPool (int id, int options, unsigned int size = DEFAULT_SIZE);
     ~IgProfPool (void);
 
     // Producer side interface.
     void		push (void **stack, int depth,
-			      Entry *counters, int ncounters);
+			      IgProfTrace::Record *recs, int nrecs);
 
     // Infrastructure and consumer side interface.
     int			readfd (void);
     void		finish (void);
-    static void		release (unsigned long info);
+    static void		release (uintptr_t info);
 
 private:
     void		flush (void);
@@ -103,11 +101,11 @@ private:
     Mapping		m_mappings [MAPPINGS];
     Released		*m_released;
     int			m_fd [2];
-    unsigned long	*m_buffer;
-    unsigned long	*m_current;
-    unsigned long	*m_end;
+
     int			m_id;
-    int			m_currentmap;
+    int			m_options;
+    int			m_current;
+    bool		m_dirty;
     bool		m_buffered;
     bool		m_shared;
     bool		m_slow;
