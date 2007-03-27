@@ -12,9 +12,6 @@
 
 class IgProfLock;
 class IgProfPool;
-class IgProfReadBuf;
-class IgHookTrace;
-class IgHookLiveMap;
 
 //<<<<<< PUBLIC VARIABLES                                               >>>>>>
 //<<<<<< PUBLIC FUNCTIONS                                               >>>>>>
@@ -50,13 +47,10 @@ private:
     static bool			lock (void);
     static void			unlock (void);
 
-    static int			profileReadHunk (int &fd,
-		    				 IgProfReadBuf &buf,
-						 IgProfReadBuf &zbuf);
+    static int			profileRead (int fd, void *buf);
+    static void			profileExtend (unsigned char *&buf, unsigned int &size,
+					       unsigned int lo, unsigned int hi);
     static void *		profileListenThread (void *);
-
-    static IgHookTrace *	root (void);
-    static IgHookLiveMap *	liveMap (const char *label);
 };
 
 /** Acquire a lock on the profiling system.  Obtains the lock and

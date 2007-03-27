@@ -3,6 +3,11 @@
 	* IgProfTrace.h, IgProfTrace.cc: New, a relocatable data gathering
 	buffer explicitly optimised for collecting profile data.
 
+	* IgProf.h, IgProf.cc: Adjust to using IgProfTrace.  Report
+	individual resource leaks.  Fix the communication in an unclean
+	exit, the profiler no longer hangs when ROOT calls "exit()" from
+	signal handlers, threads are not closed and destructors run.
+
 2007-03-13  Lassi A. Tuura  <lat@iki.fi>
 
 	* igprof-analyse (igprof_filter_by_lib_pre): Fix typo.

@@ -13,8 +13,8 @@
 #include <cstdarg>
 #include <cerrno>
 #include <list>
-#include <map>
 #include <unistd.h>
+#include <sys/mman.h>
 #include <sys/signal.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -26,6 +26,10 @@
 # define program_invocation_name **_NSGetArgv()
 #endif
 
+#if ! defined MAP_ANONYMOUS && defined MAP_ANON
+# define MAP_ANONYMOUS MAP_ANON
+#endif
+
 //<<<<<< PRIVATE DEFINES                                                >>>>>>
 //<<<<<< PRIVATE CONSTANTS                                              >>>>>>
 //<<<<<< PRIVATE TYPES                                                  >>>>>>
@@ -33,23 +37,9 @@
 // Used to capture real user start arguments in our custom thread wrapper
 struct IgProfWrappedArg { void * (*start_routine) (void *); void *arg; };
 struct IgProfPoolAlloc { IgProfPool *pool; int fd; bool perthread; };
-struct IgProfNodeCache { void *addr; IgHookTrace *node; };
-struct IgProfReadBuf { size_t size; size_t n; char *data; char *pos; off_t off; };
+struct IgProfDumpInfo { int depth; int nsyms; int nlibs; int nctrs; };
 class IgProfExitDump { public: ~IgProfExitDump (); };
-
-typedef std::map<const char *, IgHookLiveMap *> IgProfLiveMaps;
-typedef std::list<IgProfAtomic *>		IgProfGuardList;
-typedef std::list<void (*) (void)>		IgProfCallList;
-#if __GNUC__
-typedef __gnu_cxx::hash_map
-    <unsigned long, void *, __gnu_cxx::hash<unsigned long>,
-     std::equal_to<unsigned long>,
-     IgHookAlloc< std::pair<unsigned long, void *> > > IgProfSymCache;
-#else
-typedef std::map
-    <unsigned long, void *, std::less<unsigned long>,
-     IgHookAlloc< std::pair<unsigned long, void *> > > IgProfSymCache;
-#endif
+typedef std::list<void (*) (void)> IgProfCallList;
 
 //<<<<<< PRIVATE VARIABLE DEFINITIONS                                   >>>>>>
 //<<<<<< PUBLIC VARIABLE DEFINITIONS                                    >>>>>>
@@ -87,38 +77,39 @@ IGPROF_LIBHOOK (4, int, dopthread_create, _pthread21,
 
 // Data for this profiler module
 static const int	N_POOLS		= 8;
-static const unsigned	MAX_DATA	= 512;
 static const int	MAX_FNAME	= 1024;
 static IgProfAtomic	s_enabled	= 0;
 static bool		s_initialized	= false;
 static bool		s_activated	= false;
 static bool		s_pthreads	= false;
-static bool		s_quitting	= 0;
+static volatile int	s_quitting	= 0;
 static double		s_clockres	= 0;
 static IgProfPoolAlloc	*s_pools	= 0;
+static IgProfTrace	*s_masterbuf	= 0;
+static char		s_masterbufdata [sizeof (IgProfTrace)];
 static pthread_t	s_mainthread;
 static pthread_t	s_readthread;
 static fd_set		s_poolfd;
 static pthread_key_t	s_poolkey;
 static pthread_mutex_t	s_poollock;
 static pthread_mutex_t	s_lock;
-static IgProfNodeCache	s_nodecache [MAX_DATA];
-static IgProfSymCache	*s_symcache;
 static char		s_outname [MAX_FNAME];
 static char		s_dumpflag [MAX_FNAME];
 
 // Static data that needs to be constructed lazily on demand
-static IgProfLiveMaps &livemaps (void)
-{ static IgProfLiveMaps *s = new IgProfLiveMaps; return *s; }
-
 static IgProfCallList &threadinits (void)
 { static IgProfCallList *s = new IgProfCallList; return *s; }
 
-// Helper function to initialise pools.
 static void
 initPool (IgProfPoolAlloc *pools, int pool, bool perthread)
 {
-    IgProfPool *p = new IgProfPool (pool, s_pthreads, s_pthreads && !perthread);
+    int options = IgProfTrace::OptResources;
+    if (s_pthreads)
+	options |= IgProfPool::OptBuffered;
+    if (s_pthreads && !perthread)
+	options |= IgProfPool::OptShared;
+    
+    IgProfPool *p = new IgProfPool (pool, options);
     pools [pool].pool = p;
     pools [pool].fd = p->readfd ();
     pools [pool].perthread = perthread;
@@ -132,55 +123,26 @@ initPool (IgProfPoolAlloc *pools, int pool, bool perthread)
 }
 
 static bool
-readsafe (IgProfReadBuf &buf, int fd, void *into, size_t n, bool end, const char *msg)
+readsafe (int fd, void *into, size_t n, ssize_t *ntot = 0)
 {
-    // If the buffer is underfilled, fill it now.
-    if (buf.n < n && fd != -1)
+    ssize_t nread = 0;
+    while (nread < (ssize_t) n)
     {
-	memmove (buf.data, buf.pos, buf.n);
-	buf.pos = buf.data;
-
-	while (buf.n < buf.size)
+	ssize_t m = read (fd, (char *) into + nread, n - nread);
+	if (m == -1 && errno == EINTR)
+	    continue;
+	else if (m < 0)
 	{
-	    ssize_t m = read (fd, buf.data + buf.n, buf.size - buf.n);
-	    if (m < 0 && errno == EINTR)
-		continue;
-	    else if (m < 0)
-	    {
-		IgProf::debug ("INTERNAL ERROR: %s (fd %d, errno %d)\n",
-			       msg, fd, errno);
-		abort ();
-	    }
-	    if (m == 0)
-		break;
-	    buf.n += m;
+	    IgProf::debug ("INTERNAL ERROR: Failed to read profile data"
+			   " (fd %d, errno %d = %s)\n",
+			   fd, errno, strerror (errno));
+	    abort ();
 	}
-
-	buf.off = lseek (fd, 0, SEEK_CUR);
+	nread += m;
     }
-
-    // Now read from our buffer.  It's always guaranteed to be larger
-    // than any actual profile data read we are going to make.  The
-    // only reason it might not have enough data is that our read
-    // came short, meaning there is no more data in the file.
-    if (buf.n < n && end)
-    {
-	IgProf::debug ("End of profile data on descriptor %d pos %lld, buffered %lu\n",
-		       fd, (long long) lseek (fd, 0, SEEK_CUR), (unsigned long) buf.n);
-	return false;
-    }
-
-    if (buf.n < n)
-    {
-	IgProf::debug ("INTERNAL ERROR: %s (fd %d, expected %lu, have %lu)\n",
-		       msg, fd, (unsigned long) n, (unsigned long) buf.n);
-	abort ();
-    }
-
-    memcpy (into, buf.pos, n);
-    buf.pos += n;
-    buf.n -= n;
-    return true;
+    
+    if (ntot) *ntot = nread;
+    return nread == (ssize_t) n;
 }
 
 //<<<<<< PUBLIC FUNCTION DEFINITIONS                                    >>>>>>
@@ -331,6 +293,18 @@ IgProf::initialize (int *moduleid, void (*threadinit) (void), bool perthread)
 
     IgProf::disable ();
 
+    if (! s_masterbuf)
+    {
+	unsigned char	*buf = 0;
+	unsigned int	size = 0;
+	int		opts = (IgProfTrace::OptResources
+				| IgProfTrace::OptSymbolAddress);
+
+	profileExtend (buf, size, 0, 0);
+	s_masterbuf = new (s_masterbufdata) IgProfTrace;
+	s_masterbuf->setup (buf, size, opts, &profileExtend);
+    }
+
     int pool;
     for (pool = 0; pool < N_POOLS; ++pool)
 	if (! s_pools [pool].pool)
@@ -381,18 +355,14 @@ IgProf::exitThread (bool final)
     if (! s_pthreads && ! final)
 	return;
 
-    IgProfReadBuf   buf = { 32*1024, 0, 0, 0, 0 };
-    IgProfReadBuf   zbuf = { 1024*1024, 0, 0, 0, 0 };
+    void	    *buf = 0;
     pthread_t       thread = pthread_self ();
     IgProfPoolAlloc *pools
 	= (thread == s_mainthread ? s_pools
 	   : (IgProfPoolAlloc *) pthread_getspecific (s_poolkey));
 
     if (! s_pthreads && final)
-    {
-	buf.data = (char *) malloc (buf.size);
-	zbuf.data = (char *) malloc (zbuf.size);
-    }
+	buf = malloc (IgProfPool::DEFAULT_SIZE);
 
     for (int i = 0; i < N_POOLS && pools; ++i)
     {
@@ -411,13 +381,11 @@ IgProf::exitThread (bool final)
 
 	    while (true)
 	    {
-	        if (profileReadHunk (pools [i].fd, buf, zbuf)
+		// The file descriptor is closed at the end by profileRead().
+	        if (profileRead (pools [i].fd, buf)
 	            || lseek (pools [i].fd, 0, SEEK_CUR) >= info.st_size)
 		    break;
             }
-
-	    if (pools[i].fd >= 0)
-	        close (pools [i].fd);
 	}
     }
 
@@ -426,9 +394,8 @@ IgProf::exitThread (bool final)
     else
         pthread_setspecific (s_poolkey, 0);
 
+    free (buf);
     delete [] pools;
-    free (buf.data);
-    free (zbuf.data);
 }
 
 /** Return a profile accumulation pool for a profiler in the
@@ -530,33 +497,6 @@ IgProf::options (void)
      return s_options;
 }
 
-/** Get the root of the profiling counter tree.  Only access the the
-    tree within an #IgProfLock.  In general, only call this method
-    when the profiler module is constructed; if necessary within
-    #IgProfLock.  Note that this means you should not call this
-    method from places where #IgProfLock cannot be called from,
-    such as in asynchronous signal handlers.  */
-IgHookTrace *
-IgProf::root (void)
-{
-    static IgHookTrace *s_root = new IgHookTrace;
-    return s_root;
-}
-
-/** Get leak/live tracking map named @a label.  The argument must be
-    statically allocated (a string literal will do).  Returns pointer
-    to the named map.  In general, only call this method when the
-    profiler module is constructed; if necessary within #IgProfLock.  */
-IgHookLiveMap *
-IgProf::liveMap (const char *label)
-{
-    IgHookLiveMap *&map = livemaps () [label];
-    if (! map)
-	map = new IgHookLiveMap;
-
-    return map;
-}
-
 /** Internal assertion helper routine.  */
 int
 IgProf::panic (const char *file, int line, const char *func, const char *expr)
@@ -607,250 +547,124 @@ IgProf::debug (const char *format, ...)
     }
 }
 
-/** Helper function to read one profile entry.
-    This function can be called from one thread only, ever.  */
+/** Helper function to read one profile entry from the header file. */
 int
-IgProf::profileReadHunk (int &fd, IgProfReadBuf &buf, IgProfReadBuf &zbuf)
+IgProf::profileRead (int fd, void *buf)
 {
-    unsigned long words;
-    unsigned long data [MAX_DATA];
-
-    if (! s_symcache)
-	s_symcache = new IgProfSymCache;
-
-    if (! readsafe (buf, fd, &words, sizeof (words), true,
-		    "Failed to read profile header"))
+    uintptr_t hdr [3];
+    if (! readsafe (fd, hdr, sizeof (hdr)))
 	return -1;
 
-    if (words > MAX_DATA)
+    switch (hdr[0])
     {
-	IgProf::debug ("INTERNAL ERROR: Too much profile data in"
-		       " profile fd %d (%lu > %lu)\n",
-		       fd, words, MAX_DATA);
+    case IgProfPool::END:
+	close (fd);
+	return 1;
+
+    case IgProfPool::FILEREF:
+	{
+	    IgProfTrace::Header *h = (IgProfTrace::Header *) buf;
+	    if (readsafe (hdr[1], buf, sizeof (*h)))
+	    {
+	        // debug ("merging %lu bytes profile data via disk (fd=%d)\n",
+		//        h->size, (int) hdr[1]);
+		if (readsafe (hdr[1], (char *)buf+sizeof *h, h->size-sizeof *h))
+		    s_masterbuf->merge (buf);
+	    }
+	    close (hdr[1]);
+	}
+	break;
+
+    case IgProfPool::MEMREF:
+	// debug ("merging %lu bytes profile data via memory (buf=%p)\n",
+	//        ((IgProfTrace::Header *) hdr[1])->size, (void *) hdr[1]);
+	s_masterbuf->merge ((void *) hdr[1]);
+	IgProfPool::release (hdr[2]);
+	break;
+
+    default:
+	debug ("INTERNAL ERROR: unexpected profile type %d in profile"
+	       " descriptor %d\n", (int) hdr[0], fd);
 	abort ();
     }
 
-    readsafe (buf, fd, data, words * sizeof (data[0]), false,
-	      "Failed to read profile data");
+    return 0;
+}
 
-    IgHookTrace *node = 0;
-    for (unsigned long i = 0; i < words; )
+/** Extend the backing store of a profile trace buffer. */
+void
+IgProf::profileExtend (unsigned char *&buf, unsigned int &size,
+		       unsigned int lo, unsigned int hi)
+{
+    unsigned int newsize = size + 32*1024*1024;
+    void	 *newbuf = mmap (0, newsize, PROT_READ | PROT_WRITE,
+				 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
+    if (newbuf == MAP_FAILED)
     {
-	unsigned long type = data[i++];
-	switch (type)
-	{
-	case IgProfPool::END:
-	    if (fd != -1)
-	    {
-		close (fd);
-	        fd = -1;
-	    }
-	    return 1;
+	IgProf::debug ("Failed to allocate memory for profile buffer: %s (%d)\n",
+		       strerror (errno), errno);
+	abort ();
+    }
 
-	case IgProfPool::FILEREF:
-	    {
-		IGPROF_ASSERT (&zbuf != &buf);
-
-		int newfd = data[i++];
-
-		zbuf.n = 0;
-		zbuf.off = 0;
-		zbuf.pos = zbuf.data;
-
-		while (! profileReadHunk (newfd, zbuf, zbuf))
-		    ;
-	    }
-	    node = 0;
-	    break;
-
-	case IgProfPool::MEMREF:
-	    {
-		unsigned long	info = data[i++];
-		char		*buffer = (char *) data[i++];
-		unsigned long	size = data[i++];
-		IgProfReadBuf	thisbuf = { size, size, buffer, buffer, size };
-		int		newfd = -1;
-
-		while (! profileReadHunk (newfd, thisbuf, zbuf))
-		    ;
-
-		IgProfPool::release (info);
-	    }
-	    node = 0;
-	    break;
-
-	case IgProfPool::STACK:
-	    {
-	        node = root ();
-		unsigned int start = i-1;
-		unsigned int depth = data[i++];
-	        for (unsigned int j = 0, valid = 1; j < depth; ++j, ++i)
-	        {
-		    if (i >= words)
-		    {
-			IgProf::debug ("OOPS: stack trace went beyond end of available data: "
-				       " FD=%d DEPTH=%u START=%u WORDS=%lu\n",
-				       fd, depth, start, words);
-			node = 0;
-			break;
-		    }
-
-		    void *addr = (void *) data[i];
-		    if (valid && s_nodecache [j].addr == addr)
-			node = s_nodecache [j].node;
-		    else
-		    {
-			IgProfSymCache::iterator symaddr = s_symcache->find (data[i]);
-			if (symaddr == s_symcache->end())
-			{
-			    void *mapped = IgHookTrace::tosymbol (addr);
-			    symaddr = s_symcache->insert
-				(IgProfSymCache::value_type (data[i], mapped)).first;
-			}
-			node = node->child (symaddr->second);
-			s_nodecache[j].addr = addr;
-			s_nodecache[j].node = node;
-			valid = 0;
-		    }
-	        }
-	    }
-	    break;
-
-	case IgProfPool::TICK:
-	case IgProfPool::MAX:
-	case IgProfPool::ACQUIRE:
-	case IgProfPool::RELEASE:
-	    {
-		IgHookTrace::Counter *counter = (IgHookTrace::Counter *) data[i++];
-		IgHookTrace::Counter *pcounter = (IgHookTrace::Counter *) data[i++];
-		unsigned long	     amount = data[i++];
-		unsigned long	     resource = data[i++];
-		unsigned long long   val = 0;
-
-		if (type == IgProfPool::TICK || type == IgProfPool::ACQUIRE)
-		    val = node->counter (counter)->add (amount);
-		else if (type == IgProfPool::MAX)
-		    val = node->counter (counter)->max (amount);
-
-		if (pcounter)
-		    node->counter (pcounter)->max (val);
-
-		if (type == IgProfPool::ACQUIRE)
-		{
-		    IgHookLiveMap *live = IgProf::liveMap (counter->m_name);
-		    IgHookLiveMap::Iterator pos = live->find (resource);
-		    if (pos != live->end ())
-		    {
-		        IgProf::debug ("New %s resource %lu was never freed, previously from\n",
-				       counter->m_name, resource);
-			int nnn = 0;
-			for (IgHookTrace *n = pos->second.first; n; n = n->parent ())
-			    fprintf (stderr, "  %10p%s", n->address (), ++nnn % 6 ? "   " : "\n");
-			fputc ('\n', stderr);
-
-		        size_t      size = pos->second.second;
-		        IgHookTrace *resnode = pos->second.first;
-		        IGPROF_ASSERT (resnode->counter (counter)->value () >= size);
-		        resnode->counter (counter)->sub (size);
-		        live->remove (pos);
-		    }
-		    live->insert (resource, node, amount);
-		}
-		else if (type == IgProfPool::RELEASE)
-		{
-		    IgHookLiveMap *live = IgProf::liveMap (counter->m_name);
-		    IgHookLiveMap::Iterator info = live->find (resource);
-		    if (info == live->end ())
-			// Probably allocated before our tracking.
-			break;
-
-		    size_t      size = info->second.second;
-		    IgHookTrace *resnode = info->second.first;
-		    IGPROF_ASSERT (resnode->counter (counter)->value () >= size);
-		    resnode->counter (counter)->sub (size);
-		    live->remove (info);
-		}
-	    }
-	    break;
-
-	default:
-	    IgProf::debug ("INTERNAL ERROR: unexpected profile type %lu"
-			   " in profile descriptor %d at hunk index %lu of %lu\n",
-			   type, fd, i, words);
-	    abort ();
-	}
-   }
-
-   return 0;
+    if (buf)
+    {
+	memcpy (newbuf, buf, lo);
+	memcpy ((char *) newbuf + hi + (newsize - size),
+		buf + hi,
+		size - hi);
+	munmap (buf, size);
+    }
+    
+    buf = (unsigned char *) newbuf;
+    size = newsize;
 }
 
 /** Helper thread function to receive profile data from other threads. */
 void *
 IgProf::profileListenThread (void *)
 {
-    int		  dodump = 0;
-    IgProfReadBuf buf = { 32*1024, 0, 0, 0, 0 };
-    IgProfReadBuf zbuf = { 1024*1024, 0, 0, 0, 0 };
-    buf.data = (char *) malloc (buf.size);
-    zbuf.data = (char *) malloc (zbuf.size);
+    void *buf = malloc (IgProfPool::DEFAULT_SIZE);
+    int  dodump = 0;
 
     while (true)
     {
 	fd_set current;
+	struct stat st;
 
 	// Capture a copy of current set of file descriptors.
 	pthread_mutex_lock (&s_poollock);
         memcpy (&current, &s_poolfd, sizeof (s_poolfd));
 	pthread_mutex_unlock (&s_poollock);
 
-	// Check how many descriptors we have in use.
-	int maxfd = -1;
-	int nset = 0;
-	struct stat st;
-	for (int i = 0; i < FD_SETSIZE; ++i)
-	    if (FD_ISSET (i, &current))
-	    {
-		maxfd = i;
-		nset++;
-	    }
-
-	// Read profile data from all files ready with data.
-	// If we read the end-of-stream marker, remove the
-	// file descriptor from the available ones; it has
-	// already been closed by profileReadHunk().
-	for (int lastfd = 0; nset > 0; ++lastfd, --nset)
+	// Read profile data from all pool communication files.  When
+	// at end-of-stream marker, close the file (in profileRead())
+	// and remove the file descriptor from the s_poolfd set.
+	bool finished = true;
+	for (int fd = 0; fd < FD_SETSIZE; ++fd)
 	{
-	    while (! FD_ISSET (lastfd, &current))
-		++lastfd;
-
-	    buf.off = lseek (lastfd, 0, SEEK_CUR);
-	    buf.pos = buf.data;
-	    buf.n = 0;
+	    while (fd < FD_SETSIZE && ! FD_ISSET (fd, &current))
+		++fd;
 
 	    int done;
 	    do
 	    {
-	        if (fstat (lastfd, &st) || buf.off >= st.st_size)
-		{
-		    // Reset file position and buffer.
-		    lseek (lastfd, buf.off - buf.n, SEEK_SET);
+	        if (fstat (fd, &st) || lseek (fd, 0, SEEK_CUR) >= st.st_size)
 		    break;
-		}
 
-		int fd = lastfd;
-		done = profileReadHunk (fd, buf, zbuf);
-		if (done == 1)
+		if ((done = profileRead (fd, buf)) == 1)
 		{
 		    pthread_mutex_lock (&s_poollock);
-		    FD_CLR (lastfd, &s_poolfd);
-		    if (fd >= 0) FD_SET (fd, &s_poolfd);
+		    FD_CLR (fd, &s_poolfd);
 		    pthread_mutex_unlock (&s_poollock);
 		}
+		else
+		    finished = false;
 	    } while (! done);
 	}
 
-	// If we are done processing, quit.  Give threads max ~1s to quit.
-	if (s_quitting && (maxfd < 0 || ++s_quitting > 100))
+	// If we are done processing, quit.  Give threads ~1s to quit.
+	if (s_quitting && (finished || ++s_quitting > 100))
 	    break;
 
 	// Check every once in a while if a dump has been requested.
@@ -865,160 +679,85 @@ IgProf::profileListenThread (void *)
 	usleep (10000);
     }
 
-    free (buf.data);
-    free (zbuf.data);
+    free (buf);
     return 0;
 }
 
 /** Dump out the profile data.  */
 static void
-dumpProfile (FILE *output, IgHookTrace *node, void *infoptr = 0)
+dumpProfile (FILE *output, IgProfTrace::Stack *node, IgProfDumpInfo &info)
 {
-    typedef std::pair<int,unsigned long> SymInfo;
-    typedef std::pair<unsigned long, SymInfo> SymDesc;
-#if __GNUC__
-    typedef __gnu_cxx::hash_map
-	<unsigned long, SymInfo, __gnu_cxx::hash<unsigned long>,
-	 std::equal_to<unsigned long>,
-	 IgHookAlloc< std::pair<unsigned long, SymInfo> > >
-	SymIndex;
-    typedef __gnu_cxx::hash_map
-	<const char *, int, __gnu_cxx::hash<const char *>,
-	 std::equal_to<const char *>,
-	 IgHookAlloc< std::pair<const char *, int> > >
-	CounterIndex;
-    typedef __gnu_cxx::hash_map
-	<const char *, int, __gnu_cxx::hash<const char *>,
-	 std::equal_to<const char *>,
-	 IgHookAlloc< std::pair<const char *, int> > >
-	LibIndex;
-#else
-    typedef std::map
-	<unsigned long, SymInfo, std::less<unsigned long>,
-	 IgHookAlloc< std::pair<unsigned long, SymInfo> > >
-	SymIndex;
-    typedef std::map
-	<const char *, int, std::less<const char *>,
-	 IgHookAlloc< std::pair<const char *, int> > >
-	CounterIndex;
-    typedef std::map
-	<const char *, int, std::less<const char *>,
-	 IgHookAlloc< std::pair<const char *, int> > >
-	LibIndex;
-#endif
-
-    struct Info
+    if (node->address) // No address at root
     {
-	CounterIndex	counters;
-	LibIndex	libs;
-	SymIndex	syms;
-	int		depth;
-	int		nsyms;
-    };
+	IgProfTrace::Binary  *bin;
+	IgProfTrace::Symbol  *sym = s_masterbuf->getSymbol (node->address);
 
-    Info *info = (Info *) infoptr;
-    if (! info)
-    {
-	info = new Info;
-        info->depth = 0;
-	info->nsyms = 0;
-    }
-
-    if (node->address ()) // No address at root
-    {
-	unsigned long		calladdr = (unsigned long) node->address ();
-	SymIndex::iterator	sym = info->syms.find (calladdr);
-	if (sym != info->syms.end ())
-	    fprintf (output, "C%d FN%d+%d",
-		     info->depth, sym->second.first,
-		     (int) (calladdr - sym->second.second));
+	if (sym->id >= 0)
+	    fprintf (output, "C%d FN%d+%d", info.depth, sym->id, sym->symoffset);
 	else
 	{
-	    const char	*symname;
-	    const char	*libname;
-	    int		offset;
-	    int		liboffset;
-	    bool	fixed;
+	    const char	*symname = sym->name;
+	    char	symgen [32];
 
-	    fixed = node->symbol (symname, libname, offset, liboffset);
-	    if (! libname) libname = "";
+	    sym->id = info.nsyms++;
 
-	    LibIndex::iterator lib = info->libs.find (libname);
-	    bool	       needlib = false;
-	    int		       libid;
-
-	    if (lib != info->libs.end ())
-		libid = lib->second;
-	    else
+	    if (! symname || ! *symname)
 	    {
-		libid = info->libs.size ();
-		info->libs.insert (std::pair<const char *,int>(libname, libid));
-		needlib = true;
+		sprintf (symgen, "@?%p", sym->address);
+		symname = symgen;
 	    }
 
-	    unsigned long	symaddr = calladdr - offset;
-	    bool		needsym = false;
-	    int			symid;
-
-	    sym = info->syms.find (symaddr);
-	    if (sym != info->syms.end ())
-		symid = sym->second.first;
-	    else
-	    {
-		symid = info->nsyms++;
-		info->syms.insert (SymDesc (calladdr, SymInfo (symid, symaddr)));
-		if (offset != 0)
-		    info->syms.insert (SymDesc (symaddr, SymInfo (symid, symaddr)));
-		needsym = true;
-	    }
-
-	    if (needlib)
-		fprintf(output, "C%d FN%d=(F%d=(%s)+%d N=(%s))+%d",
-			info->depth, symid, libid, libname ? libname : "",
-			liboffset, symname ? symname : "", offset);
-	    else if (needsym)
+	    bin = s_masterbuf->getBinary (sym->binary);
+	    if (bin->id >= 0)
 		fprintf(output, "C%d FN%d=(F%d+%d N=(%s))+%d",
-			info->depth, symid, libid, liboffset,
-			symname ? symname : "", offset);
-	    else
-		fprintf(output, "C%d FN%d+%d", info->depth, symid, offset);
-
-	    if (! fixed) delete [] symname;
-	}
-
-	for (IgHookTrace::CounterValue *val = node->counters (); val; val = val->next ())
-	{
-	    if (! val->value ())
-		continue;
-
-	    const char			*ctrname = val->counter ()->m_name;
-	    CounterIndex::iterator	ctr = info->counters.find (ctrname);
-
-	    if (ctr != info->counters.end ())
-		fprintf (output, " V%d:(%llu,%llu)",
-			 ctr->second, val->value (), val->count ());
+			info.depth, sym->id, bin->id, sym->binoffset,
+			symname, sym->symoffset);
 	    else
 	    {
-		int ctrid = info->counters.size ();
-		info->counters.insert (std::pair<const char *, int>
-				       (ctrname, ctrid));
-		fprintf (output, " V%d=(%s):(%llu,%llu)",
-			 ctrid, ctrname, val->value (), val->count ());
+		bin->id = info.nlibs++;
+		fprintf(output, "C%d FN%d=(F%d=(%s)+%d N=(%s))+%d",
+			info.depth, sym->id, bin->id,
+			bin->name ? bin->name : "", sym->binoffset,
+			symname, sym->symoffset);
 	    }
 	}
 
+	IgProfTrace::PoolIndex cidx = node->counters;
+	while (cidx)
+	{
+	    IgProfTrace::Counter *ctr = s_masterbuf->getCounter (cidx);
+	    if (ctr->ticks)
+	    {
+		if (ctr->def->id >= 0)
+		    fprintf (output, " V%d:(%ju,%ju,%ju)",
+			     ctr->def->id, ctr->ticks, ctr->value, ctr->peak);
+		else
+		    fprintf (output, " V%d=(%s):(%ju,%ju,%ju)",
+			     (ctr->def->id = info.nctrs++), ctr->def->name,
+			     ctr->ticks, ctr->value, ctr->peak);
+
+		IgProfTrace::PoolIndex ridx = ctr->resources;
+		while (ridx)
+		{
+		    IgProfTrace::Resource *res = s_masterbuf->getResource (ridx);
+		    fprintf (output, ";LK=(%p,%ju)", (void *) res->resource, res->size);
+		    ridx = res->nextlive;
+		}
+	    }
+	    cidx = ctr->next;
+	}
 	fputc ('\n', output);
     }
 
-    // FIXME: Dump out leaks from the function here.
-
-    info->depth++;
-    for (IgHookTrace *kid = node->children (); kid; kid = kid->next ())
-	dumpProfile (output, kid, info);
-    info->depth--;
-
-    if (! infoptr)
-	delete info;
+    info.depth++;
+    IgProfTrace::PoolIndex kidx = node->children;
+    while (kidx)
+    {
+	node = s_masterbuf->getStack (kidx);
+	dumpProfile (output, node, info);
+	kidx = node->sibling;
+    }
+    info.depth--;
 }
 
 /** Dump out the profiler data: trace tree and live maps.  */
@@ -1039,26 +778,11 @@ IgProf::dump (void)
 	return;
     }
 
+    IgProfDumpInfo info = { 0, 0, 0, 0 };
     IgProf::debug ("dumping state to %s\n", s_outname);
     fprintf (output, "P=(ID=%lu N=(%s) T=%f)\n",
 	     (unsigned long) getpid (), program_invocation_name, s_clockres);
-    dumpProfile (output, IgProf::root ());
-#if 0
-    IgProfLiveMaps::iterator i = livemaps ().begin ();
-    IgProfLiveMaps::iterator end = livemaps ().end ();
-    int nmaps = 0;
-    for ( ; i != end; ++i)
-    {
-        fprintf (output, "LM%d=(S=%lu N=(%s))", nmaps++, i->second->size (), i->first);
-        IgHookLiveMap::Iterator m = i->second->begin ();
-        IgHookLiveMap::Iterator mend = i->second->end ();
-        for ( ; m != mend; ++m)
-            fprintf (output, " LK=(N=%p R=%ld I=%lu)",
-		     (void *) m->second.first, m->first, m->second.second);
-	fputc('\n', output);
-    }
-#endif
-
+    dumpProfile (output, s_masterbuf->getStack (s_masterbuf->stackRoot ()), info);
     fclose (output);
     dumping = false;
 }
