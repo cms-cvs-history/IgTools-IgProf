@@ -37,8 +37,12 @@
       { return dofun (IGPROF_MERGE3(dofun,_hook,id).typed			\
 		      IGPROF_MERGE2(IGPROF_ARGSREST,n) argnames); }
 
-#define IGPROF_ASSERT(expr) \
+#if IGPROF_DEBUG
+# define IGPROF_ASSERT(expr) \
     ((void)((expr) ? 1 : IgProf::panic(__FILE__,__LINE__,__PRETTY_FUNCTION__,#expr)))
+#else
+# define IGPROF_ASSERT(expr)
+#endif
 
 // #define IGPROF_VERBOSE 1
 #if IGPROF_VERBOSE

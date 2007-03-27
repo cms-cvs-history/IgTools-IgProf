@@ -16,6 +16,9 @@
 
 	* igprof-analyse (readDump): Read the new leak and peak reports.
 
+	* IgProfMacros.h: Make IGPROF_ASSERT conditional on IGPROF_DEBUG.
+	* BuildFile: Define IGPROF_DEBUG to zero by default.
+
 2007-03-13  Lassi A. Tuura  <lat@iki.fi>
 
 	* igprof-analyse (igprof_filter_by_lib_pre): Fix typo.
