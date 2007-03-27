@@ -11,8 +11,8 @@
 	* IgProfPool.h, IgProfPool.cc, IgProfFileDesc.cc, IgProfMem.cc,
 	IgProfPerf.cc: Adjust to using IgProfTrace.
 
-	* IgProfPool.cc, IgProfFileDesc.cc, IgProfMem.cc, IgProfPerf.cc:
-	Adjust to using IgProfTrace.
+	* IgProfPool.h, IgProfPool.cc, IgProfFileDesc.cc, IgProfMem.cc,
+	IgProfPerf.cc: Adjust to using IgProfTrace.
 
 2007-03-13  Lassi A. Tuura  <lat@iki.fi>
 
