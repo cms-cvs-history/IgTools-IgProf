@@ -1,3 +1,8 @@
+2007-03-27  Lassi A. Tuura  <lat@iki.fi>
+
+	* IgProfTrace.h, IgProfTrace.cc: New, a relocatable data gathering
+	buffer explicitly optimised for collecting profile data.
+
 2007-03-13  Lassi A. Tuura  <lat@iki.fi>
 
 	* igprof-analyse (igprof_filter_by_lib_pre): Fix typo.
