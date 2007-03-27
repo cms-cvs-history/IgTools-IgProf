@@ -14,6 +14,8 @@
 	* IgProfPool.h, IgProfPool.cc, IgProfFileDesc.cc, IgProfMem.cc,
 	IgProfPerf.cc: Adjust to using IgProfTrace.
 
+	* igprof-analyse (readDump): Read the new leak and peak reports.
+
 2007-03-13  Lassi A. Tuura  <lat@iki.fi>
 
 	* igprof-analyse (igprof_filter_by_lib_pre): Fix typo.

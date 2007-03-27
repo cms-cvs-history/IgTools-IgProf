@@ -409,19 +409,24 @@ sub readDump
 	    {
 		last;
 	    }
-	    elsif (/\GV(\d+):\((\d+),(\d+)\)\s*/goc)
+	    elsif (/\GV(\d+):\((\d+),(\d+),(\d+)\)\s*/goc)
 	    {
 		$ctrname = $ctrbyid{$1} || die;
-		$ctrval = $2;
-		$ctrfreq = $3;
+		$ctrfreq = $2;
+		$ctrval = $3; # FIXME: Peak vs. standard
 	    }
-	    elsif (/\GV(\d+)=\((.*?)\):\((\d+),(\d+)\)\s*/goc)
+	    elsif (/\GV(\d+)=\((.*?)\):\((\d+),(\d+),(\d+)\)\s*/goc)
 	    {
 	        die if exists $ctrbyid{$1};
 		$ctrname = $2;
 		$ctrbyid{$1} = $2;
-		$ctrval = $3;
-		$ctrfreq = $4;
+		$ctrfreq = $3;
+		$ctrval = $4; # FIXME: Peak vs. standard
+	    }
+	    elsif (/\G;LK=\(0x[\da-z]+,\d+\)\s*/goc)
+	    {
+		# FIXME: Ignore leak descriptors for now
+		next;
 	    }
 	    else
 	    {
