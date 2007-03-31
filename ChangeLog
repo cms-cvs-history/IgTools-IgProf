@@ -1,3 +1,7 @@
+2007-03-31  Lassi A. Tuura  <lat@iki.fi>
+
+	* igprof-analyse: Implement a more accurate resolution of symbols.
+
 2007-03-27  Lassi A. Tuura  <lat@iki.fi>
 
 	* IgProfTrace.h, IgProfTrace.cc: New, a relocatable data gathering

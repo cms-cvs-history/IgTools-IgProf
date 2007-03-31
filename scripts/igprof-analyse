@@ -264,7 +264,8 @@ sub readAllDumps
 {
     do { local $|=1; print "Reading profile data" } if $verbose;
     my $prof = { FILES => [], SYMS => {}, NODES => [],
-		 COUNTS => {}, FREQS => {}, LEAKS => {} };
+		 COUNTS => {}, FREQS => {}, LEAKS => {},
+		 SYMCACHE => {} };
     
     $$prof{FILES}[0] = { NAME => "<unknown>" };
     $$prof{SYMS}{0} = { INDEX => 0, NAME => "<spontaneous>",
@@ -365,6 +366,7 @@ sub readDump
 		$symname = "\@{$basename+$fileoff}";
 	    }
 
+	    $symname = &symlookup ($prof, $$file{NAME}, $fileoff, $symname);
 	    $sym = $symbyname{$symname};
 	    if (! $sym)
 	    {
@@ -461,6 +463,72 @@ sub readDump
 
 ######################################################################
 # Invoke GDB and/or demangler to make prettier symbol names.
+sub symlookup
+{
+     my ($prof, $file, $fileoff, $name) = @_;
+     my $cache = $$prof{SYMCACHE};
+     return $$cache{SYMS}{$file}{$fileoff}
+	if exists $$cache{SYMS}{$file}{$fileoff};
+
+     # Save regular expression context
+     my $savepos = pos();
+
+     # If we are looking for precise symbols, remap using objdump/nm.
+     if ($gdb)
+     {
+	local $_;
+        local $.;
+
+	# See if we've already obtained information for this file.
+	if (! exists $$cache{FILES}{$file} && -f $file)
+	{
+	    my $vmbase = undef;
+	    open (OBJ, "objdump -p $file |") or die;
+	    while (<OBJ>)
+	    {
+		if (/LOAD\s+off\s+(0x[0-9A-Fa-f]+)\s+vaddr\s+(0x[0-9A-Fa-f]+) /)
+		{
+		    $vmbase = hex($2)-hex($1);
+		    last;
+		}
+	    }
+	    close (OBJ);
+	    die "Cannot determine VM base address for $file\n"
+		if ! defined $vmbase;
+
+	    $$cache{FILES}{$file} = [];
+	    open (NM, "nm -t d -n $file 2>/dev/null |") or die;
+	    while (<NM>)
+	    {
+		next if ! /^(\d+) \S (\S+)$/;
+		next if substr($2, 0, 1) eq '.';
+		push(@{$$cache{FILES}{$file}}, [ $1-$vmbase, $2 ]);
+	    }
+	    close (NM);
+	}
+
+	# Find the symbol.
+	my $syms = $$cache{FILES}{$file};
+	my $idx = $#$syms;
+	if ($idx >= 0)
+	{
+	    while ($idx >= 0 && $fileoff < $$syms[$idx][0])
+	    {
+	        --$idx;
+	    }
+	    if ($idx >= 0 && $fileoff >= $$syms[$idx][0])
+	    {
+	        $$cache{SYMS}{$file}{$fileoff} = $name
+		    = $$syms[$idx][1];
+	    }
+	}
+    }
+
+    # Restore regular expression context
+    pos() = $savepos if defined $savepos;
+    return $name;
+}
+
 sub symremap
 {
      my ($prof) = @_;
