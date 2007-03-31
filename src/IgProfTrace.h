@@ -144,7 +144,7 @@ public:
     typedef uintmax_t CounterValue;
 
     /** Deepest supported stack depth. */
-    static const int MAX_DEPTH = 256;
+    static const int MAX_DEPTH = 400;
 
     /** Prototype for callback to extend the buffer.  */
     typedef void (*ExtendFunc) (unsigned char *&buf, unsigned &size,
