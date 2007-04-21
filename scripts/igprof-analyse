@@ -2,6 +2,7 @@
 
 BEGIN { use strict; use warnings; $^W = 1; }
 use File::Temp;
+use Cwd 'abs_path';
 
 my $output = "text";
 my $demangle = 0;
@@ -262,7 +263,7 @@ sub igprof_filter_by_lib_pre
 # Read a profile dump.
 sub readAllDumps
 {
-    do { local $|=1; print "Reading profile data" } if $verbose;
+    do { local $|=1; print STDERR "Reading profile data" } if $verbose;
     my $prof = { FILES => [], SYMS => {}, NODES => [],
 		 COUNTS => {}, FREQS => {}, LEAKS => {},
 		 SYMCACHE => {} };
@@ -274,7 +275,7 @@ sub readAllDumps
 
     &readDump($prof, $_) for @_;
 
-    do { local $|=1; print "\n" } if $verbose;
+    do { local $|=1; print STDERR "\n" } if $verbose;
     return $prof;
 }
 
@@ -308,7 +309,7 @@ sub readDump
         open (DUMP, "< $infile") || die "\n$infile: $!\n";
     }
 
-    do { local $|=1; print " X" } if $verbose;
+    do { local $|=1; print STDERR " X" } if $verbose;
     if (defined ($_ = <DUMP>))
     {
         die "\nThis does not look like an igprof profile stats:\n  $_\n"
@@ -318,7 +319,7 @@ sub readDump
     while (<DUMP>)
     {
         chomp;
-        do { local $|=1; print "." } if $verbose && ($. % 10000) == 1;
+        do { local $|=1; print STDERR "." } if $verbose && ($. % 10000) == 1;
         next if ! /^C(\d+)\s*/go;
 	$#nodestack = $1-1;
 
@@ -343,10 +344,11 @@ sub readDump
 	    elsif (/\GF(\d+)=\((.*?)\)\+(-?\d+) N=\((.*?)\)\)\+\d+\s*/goc)
 	    {
 		die if exists $filebyid{$1};
-		$file = $filebyname{$2};
+		my $absname = length($2) ? abs_path($2) : $2;
+		$file = $filebyname{$absname};
 		if (! $file)
 		{
-		    $filebyname{$2} = $file = { NAME => $2 };
+		    $filebyname{$absname} = $file = { NAME => $absname };
 		    push(@{$$prof{FILES}}, $file);
 		}
 		$fileoff = $3;
@@ -411,13 +413,13 @@ sub readDump
 	    {
 		last;
 	    }
-	    elsif (/\GV(\d+):\((\d+),(\d+),(\d+)\)\s*/goc)
+	    elsif (/\GV(\d+):\((\d+),(\d+)(,(\d+))?\)\s*/goc)
 	    {
 		$ctrname = $ctrbyid{$1} || die;
 		$ctrfreq = $2;
 		$ctrval = $3; # FIXME: Peak vs. standard
 	    }
-	    elsif (/\GV(\d+)=\((.*?)\):\((\d+),(\d+),(\d+)\)\s*/goc)
+	    elsif (/\GV(\d+)=\((.*?)\):\((\d+),(\d+)(,(\d+))?\)\s*/goc)
 	    {
 	        die if exists $ctrbyid{$1};
 		$ctrname = $2;
@@ -544,6 +546,7 @@ sub symremap
 	foreach my $sym (sort { $$a{FILE} cmp $$b{FILE} } values %$syms)
 	{
 	    next if ! $$sym{FILE} || ! $$sym{FILEOFF} || ! -f $$sym{FILE}{NAME};
+	    next if @{$$prof{SYMCACHE}{FILES}{$$sym{FILE}{NAME}}};
 	    print $fh "file $$sym{FILE}{NAME}\n" if $prevfile ne $$sym{FILE};
 	    print $fh "echo IGPROF_SYMCHECK <$$sym{INDEX}>\\n\n";
             print $fh "info line *$$sym{FILEOFF}\n";
@@ -646,7 +649,7 @@ sub prepdata
 	my $pre = ${::}{"igprof_filter_${filter}_pre"};
 	my $post = ${::}{"igprof_filter_${filter}_post"};
 	die "$filter: no such filter known\n" if ! $pre && ! $post;
-        do { local $|=1; print "Applying filter $filter\n" } if $verbose;
+        do { local $|=1; print STDERR "Applying filter $filter\n" } if $verbose;
         &walk($pre && sub { my ($prof, $parent, $node) = @_;
 		            &$pre($$prof{SYMS}, $$prof{NODES},
 			          $parent, $node, $cnt, $freq, $ismax) },
@@ -658,7 +661,7 @@ sub prepdata
 
     # Accumulate values.  Initialise all counters in all nodes, then
     # propagate children's counts to the parent cumulative counts.
-    do { local $|=1; print "Summing counters\n" } if $verbose;
+    do { local $|=1; print STDERR "Summing counters\n" } if $verbose;
     $$ccnt[$_] = $$cnt[$_] for 0 .. scalar(@{$$prof{NODES}})-1;
     $$cfreq[$_] = $$freq[$_] for 0 .. scalar(@{$$prof{NODES}})-1;
     if ($ismax)
@@ -701,7 +704,7 @@ sub callgrind
     &prepdata ($prof, $ismax, $cnt, $ccnt, $freq, $cfreq);
     if ($demangle || $gdb)
     {
-        do { local $|=1; print "Resolving symbols\n" } if $verbose;
+        do { local $|=1; print STDERR "Resolving symbols\n" } if $verbose;
         &symremap($prof);
     }
 
@@ -777,6 +780,17 @@ sub callgrind
 
 ######################################################################
 # Generate gprof-type output analysis.
+sub max
+{
+    my $n = shift;
+    while (my $z = shift)
+    {
+	$n = $z if $z > $n;
+    }
+
+    return $n;
+}
+
 sub analyse
 {
     my ($prof) = @_;
@@ -790,7 +804,7 @@ sub analyse
     &prepdata ($prof, $ismax, $cnt, $ccnt, $freq, $cfreq);
 
     # Initialise result table.
-    do { local $|=1; print "Building call tree map\n" } if $verbose;
+    do { local $|=1; print STDERR "Building call tree map\n" } if $verbose;
     my $flat = {};
     my $seen = {};
     &walk(sub { my ($prof, $parent, $node) = @_;
@@ -840,7 +854,7 @@ sub analyse
 	  $prof);
 
     # Sort the symbols by selected criteria
-    do { local $|=1; print "Sorting\n" } if $verbose;
+    do { local $|=1; print STDERR "Sorting\n" } if $verbose;
     my $rank = 1;
     my @sorted = sort { &cmpnodes($flat, $a, $b); } keys %$flat;
     $$flat{$_}{RANK} = $rank++ for @sorted;
@@ -848,14 +862,15 @@ sub analyse
     # Resolve symbols using GDB and/or demangler
     if ($demangle || $gdb)
     {
-        do { local $|=1; print "Resolving symbols\n" } if $verbose;
+        do { local $|=1; print STDERR "Resolving symbols\n" } if $verbose;
         &symremap($prof);
     }
 
     # Output result: flat and call tree reports.
-    do { local $|=1; print "Generating report\n" } if $verbose;
+    do { local $|=1; print STDERR "Generating report\n" } if $verbose;
     my @table = ();
     my $total = $$flat{0}{CUM_KEY}[0];
+    my $totfreq = $$flat{0}{CUM_KEY}[1];
     foreach my $sym (@sorted)
     {
 	# If the row has no value, skip it.
@@ -932,7 +947,7 @@ sub analyse
     if ($output eq 'text')
     {
         print "Counter: $key\n";
-	my $maxcnt = length(&thousands("$total")); $maxcnt = 8 if $maxcnt < 8;
+	my $maxcnt = &max(8, length(&thousands("$total")), length(&thousands("$totfreq")));
 	my $maxval = $maxcnt + ($key eq 'PERF_TICKS' ? 1 : 0);
         my $basefmt = ($key eq 'PERF_TICKS' ? "\%.2f" : "\%s");
 	my $valfmt = "\%${maxval}s / \%-${maxval}s";
@@ -1030,65 +1045,130 @@ sub analyse
     }
     elsif ($output eq 'html')
     {
-	sub htmlcounter {
-	    my ($span, $value, $count) = @_;
-	    my $spanarg = $span == 1 ? "" : " colspan=\"$span\"";
-	    print "    <td$spanarg>$value&nbsp;/</td>\n";
-	    print "    <td$spanarg>$count</td>\n";
-	}
-	    
-	sub htmlrow {
-	    my ($type, $rank, $name, $lib, $liboff, $val) = @_;
-	    if ($type eq 0) {
-	        print "  <tr valign='top' bgcolor='#ddd'>\n";
-		print "    <td align='right'><a name=\"R$rank\">[$rank]</a></td>\n";
-	    } else {
-	        print "  <tr valign='top'>\n";
-		print "    <td>&nbsp;</td>\n";
-	    }
-	    if ($type eq 1) {
-		# caller/call syntax
-		&htmlcounter (1, @$_) for @$val;
-	    } else {
-		# symbol syntax
-		&htmlcounter (2, @$val);
-	    }
-	    $name =~ s/&/&amp;/g; $name =~ s/</&lt;/g; $name =~ s/>/&gt;/g;
-	    print "    <td><a href=\"#R$rank\">$name</a>";
-	    if ($type eq 0) {
-		print "</td>\n";
-	    } else {
-		print "&nbsp;[$rank]</td>\n";
-	    }
-	    $lib =~ s/&/&amp;/g; $lib =~ s/</&lt;/g; $lib =~ s/>/&gt;/g;
-	    print "    <td>$lib</td>\n" if $showlibs;
-	    print "    <td>&nbsp;</td>\n" if ! $showlibs;
-	    print "  </tr>\n";
-	}
+        my $basefmt = ($key eq 'PERF_TICKS' ? "\%.2f" : "\%s");
+	sub rcell { return ("    <td align='right'>", @_, "</td>\n") }
+	sub lcell { return ("    <td align='left'>", @_, "</td>\n") }
+	sub hname { map { my $n = $_; $n =~ s/&/&amp;/g; $n =~ s/</&lt;/g; $n =~ s/>/&gt;/g; $n =~ s/ /&nbsp;/g; $n } @_ }
+	sub hctr { my ($v0, $v1) = @_; return (&rcell($v0), &lcell($v1 ? ("/&nbsp;", $v1) : "&nbsp;")) }
 
+	print "<h1>Flat profile, cumulative $key &gt;= 1%</h1>\n";
         print "<table width='100%' border='0'>\n";
 	print "  <tr>\n";
-	print "    <th>Order</th>\n";
-	print "    <th colspan='4'>$key</td>\n";
-	print "    <th>Symbol</th>\n";
-	print "    <th>Library</th>\n";
+	print "    <th>%&nbsp;total</th>\n";
+	print "    <th>Total</th>\n";
+	print "    <th>Calls</th>\n" if $showcalls;
+	print "    <th>Paths</th>\n" if $showpaths;
+	print "    <th>Function</th>\n";
+	print "    <th>Library</th>\n" if $showlibs;
 	print "  </tr>\n";
 
+        foreach my $entry (@table)
+        {
+	    my ($rank, $name, $lib, $liboff, $pct,
+	        $cum, $self, $kids, $selfall, $cumall) = @{$$entry{SYM}};
+	    print "  <tr>\n",
+		  &rcell (sprintf("%.1f", $pct)),
+		  &rcell (&thousands(sprintf($basefmt, $cum))),
+		  ($showcalls ? &rcell(&thousands($$cumall[1])) : ()),
+		  ($showpaths ? &rcell(&thousands($$cumall[2])) : ()),
+	          &lcell("<a href='#R$rank'>", &hname ($name), "</a>"),
+	          ($showlibs ? &lcell(&hname($lib)) : ()),
+		 "  </tr>\n";
+	    last if $pct < 1;
+	}
+	print "</table>\n";
+
+	print "<h1>Flat profile, self $key &gt;= 0.01%</h1>\n";
+        print "<table width='100%' border='0'>\n";
+	print "  <tr>\n";
+	print "    <th>%&nbsp;total</th>\n";
+	print "    <th>Self</th>\n";
+	print "    <th>Calls</th>\n" if $showcalls;
+	print "    <th>Paths</th>\n" if $showpaths;
+	print "    <th>Function</th>\n";
+	print "    <th>Library</th>\n" if $showlibs;
+	print "  </tr>\n";
+
+        foreach my $entry (sort { $$b{SYM}[6] <=> $$a{SYM}[6] } @table)
+        {
+	    my ($rank, $name, $lib, $liboff, $pct,
+	        $cum, $self, $kids, $selfall, $cumall) = @{$$entry{SYM}};
+	    $pct = $self/$total*100;
+	    print "  <tr>\n",
+		  &rcell (sprintf("%.2f", $pct)),
+		  &rcell (&thousands(sprintf($basefmt, $self))),
+		  ($showcalls ? &rcell(&thousands($$selfall[1])) : ()),
+		  ($showpaths ? &rcell(&thousands($$selfall[2])) : ()),
+	          &lcell("<a href='#R$rank'>", &hname ($name), "</a>"),
+	          ($showlibs ? &lcell(&hname($lib)) : ()),
+		 "  </tr>\n";
+	    last if $pct < 0.01;
+	}
+	print "</table>\n";
+
+	print "<h1>Call tree profile, cumulative $key</h1>\n";
+        print "<table width='100%' border='0'>\n";
 	foreach my $entry (@table)
 	{
-	    print "  <tr><td colspan='7'><hr /></tr>\n";
-	    foreach my $caller (@{$$entry{CALLERS}}) {
-		&htmlrow (1, @$caller);
+	    my $spancol = (5 + ($showcalls ? 2 : 0) + ($showpaths ? 2 : 0));
+	    print "\n  <tr><td colspan='$spancol'><a name='R$$entry{SYM}[0]'></a><hr></td></tr>\n\n";
+	    print "  <tr bgcolor='#f8f8f8'>\n",
+		  "    <th>Rank</th>\n",
+		  "    <th>%&nbsp;total</th>\n",
+		  "    <th>Self</th>\n",
+		  "    <th colspan='2'>Children</th>\n",
+		  ($showcalls ? "    <th colspan='2'>Calls</th>\n" : ()),
+		  ($showpaths ? "    <th colspan='2'>Paths</th>\n" : ()),
+		  "    <th>Function</th>\n",
+		  "  </tr>\n"
+		if ! (($$entry{SYM}[0]-1) % 10);
+
+	    foreach my $caller (@{$$entry{CALLERS}})
+	    {
+		my ($rank, $name, $lib, $liboff, $pct, $val) = @$caller;
+		print "  <tr valign='top' bgcolor='#f8f2f4'>\n",
+	    	      &lcell("&nbsp;"),
+	    	      &rcell(sprintf('%.1f', $pct)),
+	    	      &rcell("&nbsp;"), # should be leaders!
+	    	      &hctr (&thousands(map { sprintf($basefmt, $_) } @{$$val[0]})),
+		      ($showcalls ? &hctr(&thousands(@{$$val[1]})) : ()),
+		      ($showpaths ? &hctr(&thousands(@{$$val[2]})) : ()),
+		      &lcell ("&nbsp;&nbsp;&nbsp;&nbsp;<a href='#R$rank'>",
+			      &hname($name), "</a>&nbsp;[$rank]",
+			      ($showlibs ? ("&nbsp;", &hname($lib)) : ())),
+		      "  </tr>\n";
 	    }
 
-	    my $rank = $$entry{SYM}[0];
-	    &htmlrow (0, @{$$entry{SYM}});
+	    my ($rank, $name, $lib, $liboff, $pct,
+	        $cum, $self, $kids, $selfall, $cumall) = @{$$entry{SYM}};
+	    print "  <tr valign='top'>\n",
+	    	  &lcell("[$rank]"),
+	    	  &rcell(sprintf('%.1f', $pct)),
+	    	  &rcell(&thousands(sprintf($basefmt, $cum))),
+	    	  &hctr (&thousands(map { sprintf($basefmt, $_) } $self, $kids)),
+		  ($showcalls ? &hctr(&thousands($$cumall[1]), "") : ()),
+		  ($showpaths ? &hctr(&thousands($$cumall[2]), "") : ()),
+		  &lcell (&hname($name),
+		          ($showlibs ? ("&nbsp;", &hname($lib)) : ())),
+		  "  </tr>\n";
 
-	    foreach my $callee (@{$$entry{CALLS}}) {
-		&htmlrow (1, @$callee);
+	    foreach my $callee (@{$$entry{CALLS}})
+	    {
+		my ($rank, $name, $lib, $liboff, $pct, $val) = @$callee;
+		print "  <tr valign='top' bgcolor='#fffeec'>\n",
+	    	      &lcell("&nbsp;"),
+	    	      &rcell(sprintf('%.1f', $pct)),
+	    	      &rcell("&nbsp;"), # should be leaders!
+	    	      &hctr (&thousands(map { sprintf($basefmt, $_) } @{$$val[0]})),
+		      ($showcalls ? &hctr(&thousands(@{$$val[1]})) : ()),
+		      ($showpaths ? &hctr(&thousands(@{$$val[2]})) : ()),
+		      &lcell ("&nbsp;&nbsp;&nbsp;&nbsp;<a href='#R$rank'>",
+			      &hname($name), "</a>&nbsp;[$rank]",
+			      ($showlibs ? ("&nbsp;", &hname($lib)) : ())),
+		      "  </tr>\n";
 	    }
 	}
-        print "</table>\n";
+	print "</table>\n";
     }
     elsif ($output eq 'xml')
     {

@@ -1,3 +1,10 @@
+2007-04-21  Lassi A. Tuura  <lat@iki.fi>
+
+	* igprof-analyse: Send verbose output to stderr, not stdout.
+	Update HTML output.  Convert library names to "true name" by
+	translating symlinks to actual paths.  Align the text output
+	correctly when counts are wider than value.
+
 2007-03-31  Lassi A. Tuura  <lat@iki.fi>
 
 	* src/IgProfTrace.h: Increase max stack depth to 400.
