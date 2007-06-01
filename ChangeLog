@@ -1,3 +1,8 @@
+2007-06-01  Lassi A. Tuura  <lat@iki.fi>
+
+	* igprof-analyse: If "abs_path" does not resolve the path name,
+	for example if the path does not exist, just use the original.
+
 2007-04-21  Lassi A. Tuura  <lat@iki.fi>
 
 	* igprof-analyse: Send verbose output to stderr, not stdout.

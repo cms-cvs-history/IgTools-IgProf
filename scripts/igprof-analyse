@@ -344,7 +344,7 @@ sub readDump
 	    elsif (/\GF(\d+)=\((.*?)\)\+(-?\d+) N=\((.*?)\)\)\+\d+\s*/goc)
 	    {
 		die if exists $filebyid{$1};
-		my $absname = length($2) ? abs_path($2) : $2;
+		my $absname = length($2) ? (abs_path($2) || $2) : $2;
 		$file = $filebyname{$absname};
 		if (! $file)
 		{
