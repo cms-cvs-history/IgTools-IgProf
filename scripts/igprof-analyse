@@ -10,6 +10,7 @@ my $gdb = 0;
 my $showlibs = 0;
 my $verbose = 0;
 my $callgrind = 0;
+my $normal_value = 1;
 my $key;
 my @allkeys;
 my $order = 1;
@@ -417,7 +418,7 @@ sub readDump
 	    {
 		$ctrname = $ctrbyid{$1} || die;
 		$ctrfreq = $2;
-		$ctrval = $3; # FIXME: Peak vs. standard
+		$ctrval = $normal_value ? $3 : $5;
 	    }
 	    elsif (/\GV(\d+)=\((.*?)\):\((\d+),(\d+)(,(\d+))?\)\s*/goc)
 	    {
@@ -425,7 +426,7 @@ sub readDump
 		$ctrname = $2;
 		$ctrbyid{$1} = $2;
 		$ctrfreq = $3;
-		$ctrval = $4; # FIXME: Peak vs. standard
+		$ctrval = $normal_value ? $4 : $6;
 	    }
 	    elsif (/\G;LK=\(0x[\da-z]+,\d+\)\s*/goc)
 	    {
@@ -1246,11 +1247,12 @@ sub usage
 {
     print STDERR "igprof-analyse\n",
 		 "  [-r/--report KEY[,KEY]...] [-o/--order ORDER]\n",
+		 "  [-p/--paths] [-c/--calls] [--value peak|normal]\n",
 		 "  [-F/--filter-module FILE] [ -f FILTER[,FILTER...] ]\n",
                  "  [-nf/--no-filter] [-lf/--list-filters]\n",
 		 "  { [-x/--xml] | [-h/--html] | [-t/--text] }\n",
 		 "  [--libs] [--demangle] [--gdb] [-v/--verbose]\n",
-		 "  [-p/--paths] [-c/--calls] [--] [FILE]...\n";
+		 "  [--] [FILE]...\n";
 }
 
 my @userfilters = ();
@@ -1269,6 +1271,11 @@ while (scalar @ARGV)
 	push(@filters, 'malloc') if @filters && substr($key, 0, 4) eq 'MEM_';
 	push(@filters, 'gcc_pool_alloc') if @filters && $key eq 'MEM_LIVE';
     }
+    elsif ($ARGV[0] eq '--value' && scalar @ARGV > 1)
+    { $normal_value = ($ARGV[1] eq 'peak' ? 0
+		       : $ARGV[1] eq 'normal' ? 1
+		       : die "Unexpected --value argument: $ARGV[1]");
+      shift(@ARGV); shift(@ARGV); }
     elsif ($ARGV[0] eq '--order' || $ARGV[0] eq '-o')
     { $order = $ARGV[1] eq 'ascending' ? -1 : 1; shift (@ARGV); shift (@ARGV); }
     elsif ($ARGV[0] eq '--filter-file' || $ARGV[0] eq '-F')

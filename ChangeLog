@@ -1,3 +1,22 @@
+2007-06-06  Lassi A. Tuura  <lat@iki.fi>
+
+	Add back support for peak counter value reporting.
+
+	* igprof-analyse: Add --value option to select analysis of normal
+	counter value vs. peak value.
+
+	* IgProfTrace.cc (<buffer-size-parameters>): Define unsigned.
+	(push): Allow combined ACQUIRE | RELEASE records, for "merge".
+	(merge): Add a partial fix to handling peak counter value.  For
+	now add an artificial ACQUIRE | RELEASE resource record to bump up
+	the peak counter value.  This is not entirely correct in that it
+	occurs after resources are released so the peak counter may not be
+	adjusted sufficiently high between buffers; but it is better than
+	what was there, live with the inaccuracy for now.
+
+	* IgProf.cc (dumpProfile): Dump counters that have peak value set
+	even if ticks is zero.  Fixes bug in reporting MEM_LIVE peak.
+
 2007-06-01  Lassi A. Tuura  <lat@iki.fi>
 
 	* igprof-analyse: If "abs_path" does not resolve the path name,

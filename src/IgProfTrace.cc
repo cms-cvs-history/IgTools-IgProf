@@ -16,13 +16,13 @@
 //<<<<<< PUBLIC FUNCTION DEFINITIONS                                    >>>>>>
 //<<<<<< MEMBER FUNCTION DEFINITIONS                                    >>>>>>
 
-static const int BINARY_HASH = 128;
-static const int SYMBOL_HASH_SMALL = 4*1024;
-static const int SYMBOL_HASH_LARGE = 32*1024;
-static const int RESOURCE_HASH_SMALL = 2*1024;
-static const int RESOURCE_HASH_LARGE = 256*1024;
-static const int RESOURCE_HASH_USELARGE = 4*1024*1024;
-static const int MINIMUM_SIZE
+static const unsigned int BINARY_HASH = 128;
+static const unsigned int SYMBOL_HASH_SMALL = 4*1024;
+static const unsigned int SYMBOL_HASH_LARGE = 32*1024;
+static const unsigned int RESOURCE_HASH_SMALL = 2*1024;
+static const unsigned int RESOURCE_HASH_LARGE = 256*1024;
+static const unsigned int RESOURCE_HASH_USELARGE = 4*1024*1024;
+static const unsigned int MINIMUM_SIZE
     = (IgProfTrace::MAX_DEPTH * sizeof (IgProfTrace::StackCache)
        + RESOURCE_HASH_SMALL * sizeof (IgProfTrace::PoolIndex)
        + IgProfTrace::MAX_DEPTH * (sizeof (IgProfTrace::Stack)
@@ -535,7 +535,7 @@ IgProfTrace::push (void **stack, int depth, Record *recs, int nrecs)
 
 	// Handle resource record for release.  Note these don't have
 	// any call stack so "stackframe" refers to the call tree root.
-	else if (recs[i].type & RELEASE)
+	if (recs[i].type & RELEASE)
 	    release (h, recs[i]);
     }
 
@@ -631,9 +631,7 @@ IgProfTrace::merge (void *data)
 	{
 	    Counter *c = fromEnd<Counter> (hother, *idx);
 	    *idx = c->next;
-	    if (! c->ticks)
-		continue;
-	    if (! c->resources)
+	    if (c->ticks && ! c->resources)
 	    {
 		if (rec == NREC)
 		    pushextend (callstack-depth, depth-1, recs, rec);
@@ -644,7 +642,7 @@ IgProfTrace::merge (void *data)
 		recs[rec].ticks = c->ticks;
 		rec++;
 	    }
-	    else
+	    else if (c->ticks)
 	    {
 		PoolIndex *ridx = &c->resources;
 		while (*ridx)
@@ -662,6 +660,24 @@ IgProfTrace::merge (void *data)
 
 		    *ridx = r->nextlive;
 		}
+	    }
+
+	    // Adjust peak counter if necessary.  This is strictly
+	    // speaking not correct: we should be updating the peak
+	    // counter _before_ releasing resources, otherwise we may
+	    // update it too late to have an effect.  For now live
+	    // with the deficiency; consider possible corrections.
+	    if (c->def->type == TICK_PEAK && c->peak > c->value)
+	    {
+		    if (rec == NREC)
+			pushextend (callstack-depth, depth-1, recs, rec);
+
+		    recs[rec].type = COUNT | ACQUIRE | RELEASE;
+		    recs[rec].def = c->def;
+		    recs[rec].amount = c->peak - c->value;
+		    recs[rec].ticks = 1;
+		    recs[rec].resource = ~((Address) 0);
+		    rec++;
 	    }
 	}
 

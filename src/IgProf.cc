@@ -726,7 +726,7 @@ dumpProfile (FILE *output, IgProfTrace::Stack *node, IgProfDumpInfo &info)
 	while (cidx)
 	{
 	    IgProfTrace::Counter *ctr = s_masterbuf->getCounter (cidx);
-	    if (ctr->ticks)
+	    if (ctr->ticks || ctr->peak)
 	    {
 		if (ctr->def->id >= 0)
 		    fprintf (output, " V%d:(%ju,%ju,%ju)",
