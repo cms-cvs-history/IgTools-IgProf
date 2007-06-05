@@ -1,5 +1,9 @@
 2007-06-06  Lassi A. Tuura  <lat@iki.fi>
 
+	* igprof-func, igprof-segment: New utility scripts.
+
+2007-06-06  Lassi A. Tuura  <lat@iki.fi>
+
 	Add back support for peak counter value reporting.
 
 	* igprof-analyse: Add --value option to select analysis of normal
