@@ -1,11 +1,11 @@
 //<<<<<< INCLUDES                                                       >>>>>>
 
-#include "Ig_Tools/IgProf/src/IgProf.h"
-#include "Ig_Tools/IgProf/src/IgProfPool.h"
-#include "Ig_Tools/IgProf/src/IgProfAtomic.h"
-#include "Ig_Tools/IgHook/interface/IgHook.h"
-#include "Ig_Tools/IgHook/interface/IgHookTrace.h"
-#include "Ig_Tools/IgHook/interface/IgHookLiveMap.h"
+#include "IgTools/IgProf/src/IgProf.h"
+#include "IgTools/IgProf/src/IgProfPool.h"
+#include "IgTools/IgProf/src/IgProfAtomic.h"
+#include "IgTools/IgHook/interface/IgHook.h"
+#include "IgTools/IgHook/interface/IgHookTrace.h"
+#include "IgTools/IgHook/interface/IgHookLiveMap.h"
 #include <sys/types.h>
 #include <sys/time.h>
 #include <cstdlib>

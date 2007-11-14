@@ -1,6 +1,6 @@
 //<<<<<< INCLUDES                                                       >>>>>>
 
-#include "Ig_Tools/IgProf/src/IgProfPool.h"
+#include "IgTools/IgProf/src/IgProfPool.h"
 #include <unistd.h>
 #include <sys/fcntl.h>
 #include <sys/stat.h>

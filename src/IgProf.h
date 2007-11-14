@@ -3,8 +3,8 @@
 
 //<<<<<< INCLUDES                                                       >>>>>>
 
-# include "Ig_Tools/IgHook/interface/IgHook.h"
-# include "Ig_Tools/IgProf/src/IgProfMacros.h"
+# include "IgTools/IgHook/interface/IgHook.h"
+# include "IgTools/IgProf/src/IgProfMacros.h"
 
 //<<<<<< PUBLIC DEFINES                                                 >>>>>>
 //<<<<<< PUBLIC CONSTANTS                                               >>>>>>

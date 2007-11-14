@@ -3,7 +3,7 @@
 
 //<<<<<< INCLUDES                                                       >>>>>>
 
-# include "Ig_Tools/IgProf/interface/config.h"
+# include "IgTools/IgProf/interface/config.h"
 
 //<<<<<< PUBLIC DEFINES                                                 >>>>>>
 //<<<<<< PUBLIC CONSTANTS                                               >>>>>>

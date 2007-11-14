@@ -1,8 +1,8 @@
 //<<<<<< INCLUDES                                                       >>>>>>
 
-#include "Ig_Tools/IgProf/src/IgProfTrace.h"
-#include "Ig_Tools/IgProf/src/IgProf.h"
-#include "Ig_Tools/IgHook/interface/IgHookTrace.h"
+#include "IgTools/IgProf/src/IgProfTrace.h"
+#include "IgTools/IgProf/src/IgProf.h"
+#include "IgTools/IgHook/interface/IgHookTrace.h"
 #include <memory.h>
 #include <stdio.h>
 

@@ -1,7 +1,7 @@
-<use name=Ig_Tools/IgHook>
+<use name=IgTools/IgHook>
 <Flags NO_LIB_CHECKING=yes>
 <Flags CXXFLAGS="-g -DIGPROF_DEBUG=0">
 <export>
- <use name=Ig_Tools/IgHook>
+ <use name=IgTools/IgHook>
  <lib name=IgProf>
 </export>

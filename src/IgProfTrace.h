@@ -3,8 +3,8 @@
 
 //<<<<<< INCLUDES                                                       >>>>>>
 
-# include "Ig_Tools/IgProf/src/IgProfMacros.h"
-# include "Ig_Tools/IgProf/src/IgProf.h"
+# include "IgTools/IgProf/src/IgProfMacros.h"
+# include "IgTools/IgProf/src/IgProf.h"
 # include <limits.h>
 # include <stdint.h>
 

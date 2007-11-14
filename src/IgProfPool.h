@@ -3,7 +3,7 @@
 
 //<<<<<< INCLUDES                                                       >>>>>>
 
-# include "Ig_Tools/IgProf/src/IgProfTrace.h"
+# include "IgTools/IgProf/src/IgProfTrace.h"
 # include <pthread.h>
 
 //<<<<<< PUBLIC DEFINES                                                 >>>>>>

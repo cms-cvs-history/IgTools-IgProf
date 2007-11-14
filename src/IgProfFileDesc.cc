@@ -1,10 +1,10 @@
 //<<<<<< INCLUDES                                                       >>>>>>
 
-#include "Ig_Tools/IgProf/src/IgProfFileDesc.h"
-#include "Ig_Tools/IgProf/src/IgProf.h"
-#include "Ig_Tools/IgProf/src/IgProfPool.h"
-#include "Ig_Tools/IgHook/interface/IgHook.h"
-#include "Ig_Tools/IgHook/interface/IgHookTrace.h"
+#include "IgTools/IgProf/src/IgProfFileDesc.h"
+#include "IgTools/IgProf/src/IgProf.h"
+#include "IgTools/IgProf/src/IgProfPool.h"
+#include "IgTools/IgHook/interface/IgHook.h"
+#include "IgTools/IgHook/interface/IgHookTrace.h"
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
