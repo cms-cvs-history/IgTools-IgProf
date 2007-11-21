@@ -3,5 +3,5 @@
 <Flags CXXFLAGS="-g -DIGPROF_DEBUG=0">
 <export>
  <use name=IgTools/IgHook>
- <lib name=IgProf>
+ <lib name=IgToolsIgProf>
 </export>

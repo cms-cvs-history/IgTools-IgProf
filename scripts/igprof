@@ -111,7 +111,7 @@ case $(uname) in
     DYLD_INSERT_LIBRARIES=./libIgProf.dylib
     export DYLD_INSERT_LIBRARIES ;;
   * )
-    LD_PRELOAD=${LD_PRELOAD:+${LD_PRELOAD}:}libIgProf.so;
+    LD_PRELOAD=${LD_PRELOAD:+${LD_PRELOAD}:}libIgToolsIgProf.so;
     export LD_PRELOAD ;;
 esac
 export IGPROF
