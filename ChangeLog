@@ -1,3 +1,9 @@
+2007-11-21  Peter Elmer <Peter.Elmer@cern.ch> 
+
+        * Updates to build with CMSSW (following the old patch for this, but
+          updating "Ig_Tools" to "IgTools")
+        * Add .admin/developers files
+
 2007-11-14  Peter Elmer <Peter.Elmer@cern.ch>
 
         * Modify includes and BuildFiles to refer to "IgTools" rather 
