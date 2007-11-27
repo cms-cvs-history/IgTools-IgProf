@@ -29,6 +29,10 @@ IGPROF_LIBHOOK (3, int, dopthread_sigmask, _main,
 	        (int how, sigset_t *newmask, sigset_t *oldmask),
 		(how, newmask, oldmask),
 	        "pthread_sigmask", 0, 0)
+IGPROF_LIBHOOK (3, int, dosigaction, _main,
+	        (int signum, const struct sigaction *act, struct sigaction *oact),
+		(signum, act, oact),
+	        "sigaction", 0, 0)
 
 // Data for this profiler module
 static IgProfTrace::CounterDef	s_ct_ticks	= { "PERF_TICKS", IgProfTrace::TICK, -1 };
@@ -152,10 +156,9 @@ IgProfPerf::initialize (void)
     else if (s_itimer == ITIMER_PROF)
 	IgProf::debug ("Perf: profiling process time\n");
 
-    // Enable profiler.  On old GNU/Linux systems, also start a
-    // signal handling worker thread that mirrors the profiling
-    // signal to all real user-threads.
+    // Enable profiler.
     IgHook::hook (dopthread_sigmask_hook_main.raw);
+    IgHook::hook (dosigaction_hook_main.raw);
     IgProf::debug ("Performance profiler enabled\n");
 
     enableSignalHandler ();
@@ -178,13 +181,43 @@ static int
 dopthread_sigmask (IgHook::SafeData<igprof_dopthread_sigmask_t> &hook,
 		   int how, sigset_t *newmask,  sigset_t *oldmask)
 {
-    if (newmask && (how == SIG_BLOCK || how == SIG_SETMASK))
+    bool prevented = false;
+    if (newmask && how == SIG_BLOCK && sigismember(newmask, s_signal))
     {
-	sigdelset (newmask, SIGALRM);
-	sigdelset (newmask, SIGVTALRM);
-	sigdelset (newmask, SIGPROF);
+	sigdelset (newmask, s_signal);
+	prevented = true;
     }
+    else if (newmask && how == SIG_SETMASK && !sigismember(newmask, s_signal))
+    {
+	sigaddset (newmask, s_signal);
+	prevented = true;
+    }
+
+    if (prevented)
+	IgProf::debug("preventing blocking of profiling signal %d\n", s_signal);
+
     return hook.chain (how, newmask, oldmask);
+}
+
+//////////////////////////////////////////////////////////////////////
+// Trap fiddling with the profiling signal.
+static int
+dosigaction (IgHook::SafeData<igprof_dosigaction_t> &hook,
+	     int signum, const struct sigaction *act, struct sigaction *oact)
+{
+    struct sigaction sa;
+    if (signum == s_signal
+	&& act
+	&& act->sa_handler != (sighandler_t) &profileSignalHandler)
+    {
+	IgProf::debug("preventing profiling signal %d override\n", s_signal);
+        sigemptyset (&sa.sa_mask);
+        sa.sa_handler = (sighandler_t) &profileSignalHandler;
+        sa.sa_flags = SA_RESTART | SA_SIGINFO;
+	act = &sa;
+    }
+
+    return hook.chain (signum, act, oact);
 }
 
 //////////////////////////////////////////////////////////////////////
