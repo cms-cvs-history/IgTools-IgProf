@@ -1,3 +1,9 @@
+2007-11-27  Lassi A. Tuura  <lat@iki.fi>
+
+	* IgProf.cc: Use "s_activated", not "s_initialized" to protect
+	against use of the profiler when it is unsafe to do so.  Avoids
+	crash risk at exit time if the application abandons threads.
+
 2007-11-21  Peter Elmer <Peter.Elmer@cern.ch> 
 
         * Updates to build with CMSSW.  Following the old patch for this,

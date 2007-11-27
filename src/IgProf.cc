@@ -416,7 +416,7 @@ IgProf::pool (int moduleid)
     // otherwise a per-thread pool.
     pthread_t thread = pthread_self ();
     IgProfPoolAlloc *pools = s_pools;
-    if (! s_initialized || (s_pthreads && thread == s_readthread))
+    if (! s_activated || (s_pthreads && thread == s_readthread))
 	pools = 0;
     else if (thread != s_mainthread && s_pools [moduleid].perthread)
 	pools = (IgProfPoolAlloc *) pthread_getspecific (s_poolkey);
@@ -443,7 +443,7 @@ IgProf::lock (void)
 	return true;
     }
 
-    return s_initialized;
+    return s_activated;
 }
 
 /** Release profiling system lock after successful call to #lock().  */
@@ -800,7 +800,7 @@ threadWrapper (void *arg)
     delete wrapped;
 
     // Report the thread and enable per-thread profiling pools.
-    if (s_initialized)
+    if (s_activated)
     {
         IgProf::debug ("captured thread id 0x%lx for profiling (%p, %p)\n",
 		       (unsigned long) pthread_self (),
@@ -817,7 +817,7 @@ threadWrapper (void *arg)
     void *dummy = 0; IgHookTrace::stacktrace (&dummy, 1);
 
     // Run per-profiler initialisation.
-    if (s_initialized)
+    if (s_activated)
     {
         IgProfCallList				&l = threadinits ();
         IgProfCallList::reverse_iterator	i = l.rbegin ();
@@ -830,7 +830,7 @@ threadWrapper (void *arg)
     void *ret = (*start_routine) (start_arg);
 
     // Harvest thread profile result.
-    if (s_initialized)
+    if (s_activated)
     {
         IgProf::debug ("leaving thread id 0x%lx from profiling (%p, %p)\n",
 		       (unsigned long) pthread_self (),
@@ -911,6 +911,7 @@ IgProfExitDump::~IgProfExitDump (void)
 		   (unsigned long) pthread_self ());
     IgProf::exitThread (true);
     s_activated = false;
+    s_enabled = 0;
     s_quitting = 1;
     if (s_pthreads) pthread_join (s_readthread, 0);
     IgProf::disable ();
