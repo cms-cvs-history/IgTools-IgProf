@@ -1,5 +1,11 @@
 2007-11-27  Lassi A. Tuura  <lat@iki.fi>
 
+	* igprof-analyse: Resolve pure file names against $PATH.  This
+	usually just the binary names, and it is better to attempt the
+	path search than not to find the file at all for symbol check.
+
+2007-11-27  Lassi A. Tuura  <lat@iki.fi>
+
 	* IgProf.cc: Use "s_activated", not "s_initialized" to protect
 	against use of the profiler when it is unsafe to do so.  Avoids
 	crash risk at exit time if the application abandons threads.

@@ -345,7 +345,19 @@ sub readDump
 	    elsif (/\GF(\d+)=\((.*?)\)\+(-?\d+) N=\((.*?)\)\)\+\d+\s*/goc)
 	    {
 		die if exists $filebyid{$1};
-		my $absname = length($2) ? (abs_path($2) || $2) : $2;
+		my $origname = $2;
+		if (index($origname, "/") == -1)
+		{
+		    foreach my $p (split(":", $ENV{PATH}))
+		    {
+		        next if ! -f "$p/$origname";
+			$origname = "$p/$origname";
+			last;
+		    }
+		}
+		my $absname = $origname;
+		$absname = (abs_path($origname) || $origname)
+		    if length($origname);
 		$file = $filebyname{$absname};
 		if (! $file)
 		{
