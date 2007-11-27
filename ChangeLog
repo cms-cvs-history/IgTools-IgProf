@@ -1,21 +1,21 @@
 2007-11-21  Peter Elmer <Peter.Elmer@cern.ch> 
 
-        * Updates to build with CMSSW (following the old patch for this, but
-          updating "Ig_Tools" to "IgTools")
-        * Add .admin/developers files
+        * Updates to build with CMSSW.  Following the old patch for this,
+	  but updating "Ig_Tools" to "IgTools".
+        * Add .admin/developers files.
 
 2007-11-14  Peter Elmer <Peter.Elmer@cern.ch>
 
-        * Modify includes and BuildFiles to refer to "IgTools" rather 
-          than "Ig_Tools"
+        * Modify includes and BuildFiles to refer to "IgTools" rather than
+	"Ig_Tools".
 
 2007-11-13  Peter Elmer <Peter.Elmer@cern.ch>
 
-        * Migrate Ig_Tools/{IgHook,IgTrace,IgProf} into the CMSSW CVS 
-          repository from the IGNOMINY repo, changing the subsystem name
-          to "IgTools" to conform to the CMSSW conventions. The initial
-          import is tagged "pe20071114-CMSSW-import" and the revision
-          history prior to that should be maintained.
+        * Migrate Ig_Tools/{IgHook,IgTrace,IgProf} into the CMSSW CVS
+	repository from the IGNOMINY repo, changing the subsystem name to
+	"IgTools" to conform to the CMSSW conventions. The initial import
+	is tagged "pe20071114-CMSSW-import" and the revision history prior
+	to that should be maintained.
 
 2007-06-06  Lassi A. Tuura  <lat@iki.fi>
 
