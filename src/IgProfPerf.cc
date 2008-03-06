@@ -7,7 +7,6 @@
 #include <cstring>
 #include <signal.h>
 #include <sys/time.h>
-#include <unistd.h>
 
 #ifdef __APPLE__
 typedef sig_t sighandler_t;
@@ -173,20 +172,15 @@ static int
 dopthread_sigmask(IgHook::SafeData<igprof_dopthread_sigmask_t> &hook,
 		  int how, sigset_t *newmask,  sigset_t *oldmask)
 {
-  bool prevented = false;
-  if (newmask && how == SIG_BLOCK && sigismember(newmask, s_signal))
+  if (newmask
+      && (how == SIG_BLOCK || how == SIG_SETMASK)
+      && sigismember(newmask, s_signal))
   {
+    IgProf::debug("pthread_sigmask(): prevented profiling signal"
+		  " %d from being blocked in thread 0x%lx\n",
+		  s_signal, (unsigned long) pthread_self());
     sigdelset(newmask, s_signal);
-    prevented = true;
   }
-  else if (newmask && how == SIG_SETMASK && !sigismember(newmask, s_signal))
-  {
-    sigaddset(newmask, s_signal);
-    prevented = true;
-  }
-
-  if (prevented)
-    IgProf::debug("preventing blocking of profiling signal %d\n", s_signal);
 
   return hook.chain(how, newmask, oldmask);
 }
@@ -201,7 +195,9 @@ dosigaction(IgHook::SafeData<igprof_dosigaction_t> &hook,
       && act
       && act->sa_handler != (sighandler_t) &profileSignalHandler)
   {
-    IgProf::debug("preventing profiling signal %d override\n", s_signal);
+    IgProf::debug("sigaction(): prevented profiling signal"
+		  " %d from being overridden in thread 0x%lx\n",
+		  s_signal, (unsigned long) pthread_self());
     sigemptyset(&sa.sa_mask);
     sa.sa_handler = (sighandler_t) &profileSignalHandler;
     sa.sa_flags = SA_RESTART | SA_SIGINFO;

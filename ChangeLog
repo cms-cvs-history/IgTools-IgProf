@@ -1,5 +1,10 @@
 2008-03-06  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProfPerf.cc: Fix SIG_SETMASK logic; this sets the signal mask,
+	not the signals allowed, so force the profiling signal out of the
+	mask rather than forcing it in.  Improve debug output when signal
+	handling overrides take place.
+
 	* IgProf.cc (enabled, enable, disable): Make it more obvious that
 	the profiling engine is disabled when thread-local flag is
 	modified, but does not yet exist (while the thread is created).
