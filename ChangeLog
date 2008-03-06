@@ -1,3 +1,18 @@
+2008-03-06  Lassi A. Tuura  <lat@iki.fi>
+
+	* Re-implement the handling of internal profiling buffers to
+	reduce memory consumption for memory-heavy applications.
+	Not entirely functional yet.
+	* IgProfBuffer.h, IgProfBuffer.cc: New buffer core.
+	* IgProfSymCache.h, IgProfSymCache.cc: Separate symbol caches.
+	* IgProfTrace.h, IgProfTrace.cc: Simplify, just grow the buffer
+	piece-meal as more data is added.  Remove ability to relocate the
+	buffer and to do symbol mappings; we do the latter at the end.
+	* IgProfMem.cc, IgProfFileDesc.cc, IgProfPerf.cc: Adjust.
+	* IgProf.h, IgProf.cc: Adjust.  Provide separate global and
+	per-thread enabled/disabled states.
+	* IgProfPool.h, IgProfPool.cc: Removed.
+
 2007-11-27  Lassi A. Tuura  <lat@iki.fi>
 
 	* igprof-analyse: Resolve pure file names against $PATH.  This

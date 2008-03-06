@@ -1,5 +1,3 @@
-//<<<<<< INCLUDES                                                       >>>>>>
-
 #include "IgTools/IgProf/src/IgProfPerf.h"
 #include "IgTools/IgProf/src/IgProf.h"
 #include "IgTools/IgProf/src/IgProfPool.h"
@@ -11,28 +9,20 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-//<<<<<< PRIVATE DEFINES                                                >>>>>>
-//<<<<<< PRIVATE CONSTANTS                                              >>>>>>
-//<<<<<< PRIVATE TYPES                                                  >>>>>>
-
 #ifdef __APPLE__
 typedef sig_t sighandler_t;
 #endif
 
-//<<<<<< PRIVATE VARIABLE DEFINITIONS                                   >>>>>>
-//<<<<<< PUBLIC VARIABLE DEFINITIONS                                    >>>>>>
-//<<<<<< CLASS STRUCTURE INITIALIZATION                                 >>>>>>
-//<<<<<< PRIVATE FUNCTION DEFINITIONS                                   >>>>>>
-
+// -------------------------------------------------------------------
 // Traps for this profiler module
-IGPROF_LIBHOOK (3, int, dopthread_sigmask, _main,
-	        (int how, sigset_t *newmask, sigset_t *oldmask),
-		(how, newmask, oldmask),
-	        "pthread_sigmask", 0, 0)
-IGPROF_LIBHOOK (3, int, dosigaction, _main,
-	        (int signum, const struct sigaction *act, struct sigaction *oact),
-		(signum, act, oact),
-	        "sigaction", 0, 0)
+IGPROF_LIBHOOK(3, int, dopthread_sigmask, _main,
+	       (int how, sigset_t *newmask, sigset_t *oldmask),
+	       (how, newmask, oldmask),
+	       "pthread_sigmask", 0, 0)
+IGPROF_LIBHOOK(3, int, dosigaction, _main,
+	       (int signum, const struct sigaction *act, struct sigaction *oact),
+	       (signum, act, oact),
+	       "sigaction", 0, 0)
 
 // Data for this profiler module
 static IgProfTrace::CounterDef	s_ct_ticks	= { "PERF_TICKS", IgProfTrace::TICK, -1 };
@@ -42,183 +32,184 @@ static int			s_itimer	= ITIMER_PROF;
 static int			s_moduleid	= -1;
 
 /** Performance profiler signal handler, SIGPROF or SIGALRM depending
-    on the current profiler mode.  Record a tick for the current program
-    location.  Assumes the signal handler is registered for the correct
-    thread.  Skip ticks when this profiler is not enabled.  */
+    on the current profiler mode.  Record a tick for the current
+    program location.  Assumes the signal handler is registered for
+    the correct thread.  Skip ticks when this profiler is not
+    enabled.  */
 static void
-profileSignalHandler (int /* nsig */, siginfo_t * /* info */, void * /* ctx */)
+profileSignalHandler(int /* nsig */, siginfo_t * /* info */, void * /* ctx */)
 {
-    if (! IgProf::enabled ())
-	return;
+  if (! IgProf::enabled(false))
+    return;
 
-    void		*addresses [IgProfTrace::MAX_DEPTH];
-    int			depth = IgHookTrace::stacktrace (addresses, IgProfTrace::MAX_DEPTH);
-    IgProfTrace::Record	entry = { IgProfTrace::COUNT, &s_ct_ticks, 1, 1, 0 };
-    IgProfPool		*pool = IgProf::pool (s_moduleid);
+  IgProfTrace *buf = IgProf::buffer(s_moduleid);
+  if (! buf)
+    return;
 
-    // Drop two bottom frames, three top ones (stacktrace, me, signal frame).
-    if (pool) pool->push (addresses+3, depth-4, &entry, 1);
+  void			*addresses [IgProfTrace::MAX_DEPTH];
+  int			depth = IgHookTrace::stacktrace(addresses, IgProfTrace::MAX_DEPTH);
+  IgProfTrace::Record	entry = { IgProfTrace::COUNT, &s_ct_ticks, 1, 1, 0 };
+
+  // Drop two bottom frames, three top ones (stacktrace, me, signal frame).
+  buf->push(addresses+3, depth-4, &entry, 1);
 }
 
 /** Enable profiling timer.  You should have called
     #enableSignalHandler() before calling this function.
     This needs to be executed in every thread to be profiled. */
 static void
-enableTimer (void)
+enableTimer(void)
 {
-    itimerval interval = { { 0, 10000 }, { 0, 10000 } };
-    setitimer (s_itimer, &interval, 0);
+  itimerval interval = { { 0, 10000 }, { 0, 10000 } };
+  setitimer(s_itimer, &interval, 0);
 }
 
 /** Enable profiling signal handler.  */
 static void
-enableSignalHandler (void)
+enableSignalHandler(void)
 {
-    sigset_t profset;
-    sigemptyset (&profset);
-    sigaddset (&profset, s_signal);
-    if (IgProf::isMultiThreaded ())
-        pthread_sigmask (SIG_UNBLOCK, &profset, 0);
-    else
-        sigprocmask (SIG_UNBLOCK, &profset, 0);
+  sigset_t profset;
+  sigemptyset(&profset);
+  sigaddset(&profset, s_signal);
+  if (IgProf::isMultiThreaded())
+    pthread_sigmask(SIG_UNBLOCK, &profset, 0);
+  else
+    sigprocmask(SIG_UNBLOCK, &profset, 0);
 
-    struct sigaction sa;
-    sigemptyset (&sa.sa_mask);
-    sa.sa_handler = (sighandler_t) &profileSignalHandler;
-    sa.sa_flags = SA_RESTART | SA_SIGINFO;
-    sigaction (s_signal, &sa, 0);
+  struct sigaction sa;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_handler = (sighandler_t) &profileSignalHandler;
+  sa.sa_flags = SA_RESTART | SA_SIGINFO;
+  sigaction(s_signal, &sa, 0);
 }
 
-//<<<<<< PUBLIC FUNCTION DEFINITIONS                                    >>>>>>
-//<<<<<< MEMBER FUNCTION DEFINITIONS                                    >>>>>>
-
+// -------------------------------------------------------------------
 /** Possibly start performance profiler.  */
 void
-IgProfPerf::initialize (void)
+IgProfPerf::initialize(void)
 {
-    if (s_initialized) return;
-    s_initialized = true;
+  if (s_initialized) return;
+  s_initialized = true;
 
-    const char	*options = IgProf::options ();
-    bool	enable = false;
+  const char	*options = IgProf::options();
+  bool		enable = false;
 
-    while (options && *options)
+  while (options && *options)
+  {
+    while (*options == ' ' || *options == ',')
+      ++options;
+
+    if (! strncmp(options, "perf", 4))
     {
-	while (*options == ' ' || *options == ',')
-	    ++options;
-
-	if (! strncmp (options, "perf", 4))
+      enable = true;
+      options += 4;
+      while (*options)
+      {
+	if (! strncmp(options, ":real", 5))
 	{
-	    enable = true;
-	    options += 4;
-	    while (*options)
-	    {
-		if (! strncmp (options, ":real", 5))
-		{
-		    s_signal = SIGALRM;
-		    s_itimer = ITIMER_REAL;
-		    options += 5;
-		}
-		else if (! strncmp (options, ":user", 5))
-		{
-		    s_signal = SIGVTALRM;
-		    s_itimer = ITIMER_VIRTUAL;
-		    options += 5;
-		}
-		else if (! strncmp (options, ":process", 7))
-		{
-		    s_signal = SIGPROF;
-		    s_itimer = ITIMER_PROF;
-		    options += 7;
-		}
-		else
-		    break;
-	    }
+	  s_signal = SIGALRM;
+	  s_itimer = ITIMER_REAL;
+	  options += 5;
+	}
+	else if (! strncmp(options, ":user", 5))
+	{
+	  s_signal = SIGVTALRM;
+	  s_itimer = ITIMER_VIRTUAL;
+	  options += 5;
+	}
+	else if (! strncmp(options, ":process", 7))
+	{
+	  s_signal = SIGPROF;
+	  s_itimer = ITIMER_PROF;
+	  options += 7;
 	}
 	else
-	    options++;
-
-	while (*options && *options != ',' && *options != ' ')
-	    options++;
+	  break;
+      }
     }
+    else
+      options++;
 
-    if (! enable)
-	return;
+    while (*options && *options != ',' && *options != ' ')
+      options++;
+  }
 
-    if (! IgProf::initialize (&s_moduleid, &IgProfPerf::threadInit, true))
-	return;
+  if (! enable)
+    return;
 
-    IgProf::disable ();
-    if (s_itimer == ITIMER_REAL)
-	IgProf::debug ("Perf: measuring real time\n");
-    else if (s_itimer == ITIMER_VIRTUAL)
-	IgProf::debug ("Perf: profiling user time\n");
-    else if (s_itimer == ITIMER_PROF)
-	IgProf::debug ("Perf: profiling process time\n");
+  if (! IgProf::initialize(&s_moduleid, &IgProfPerf::threadInit, true))
+    return;
 
-    // Enable profiler.
-    IgHook::hook (dopthread_sigmask_hook_main.raw);
-    IgHook::hook (dosigaction_hook_main.raw);
-    IgProf::debug ("Performance profiler enabled\n");
+  IgProf::disable(true);
+  if (s_itimer == ITIMER_REAL)
+    IgProf::debug("Perf: measuring real time\n");
+  else if (s_itimer == ITIMER_VIRTUAL)
+    IgProf::debug("Perf: profiling user time\n");
+  else if (s_itimer == ITIMER_PROF)
+    IgProf::debug("Perf: profiling process time\n");
 
-    enableSignalHandler ();
-    enableTimer ();
-    IgProf::enable ();
+  // Enable profiler.
+  IgHook::hook(dopthread_sigmask_hook_main.raw);
+  IgHook::hook(dosigaction_hook_main.raw);
+  IgProf::debug("Performance profiler enabled\n");
+
+  enableSignalHandler();
+  enableTimer();
+  IgProf::enable(true);
 }
 
 /** Thread setup function.  */
 void
-IgProfPerf::threadInit (void)
+IgProfPerf::threadInit(void)
 {
-   // Enable profiling in this thread.
-   enableSignalHandler ();
-   enableTimer ();
+  // Enable profiling in this thread.
+  enableSignalHandler();
+  enableTimer();
 }
 
-//////////////////////////////////////////////////////////////////////
+// -------------------------------------------------------------------
 // Trap fiddling with thread signal masks
 static int
-dopthread_sigmask (IgHook::SafeData<igprof_dopthread_sigmask_t> &hook,
-		   int how, sigset_t *newmask,  sigset_t *oldmask)
+dopthread_sigmask(IgHook::SafeData<igprof_dopthread_sigmask_t> &hook,
+		  int how, sigset_t *newmask,  sigset_t *oldmask)
 {
-    bool prevented = false;
-    if (newmask && how == SIG_BLOCK && sigismember(newmask, s_signal))
-    {
-	sigdelset (newmask, s_signal);
-	prevented = true;
-    }
-    else if (newmask && how == SIG_SETMASK && !sigismember(newmask, s_signal))
-    {
-	sigaddset (newmask, s_signal);
-	prevented = true;
-    }
+  bool prevented = false;
+  if (newmask && how == SIG_BLOCK && sigismember(newmask, s_signal))
+  {
+    sigdelset(newmask, s_signal);
+    prevented = true;
+  }
+  else if (newmask && how == SIG_SETMASK && !sigismember(newmask, s_signal))
+  {
+    sigaddset(newmask, s_signal);
+    prevented = true;
+  }
 
-    if (prevented)
-	IgProf::debug("preventing blocking of profiling signal %d\n", s_signal);
+  if (prevented)
+    IgProf::debug("preventing blocking of profiling signal %d\n", s_signal);
 
-    return hook.chain (how, newmask, oldmask);
+  return hook.chain(how, newmask, oldmask);
 }
 
-//////////////////////////////////////////////////////////////////////
 // Trap fiddling with the profiling signal.
 static int
-dosigaction (IgHook::SafeData<igprof_dosigaction_t> &hook,
-	     int signum, const struct sigaction *act, struct sigaction *oact)
+dosigaction(IgHook::SafeData<igprof_dosigaction_t> &hook,
+	    int signum, const struct sigaction *act, struct sigaction *oact)
 {
-    struct sigaction sa;
-    if (signum == s_signal
-	&& act
-	&& act->sa_handler != (sighandler_t) &profileSignalHandler)
-    {
-	IgProf::debug("preventing profiling signal %d override\n", s_signal);
-        sigemptyset (&sa.sa_mask);
-        sa.sa_handler = (sighandler_t) &profileSignalHandler;
-        sa.sa_flags = SA_RESTART | SA_SIGINFO;
-	act = &sa;
-    }
+  struct sigaction sa;
+  if (signum == s_signal
+      && act
+      && act->sa_handler != (sighandler_t) &profileSignalHandler)
+  {
+    IgProf::debug("preventing profiling signal %d override\n", s_signal);
+    sigemptyset(&sa.sa_mask);
+    sa.sa_handler = (sighandler_t) &profileSignalHandler;
+    sa.sa_flags = SA_RESTART | SA_SIGINFO;
+    act = &sa;
+  }
 
-    return hook.chain (signum, act, oact);
+  return hook.chain(signum, act, oact);
 }
 
-//////////////////////////////////////////////////////////////////////
-static bool autoboot = (IgProfPerf::initialize (), true);
+// -------------------------------------------------------------------
+static bool autoboot = (IgProfPerf::initialize(), true);
