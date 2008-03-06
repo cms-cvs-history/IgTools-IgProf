@@ -1,5 +1,14 @@
 2008-03-06  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProf.cc (enable, disable): Protect against activity for
+	thread-local actions before the thread has been fully initialised.
+	* IgProfTrace.h (freestart_, freeend_): Remove unused fields.
+	* IgProfTrace.cc (mergeFrom): Fix various data traversal bugs.
+	(debugDumpStack): Print more details about which value is which.
+	(debugDump): Do print out the stack dump.
+
+2008-03-06  Lassi A. Tuura  <lat@iki.fi>
+
 	* Re-implement the handling of internal profiling buffers to
 	reduce memory consumption for memory-heavy applications.
 	Not entirely functional yet.

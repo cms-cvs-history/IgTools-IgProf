@@ -355,7 +355,7 @@ IgProf::enable(bool globally)
   if (! globally && s_pthreads)
   {
     IgProfAtomic *flag = (IgProfAtomic *) pthread_getspecific(s_flagkey);
-    IgProfAtomic newval = IgProfAtomicInc(flag);
+    IgProfAtomic newval = flag ? IgProfAtomicInc(flag) : -1;
     return newval > 0 && s_enabled > 0;
   }
   else
@@ -374,7 +374,7 @@ IgProf::disable(bool globally)
   if (! globally && s_pthreads)
   {
     IgProfAtomic *flag = (IgProfAtomic *) pthread_getspecific(s_flagkey);
-    IgProfAtomic newval = IgProfAtomicDec(flag);
+    IgProfAtomic newval = flag ? IgProfAtomicDec(flag) : -1;
     return newval >= 0 && s_enabled > 0;
   }
   else

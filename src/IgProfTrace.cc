@@ -299,7 +299,7 @@ IgProfTrace::mergeFrom(IgProfTrace &other)
   void	 *callstack[MAX_DEPTH+1];
 
   callstack[MAX_DEPTH] = stack_->address; // null really
-  mergeFrom(0, stack_, &callstack[MAX_DEPTH], recs);
+  mergeFrom(0, other.stack_, &callstack[MAX_DEPTH], recs);
 
   if (other.options_ & OptShared)
     pthread_mutex_unlock(&other.mutex_);
@@ -311,10 +311,8 @@ void
 IgProfTrace::mergeFrom(int depth, Stack *frame, void **callstack, Record *recs)
 {
   // Process counters at this call stack level.
-  Counter *c = frame->counters;
   int rec = 0;
-
-  while (c)
+  for (Counter *c = frame->counters; c; c = c->next)
   {
     if (c->ticks && ! c->resources)
     {
@@ -385,24 +383,24 @@ void
 IgProfTrace::debugDumpStack(Stack *s, int depth)
 {
   INDENT(2*depth);
-  fprintf(stderr, "STACK %d %p %p %p %p\n",
+  fprintf(stderr, "STACK %d frame=%p addr=%p next=%p kids=%p\n",
 	  depth, s, s->address, s->sibling, s->children);
 
   for (Counter *c = s->counters; c; c = c->next)
   {
     INDENT(2*depth+1);
-    fprintf(stderr, "COUNTER %p %s %ju %ju %ju\n",
+    fprintf(stderr, "COUNTER ctr=%p %s %ju %ju %ju\n",
 	    c, c->def->name, c->ticks, c->value, c->peak);
 
     for (Resource *r = c->resources; r; r = r->nextlive)
     {
       INDENT(2*depth+2);
-      fprintf(stderr, "RESOURCE %p (%p %p) %ju %ju\n",
+      fprintf(stderr, "RESOURCE res=%p (prev=%p next=%p) %ju %ju\n",
 	      r, r->prevlive, r->nextlive, r->resource, r->size);
     }
   }
 
-  for (Stack *kid = s->children; kid; kid = s->sibling)
+  for (Stack *kid = s->children; kid; kid = kid->sibling)
     debugDumpStack(kid, depth+1);
 }
 
@@ -413,9 +411,7 @@ IgProfTrace::debugDump(void)
   fprintf (stderr, " OPTIONS:   %d\n", options_);
   fprintf (stderr, " RESTABLE:  %p\n", restable_);
   fprintf (stderr, " CALLCACHE: %p\n", callcache_);
-  fprintf (stderr, " FREESTART: %p\n", freestart_);
-  fprintf (stderr, " FREEEND:   %p\n", freeend_);
 
-  // debugDumpStack(stack_, 0);
+  debugDumpStack(stack_, 0);
   // debugDumpResources();
 }

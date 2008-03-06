@@ -205,8 +205,6 @@ private:
   StackCache		*callcache_;	//< Start of address cache.
   Resource		*resfree_;	//< Resource free list.
   Stack			*stack_;	//< Stack root.
-  char			*freestart_;	//< Next free address.
-  char			*freeend_;	//< Last free address.
 
   // Unavailable copy constructor, assignment operator
   IgProfTrace(IgProfTrace &);
