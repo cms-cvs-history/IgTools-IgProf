@@ -340,7 +340,7 @@ IgProf::enabled(bool globally)
   if (! globally && s_pthreads)
   {
     IgProfAtomic *flag = (IgProfAtomic *) pthread_getspecific(s_flagkey);
-    return *flag > 0 && s_enabled > 0;
+    return flag ? *flag > 0 && s_enabled > 0 : false;
   }
   else
     return s_enabled > 0;
@@ -355,8 +355,7 @@ IgProf::enable(bool globally)
   if (! globally && s_pthreads)
   {
     IgProfAtomic *flag = (IgProfAtomic *) pthread_getspecific(s_flagkey);
-    IgProfAtomic newval = flag ? IgProfAtomicInc(flag) : -1;
-    return newval > 0 && s_enabled > 0;
+    return flag ? (IgProfAtomicInc(flag) > 0 && s_enabled > 0) : false;
   }
   else
   {
@@ -374,8 +373,7 @@ IgProf::disable(bool globally)
   if (! globally && s_pthreads)
   {
     IgProfAtomic *flag = (IgProfAtomic *) pthread_getspecific(s_flagkey);
-    IgProfAtomic newval = flag ? IgProfAtomicDec(flag) : -1;
-    return newval >= 0 && s_enabled > 0;
+    return flag ? (IgProfAtomicDec(flag) >= 0 && s_enabled > 0) : false;
   }
   else
   {

@@ -1,5 +1,11 @@
 2008-03-06  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProf.cc (enabled, enable, disable): Make it more obvious that
+	the profiling engine is disabled when thread-local flag is
+	modified, but does not yet exist (while the thread is created).
+
+2008-03-06  Lassi A. Tuura  <lat@iki.fi>
+
 	* IgProf.cc (enable, disable): Protect against activity for
 	thread-local actions before the thread has been fully initialised.
 	* IgProfTrace.h (freestart_, freeend_): Remove unused fields.
