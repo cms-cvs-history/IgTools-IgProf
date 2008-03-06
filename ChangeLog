@@ -1,5 +1,7 @@
 2008-03-06  Lassi A. Tuura  <lat@iki.fi>
 
+	* BuildFile: Remove optimisation kill override.
+
 	* IgProfPerf.cc: Fix SIG_SETMASK logic; this sets the signal mask,
 	not the signals allowed, so force the profiling signal out of the
 	mask rather than forcing it in.  Improve debug output when signal
