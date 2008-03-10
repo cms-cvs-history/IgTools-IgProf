@@ -1,6 +1,6 @@
 #include "IgTools/IgProf/src/IgProfMem.h"
 #include "IgTools/IgProf/src/IgProf.h"
-#include "IgTools/IgProf/src/IgProfPool.h"
+#include "IgTools/IgProf/src/IgProfTrace.h"
 #include "IgTools/IgHook/interface/IgHook.h"
 #include "IgTools/IgHook/interface/IgHookTrace.h"
 #include <cstdlib>
@@ -111,8 +111,8 @@ remove (void *ptr)
 // -------------------------------------------------------------------
 /** Initialise memory profiling.  Traps various system calls to keep track
     of memory usage, and if requested, leaks.  */
-void
-IgProfMem::initialize(void)
+static void
+initialize(void)
 {
   if (s_initialized) return;
   s_initialized = true;
@@ -303,4 +303,4 @@ dofree(IgHook::SafeData<igprof_dofree_t> &hook, void *ptr)
 }
 
 // -------------------------------------------------------------------
-static bool autoboot = (IgProfMem::initialize(), true);
+static bool autoboot = (initialize(), true);

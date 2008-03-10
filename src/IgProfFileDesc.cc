@@ -1,6 +1,5 @@
-#include "IgTools/IgProf/src/IgProfFileDesc.h"
 #include "IgTools/IgProf/src/IgProf.h"
-#include "IgTools/IgProf/src/IgProfPool.h"
+#include "IgTools/IgProf/src/IgProfTrace.h"
 #include "IgTools/IgHook/interface/IgHook.h"
 #include "IgTools/IgHook/interface/IgHookTrace.h"
 #include <cstdlib>
@@ -99,8 +98,8 @@ remove (int fd)
 // -------------------------------------------------------------------
 /** Initialise file descriptor profiling.  Traps various system
     calls to keep track of usage, and if requested, leaks.  */
-void
-IgProfFileDesc::initialize(void)
+static void
+initialize(void)
 {
   if (s_initialized) return;
   s_initialized = true;
@@ -305,4 +304,4 @@ doaccept(IgHook::SafeData<igprof_doaccept_t> &hook,
 }
 
 // -------------------------------------------------------------------
-static bool autoboot = (IgProfFileDesc::initialize(), true);
+static bool autoboot = (initialize(), true);

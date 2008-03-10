@@ -1,6 +1,6 @@
 #include "IgTools/IgProf/src/IgProfPerf.h"
 #include "IgTools/IgProf/src/IgProf.h"
-#include "IgTools/IgProf/src/IgProfPool.h"
+#include "IgTools/IgProf/src/IgProfTrace.h"
 #include "IgTools/IgHook/interface/IgHook.h"
 #include "IgTools/IgHook/interface/IgHookTrace.h"
 #include <cstdlib>
@@ -82,10 +82,19 @@ enableSignalHandler(void)
   sigaction(s_signal, &sa, 0);
 }
 
+/** Thread setup function.  */
+static void
+threadInit(void)
+{
+  // Enable profiling in this thread.
+  enableSignalHandler();
+  enableTimer();
+}
+
 // -------------------------------------------------------------------
 /** Possibly start performance profiler.  */
-void
-IgProfPerf::initialize(void)
+static void
+initialize(void)
 {
   if (s_initialized) return;
   s_initialized = true;
@@ -136,7 +145,7 @@ IgProfPerf::initialize(void)
   if (! enable)
     return;
 
-  if (! IgProf::initialize(&s_moduleid, &IgProfPerf::threadInit, true))
+  if (! IgProf::initialize(&s_moduleid, &threadInit, true))
     return;
 
   IgProf::disable(true);
@@ -155,15 +164,6 @@ IgProfPerf::initialize(void)
   enableSignalHandler();
   enableTimer();
   IgProf::enable(true);
-}
-
-/** Thread setup function.  */
-void
-IgProfPerf::threadInit(void)
-{
-  // Enable profiling in this thread.
-  enableSignalHandler();
-  enableTimer();
 }
 
 // -------------------------------------------------------------------
@@ -208,4 +208,4 @@ dosigaction(IgHook::SafeData<igprof_dosigaction_t> &hook,
 }
 
 // -------------------------------------------------------------------
-static bool autoboot = (IgProfPerf::initialize(), true);
+static bool autoboot = (initialize(), true);

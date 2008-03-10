@@ -1,3 +1,9 @@
+2008-03-10  Lassi A. Tuura  <lat@iki.fi>
+
+	* IgProfFileDesc.h, IgProfMem.h, IgProfPerf.h: Remove as obsolete.
+	* IgProfFileDesc.cc, IgProfMem.cc, IgProfPerf.cc: Adjust to
+	removed headers, those above and IgProfPool.h.
+
 2008-03-06  Lassi A. Tuura  <lat@iki.fi>
 
 	* BuildFile: Remove optimisation kill override.
