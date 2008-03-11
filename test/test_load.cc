@@ -37,7 +37,7 @@ void b1(int i) { i % 20 > 10 ? b2(i) : b3(i); }
 void *
 b (void *)
 {
-    for (int j = 0; j < 100; j++)
+    for (int j = 0; j < 10; j++)
     {
         std::cerr << "b(" << getpid () << "[" << pthread_self ()
 		  << "], " << j << ")\n";
@@ -56,7 +56,7 @@ main (int /*argc*/, char ** /*argv*/)
     for (int i = 0; i < NTHREADS; ++i)
         pthread_create (&threads [i], 0, b, 0);
 
-    for (int i = 0; i < 100; i++)
+    for (int i = 0; i < 10; i++)
 	a (i);	
 
     for (int i = 0; i < NTHREADS; ++i)

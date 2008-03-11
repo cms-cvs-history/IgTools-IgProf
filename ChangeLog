@@ -14,6 +14,8 @@
 	information when a resource conflict has been found.
 	* IgProfTrace.h (OptSymbolAddress): Remove unused flag.
 
+	* test/test_load.cc: Run 10 rounds to avoid excessive run time.
+
 2008-03-10  Lassi A. Tuura  <lat@iki.fi>
 
 	* IgProfFileDesc.h, IgProfMem.h, IgProfPerf.h: Remove as obsolete.
