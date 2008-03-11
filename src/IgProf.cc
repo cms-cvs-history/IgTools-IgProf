@@ -225,8 +225,7 @@ IgProf::initialize(int *moduleid, void (*threadinit)(void), bool perthread)
 
   if (! s_masterbuf)
   {
-    int opts = (IgProfTrace::OptResources | IgProfTrace::OptSymbolAddress);
-    s_masterbuf = new (s_masterbufdata) IgProfTrace(opts);
+    s_masterbuf = new (s_masterbufdata) IgProfTrace(IgProfTrace::OptResources);
     s_symcache = new (s_symcachedata) IgProfSymCache;
   }
 
@@ -340,7 +339,7 @@ IgProf::enabled(bool globally)
   if (! globally && s_pthreads)
   {
     IgProfAtomic *flag = (IgProfAtomic *) pthread_getspecific(s_flagkey);
-    return flag ? *flag > 0 && s_enabled > 0 : false;
+    return flag ? (*flag > 0 && s_enabled > 0) : false;
   }
   else
     return s_enabled > 0;

@@ -7,6 +7,9 @@
 	be needed in dorealloc() but it isn't obvious how to apply the fix
 	there because of the API definition; calls to realloc() are rare.
 
+	* IgProf.cc: Stop using obsolete OptSymbolAddress.
+	(enabled): Add some parentheses for readability.
+
 2008-03-10  Lassi A. Tuura  <lat@iki.fi>
 
 	* IgProfFileDesc.h, IgProfMem.h, IgProfPerf.h: Remove as obsolete.
