@@ -10,6 +10,10 @@
 	* IgProf.cc: Stop using obsolete OptSymbolAddress.
 	(enabled): Add some parentheses for readability.
 
+	* IgProfTrace.cc (acquireResource): Dump more complete stack
+	information when a resource conflict has been found.
+	* IgProfTrace.h (OptSymbolAddress): Remove unused flag.
+
 2008-03-10  Lassi A. Tuura  <lat@iki.fi>
 
 	* IgProfFileDesc.h, IgProfMem.h, IgProfPerf.h: Remove as obsolete.

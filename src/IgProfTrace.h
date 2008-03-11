@@ -172,8 +172,7 @@ public:
 
   // Buffer configuration options.
   static const int OptResources = 1;	 //< Buffer stores resources.
-  static const int OptSymbolAddress = 2; //< Map addresses to symbols.
-  static const int OptShared = 4;        //< Multiple threads share the buffer.
+  static const int OptShared = 2;        //< Multiple threads share the buffer.
 
   IgProfTrace(int opts);
   ~IgProfTrace(void);

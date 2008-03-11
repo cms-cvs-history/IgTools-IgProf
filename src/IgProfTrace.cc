@@ -1,4 +1,5 @@
 #include "IgTools/IgProf/src/IgProfTrace.h"
+#include "IgTools/IgHook/interface/IgHookTrace.h"
 #include <memory.h>
 #include <stdio.h>
 
@@ -173,7 +174,6 @@ void
 IgProfTrace::acquireResource(Record &rec, Counter *ctr)
 {
   IGPROF_ASSERT(ctr);
-  IGPROF_ASSERT(link);
 
   // Locate the resource in the hash table.
   Resource  **rlink;
@@ -184,8 +184,17 @@ IgProfTrace::acquireResource(Record &rec, Counter *ctr)
 		  ctr->def->name, rec.resource, res->size, this);
 #if IGPROF_DEBUG
     int depth = 0;
-    for (Stack *s = ctr->stack; s; s = s->parent)
-      IgProf::debug ("  [%u] %10p\n", ++depth, s->address);
+    for (Stack *s = ctr->frame; s; s = s->parent)
+    {
+      const char  *sym = 0;
+      const char  *lib = 0;
+      int         offset = 0;
+      int         liboffset = 0;
+
+      IgHookTrace::symbol(s->address, sym, lib, offset, liboffset);
+      IgProf::debug ("  [%u] %10p %s + %d [%s + %d]\n", ++depth, s->address,
+		     sym ? sym : "?", offset, lib ? lib : "?", liboffset);
+    }
 #endif
 
     // Release the resource, then proceed as if we hadn't found it.
