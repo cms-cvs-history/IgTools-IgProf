@@ -297,8 +297,8 @@ static void
 dofree(IgHook::SafeData<igprof_dofree_t> &hook, void *ptr)
 {
   IgProf::disable(false);
-  (*hook.chain)(ptr);
   remove(ptr);
+  (*hook.chain)(ptr);
   IgProf::enable(false);
 }
 

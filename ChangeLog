@@ -1,3 +1,12 @@
+2008-03-11  Lassi A. Tuura  <lat@iki.fi>
+
+	* IgProfMem.cc (dofree): Release the memory resource first before
+	invoking "free()".  Avoids the situation where the memory is freed
+	to the heap and another thread manages to allocate it before the
+	current thread manages to record it released.  A similar fix would
+	be needed in dorealloc() but it isn't obvious how to apply the fix
+	there because of the API definition; calls to realloc() are rare.
+
 2008-03-10  Lassi A. Tuura  <lat@iki.fi>
 
 	* IgProfFileDesc.h, IgProfMem.h, IgProfPerf.h: Remove as obsolete.
