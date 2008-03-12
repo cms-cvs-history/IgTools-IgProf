@@ -1,4 +1,3 @@
-#include "IgTools/IgProf/src/IgProfMem.h"
 #include "IgTools/IgProf/src/IgProf.h"
 #include "IgTools/IgProf/src/IgProfTrace.h"
 #include "IgTools/IgHook/interface/IgHook.h"

@@ -1,3 +1,7 @@
+2008-03-12  Lassi A. Tuura  <lat@iki.fi>
+
+	* IgProfMem.cc, IgProfPerf.cc: Truly remove obsolete headers.
+
 2008-03-11  Lassi A. Tuura  <lat@iki.fi>
 
 	* IgProfMem.cc (dofree): Release the memory resource first before
