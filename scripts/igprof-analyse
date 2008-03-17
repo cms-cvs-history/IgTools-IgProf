@@ -1267,7 +1267,7 @@ sub analyse
             print IGCALL "<table width='100%' border='0'>\n";
 	    my $spancol = (5 + ($showcalls ? 2 : 0) + ($showpaths ? 2 : 0));
 	    print IGCALL "\n  <tr><td colspan='$spancol'><a name='R$$entry{SYM}[0]'></a><hr></td></tr>\n\n";
-	    print IGCALL "  <tr bgcolor='#f8f8f8'>\n",
+	    print IGCALL "  <tr bgcolor='#e8e8e8'>\n",
  		         "    <th>Rank</th>\n",
               		 "    <th>%&nbsp;total</th>\n",
 	              	 "    <th>Self</th>\n",
@@ -1280,7 +1280,7 @@ sub analyse
 	    foreach my $caller (@{$$entry{CALLERS}})
 	    {
 		my ($rank, $name, $lib, $liboff, $pct, $val) = @$caller;
-		print IGCALL "  <tr valign='top' bgcolor='#f8f2f4'>\n",
+		print IGCALL "  <tr valign='top' bgcolor='#e8e2e4'>\n",
 	    	      &lcell("&nbsp;"),
 	    	      &rcell(sprintf('%.1f', $pct)),
 	    	      &rcell("&nbsp;"), # should be leaders!
@@ -1307,7 +1307,7 @@ sub analyse
 	    foreach my $callee (@{$$entry{CALLS}})
 	    {
 		my ($rank, $name, $lib, $liboff, $pct, $val) = @$callee;
-		print IGCALL "  <tr valign='top' bgcolor='#fffeec'>\n",
+		print IGCALL "  <tr valign='top' bgcolor='#efeedc'>\n",
 	    	      &lcell("&nbsp;"),
 	    	      &rcell(sprintf('%.1f', $pct)),
 	    	      &rcell("&nbsp;"), # should be leaders!
