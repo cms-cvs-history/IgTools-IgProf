@@ -338,7 +338,7 @@ void
 printProgress (void)
 {
 	static int counter = 0;
-	counter = ++counter % 20000;
+	counter = ++counter % 10000;
 	if (! counter)
 		std::cerr << ".";
 }
@@ -1021,8 +1021,6 @@ IgProfAnalyzerApplication::selectCountedValue (const std::string &normalValue,
 }
 
 // Regular expressions matching the symbol information header.
-static lat::Regexp fnRE ("FN(\\d+)\\+\\d+\\s*");
-static lat::Regexp fnWithDefinitionRegExp ("FN(\\d+)=\\(");
 static lat::Regexp vRE ("V(\\d+):\\((\\d+),(\\d+)(,(\\d+))?\\)\\s*");
 static lat::Regexp vWithDefinitionRE ("V(\\d+)=\\((.*?)\\):\\((\\d+),(\\d+)(,(\\d+))?\\)\\s*");
 static lat::Regexp leakRE (";LK=\\(0x[\\da-z]+,\\d+\\)\\s*");
@@ -1050,12 +1048,52 @@ parseStackLine(const char *line,
 }
 
 static bool
-parseFunctionRef()
-{}
+parseFunctionRef(const char *lineStart, Position &pos, int &symid) 
+{
+	const char *line = lineStart + pos ();
+	// Matches "FN(\\d+)\\+\\d+\\s*" and sets symid = $1
+	if (line[0] != 'F' && line[1] != 'N')
+	{ return false; }
+	char *endptr = 0;
+	int fnRef = strtol (line+2, &endptr, 10);
+	if (endptr == line + 2)
+	{return false; }
+	if (*endptr != '+' )
+	{ return false; }
+	char *endptr2 = 0;
+	int offset = strtol (endptr, &endptr2, 10);
+	if (endptr == endptr2)
+	{ return false; }
+	
+	symid = fnRef;
+
+	while (*endptr2 == ' ' || *endptr2 == '\t')
+	{ ++endptr2; }
+	pos (endptr2 - lineStart);
+	return true;
+}
 
 static bool
-parseFuntionDef()
-{}
+parseFunctionDef(const char *lineStart, Position &pos, int &symid)
+{
+	const char *line = lineStart + pos ();
+	// Matches FN(\\d+)=\\( and sets symid = $1
+	if (line[0] != 'F' && line[1] != 'N')
+	{ return false; }
+	char *endptr = 0;
+	int fnRef = strtol (line+2, &endptr, 10);
+	if (endptr == line + 2)
+	{return false; }
+	if (*endptr++ != '=')
+	{ return false; }
+	if (*endptr++ != '(')
+	{ return false; }
+	
+	symid = fnRef;
+
+	pos (endptr - lineStart);
+	return true;
+}
 
 static bool
 parseCounterVal()
@@ -1124,27 +1162,21 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 		ProfileInfo::SymbolInfo *sym;
 		match.reset (); 
 
+		int symid = -1;
+		
 		if (line.size() <= pos())
 		{
 			printSyntaxError (line, filename, lineCount, pos ());
 			exit (1);
 		}
-		else  if (line.size() > pos()+2
-				  && line[pos()] == 'F'
-				  && line[pos()+1] == 'N'
-				  && fnRE.match (line, pos (), 0, &match))
+		else  if (line.size () > pos()+2
+				  && parseFunctionRef (line.c_str (), pos, symid))
 		{
-			int symid = toInt (match.matchString (line, 1));
-			pos (match.matchEnd ());
 			sym = symbolsFactory.getSymbol (symid);
 		}
 		else if (line.size() > pos()+2
-				 && line[pos()] == 'F'
-				 && line[pos()+1] == 'N'
-				 && fnWithDefinitionRegExp.match (line, pos (), 0, &match))
+				 && parseFunctionDef (line.c_str (), pos, symid))
 		{
-			int symid = toInt (match.matchString (line, 1));
-			pos (match.matchEnd ());
 			sym = symbolsFactory.createSymbolInfo (line, symid, pos, lineCount);
 		}
 		else
