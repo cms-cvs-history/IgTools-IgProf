@@ -246,20 +246,19 @@ private:
 	const ArgsList::const_iterator m_end;
 };
 
+
 class FileOpener 
 {
 public:
 	static const int BUFFER_SIZE=10000000; 
-	FileOpener (const std::string &filename)
-		: m_file (filename),
-		  m_posInBuffer (BUFFER_SIZE),
+	FileOpener (void)
+		: m_posInBuffer (BUFFER_SIZE),
 		  m_lastInBuffer (BUFFER_SIZE),
 		  m_eof (false)
 	{
-		m_streams.push_back (new lat::StorageInputStream (&m_file));
-		m_streams.push_back (new lat::BufferInputStream (m_streams.back ()));
 	}
-	~FileOpener (void)
+	
+	virtual ~FileOpener (void)
 	{
 		for (StreamsIterator i = m_streams.begin ();
 			 i != m_streams.end ();
@@ -267,11 +266,16 @@ public:
 		{
 			delete *i;
 		}
-		m_file.close ();
 	}
+	
 	lat::InputStream &stream (void)
 	{
 		return *m_streams.back ();
+	}
+
+	void addStream (lat::InputStream *stream)
+	{
+		m_streams.push_back (stream);
 	}
 	
 	std::string readLine (void)
@@ -308,12 +312,30 @@ public:
 private:
 	typedef std::list<lat::InputStream *> Streams; 
 	typedef Streams::iterator StreamsIterator;
-	lat::File m_file;
 	Streams m_streams;
 	char m_buffer[BUFFER_SIZE];
 	int m_posInBuffer;
 	int m_lastInBuffer;
 	int m_eof;
+};
+
+class FileReader : public FileOpener
+{
+public:
+	FileReader (const std::string &filename)
+	: FileOpener (),
+	  m_file (filename)
+	{	
+		lat::StorageInputStream *storageInput = new lat::StorageInputStream (&m_file);
+		addStream (storageInput);
+		addStream (new lat::BufferInputStream (storageInput));
+	}
+	~FileReader (void)
+	{
+		m_file.close ();
+	}
+private:
+	lat::File m_file;
 };
 
 class PathCollection

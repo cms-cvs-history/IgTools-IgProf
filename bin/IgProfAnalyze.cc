@@ -877,37 +877,45 @@ public:
 		return *this;
 	}
 	TextStreamer &operator<< (const char *text)
-	{
-		m_file->write (text, strlen (text));
-	}
+	{ m_file->write (text, strlen (text)); }
 private:
 	lat::File *m_file;
 };
 
-void symremap (ProfileInfo &prof, bool usegdb, bool demangle)
-{
-	if (usegdb)
-	{
-		lat::Filename tmpFilename ("/tmp/igprof-analyse.gdb.XXXXXXXX");
-		lat::File *file = lat::TempFile::file (tmpFilename);
-		lat::Filename prevfile ("");
-		TextStreamer out (file);
-		out << "set width 10000\n";
-				
-		for (ProfileInfo::Syms::const_iterator i = prof.syms ().begin ();
-			 i != prof.syms ().end ();
-			 i++)
-		{
-			ASSERT (*i);
-			ProfileInfo::SymbolInfo &sym = **i;
-			if ((! sym.FILE) || (! sym.FILEOFF) || (sym.FILE->NAME != ""))
-				continue;
-			
-		}
-	}
-		ASSERT (false);
-}
-
+//void symremap (ProfileInfo &prof, bool usegdb, bool demangle)
+//{
+//	if (usegdb)
+//	{
+//		lat::Filename tmpFilename ("/tmp/igprof-analyse.gdb.XXXXXXXX");
+//		lat::File *file = lat::TempFile::file (tmpFilename);
+//		lat::Filename prevfile ("");
+//		TextStreamer out (file);
+//		out << "set width 10000\n";
+//
+//		for (ProfileInfo::Syms::const_iterator i = prof.syms ().begin ();
+//			 i != prof.syms ().end ();
+//			 i++)
+//		{
+//			ASSERT (*i);
+//			ProfileInfo::SymbolInfo *symPtr = *i;
+//			ProfileInfo::SymbolInfo &sym = *symPtr;
+//			if ((! sym.FILE) || (! sym.FILEOFF) || (sym.FILE->NAME != ""))
+//				continue;
+//			if (sym.FILE->NAME != prevfile)
+//				out << "file " << sym.FILE->NAME << "\n";
+//			out << "echo IGPROF_SYMCHECK <" << toString (int(symPtr)) << ">\\n\n";
+//			out << "info line *" << toString (sym.FILEOFF);
+//			prevfile = sym.FILE->NAME; 
+//		}
+//		file->close ();
+//		
+//		lat::Argz args (std::string ("gdb --batch --command=") + std::string (tmpFilename));
+//		lat::SubProcess gdb (args.argz (), SubProcess::First);
+//	}
+//	
+//		ASSERT (false);
+//}
+//
 class MallocFilter : public IgProfFilter
 {
 public:
@@ -1012,25 +1020,55 @@ IgProfAnalyzerApplication::selectCountedValue (const std::string &normalValue,
 	return toInt (m_config->normalValue () ? normalValue : selfValue);
 }
 
-static int
-warpToStackframeForLine (std::vector<ProfileInfo::NodeInfo *> &nodestack, 
-						 const std::string &line)
-{
-	static lat::Regexp cRE ("^C(\\d+)\\s*");
-	static lat::RegexpMatch match;
+// Regular expressions matching the symbol information header.
+static lat::Regexp cRE ("^C(\\d+)\\s*");
+static lat::Regexp fnRE ("FN(\\d+)\\+\\d+\\s*");
+static lat::Regexp fnWithDefinitionRegExp ("FN(\\d+)=\\(");
+static lat::Regexp vRE ("V(\\d+):\\((\\d+),(\\d+)(,(\\d+))?\\)\\s*");
+static lat::Regexp vWithDefinitionRE ("V(\\d+)=\\((.*?)\\):\\((\\d+),(\\d+)(,(\\d+))?\\)\\s*");
+static lat::Regexp leakRE (";LK=\\(0x[\\da-z]+,\\d+\\)\\s*");
 
-	// Get the position in the node stack and position yourself at the
-	// Correct level.
-	if (! cRE.match (line, 0, 0, &match))
+static int
+parseStackLine(const char *line, 
+			   std::vector<ProfileInfo::NodeInfo *> &nodestack)
+{
+	// Matches the same as matching "^C(\\d+)\\s*" and resize nodestack to $1.
+	if ((line[0] == 0) || line[0] != 'C')
 		return 0;
-	int stackPosition = toInt (match.matchString (line, 1)) - 1;
-	ASSERT (stackPosition <= nodestack.size ());
-	ASSERT (stackPosition >= 0);
-	nodestack.resize (stackPosition);
-	return match.matchEnd ();
+	char *endptr = 0;
+	int newPosition = strtol (line+1, &endptr, 10) - 1;
+	if (endptr == line+1)
+	{ return 0; }
+
+	do 
+	{ ++endptr; } while (*endptr == ' ' || *endptr == '\t');
+	
+	ASSERT (newPosition <= nodestack.size ());
+	ASSERT (newPosition >= 0);
+	nodestack.resize (newPosition);
+	
+	return endptr - line;
 }
 
+static bool
+parseFunctionRef()
+{}
 
+static bool
+parseFuntionDef()
+{}
+
+static bool
+parseCounterVal()
+{}
+
+static bool
+parseCounterDef()
+{}
+
+static bool
+parseLeak()
+{}
 
 void
 IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filename)
@@ -1044,15 +1082,15 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 	lat::File f (filename);
 	if (m_config->verbose ())
 		std::cerr << " X" << filename << std::endl;
-	FileOpener reader (filename);
+	FileReader reader (filename);
 	checkHeaders (reader.readLine ());
-	// Regular expressions matching the symbol information header.
-	lat::Regexp fnRE ("FN(\\d+)\\+\\d+\\s*");
-	lat::Regexp fnWithDefinitionRegExp ("FN(\\d+)=\\(");
-	lat::Regexp vRE ("V(\\d+):\\((\\d+),(\\d+)(,(\\d+))?\\)\\s*");
-	lat::Regexp vWithDefinitionRE ("V(\\d+)=\\((.*?)\\):\\((\\d+),(\\d+)(,(\\d+))?\\)\\s*");
-	lat::Regexp leakRE (";LK=\\(0x[\\da-z]+,\\d+\\)\\s*");
 
+//	fnRE.study();
+//	fnWithDefinitionRegExp.study();
+//	vRE.study();
+//	vWithDefinitionRE.study();
+//	leakRE.study();
+//
 	PathCollection paths ("PATH");
 	
 	int lineCount = 1;
@@ -1076,7 +1114,7 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 		printProgress ();
 		std::string line = reader.readLine ();
 	
-		int newPos = warpToStackframeForLine (nodestack, line);
+		int newPos = parseStackLine (line.c_str (), nodestack);
 		if (! newPos) 
 			continue;
 		
@@ -1087,13 +1125,24 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 		ProfileInfo::SymbolInfo *sym;
 		match.reset (); 
 
-		if (fnRE.match (line, pos (), 0, &match))
+		if (line.size() <= pos())
+		{
+			printSyntaxError (line, filename, lineCount, pos ());
+			exit (1);
+		}
+		else  if (line.size() > pos()+2
+				  && line[pos()] == 'F'
+				  && line[pos()+1] == 'N'
+				  && fnRE.match (line, pos (), 0, &match))
 		{
 			int symid = toInt (match.matchString (line, 1));
 			pos (match.matchEnd ());
 			sym = symbolsFactory.getSymbol (symid);
 		}
-		else if (fnWithDefinitionRegExp.match (line, pos (), 0, &match))
+		else if (line.size() > pos()+2
+				 && line[pos()] == 'F'
+				 && line[pos()+1] == 'N'
+				 && fnWithDefinitionRegExp.match (line, pos (), 0, &match))
 		{
 			int symid = toInt (match.matchString (line, 1));
 			pos (match.matchEnd ());
@@ -1130,27 +1179,35 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 
 			if (line.size () == pos())
 			{ break; }
-			else if (vRE.match (line, pos (), 0, &match))
+			else if (line.size() >= pos()+2
+					 && line[pos()] == 'V'
+					 && vRE.match (line, pos (), 0, &match))
 			{
-				lat::StringList matchResults = match.matchStrings (line);
 				// FIXME: should really do:
 				// $ctrname = $ctrbyid{$1} || die;
-				ctrid = toInt (matchResults[1]);
-				ctrfreq = toInt (matchResults[2]);
-				ctrval = this->selectCountedValue (matchResults[3], matchResults[5]);
+				ctrid = toInt (match.matchString (line, 1));
+				ctrfreq = toInt (match.matchString (line, 2));
+				ctrval = this->selectCountedValue (match.matchString (line, 3),
+				 								   match.matchString (line, 5));
 			}
-			else if (vWithDefinitionRE.match (line, pos (), 0, &match))
+			else if (line.size() >= pos()+2
+					 && line[pos()] == 'V'
+					 && vWithDefinitionRE.match (line, pos (), 0, &match))
 			{
-				lat::StringList matchResults = match.matchStrings (line);
 				// FIXME: should really do:
 				// die if exists $ctrbyid{$1};
-				std::string ctrname = matchResults[2];
-				ctrid = toInt (matchResults[1]);
+				std::string ctrname = match.matchString (line, 2);
+				ctrid = toInt (match.matchString (line, 1));
 				Counter::addNameToIdMapping (ctrname, ctrid, (ctrname == "PERF_TICKS" && ! m_config->callgrind ()));
-				ctrfreq = toInt (matchResults[3]);
-				ctrval = this->selectCountedValue (matchResults[4], matchResults[6]);
+				ctrfreq = toInt (match.matchString (line, 3));
+				ctrval = this->selectCountedValue (match.matchString (line, 4), 
+												   match.matchString (line, 6));
 			}
-			else if (leakRE.match (line, pos (), 0, &match))
+			else if (line.size() >= pos()+3
+					 && line[pos()] == ';'
+					 && line[pos()+1] == 'L'
+					 && line[pos()+2] == 'K'
+					 && leakRE.match (line, pos (), 0, &match))
 			{
 				//# FIXME: Ignore leak descriptors for now
 				pos (match.matchEnd ());
@@ -1173,7 +1230,6 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 		}
 		lineCount++;
 	}
-	dummy ();
 }
 
 template < template <class KK, class VV, class CC, class AA> class T, class K, class V, class C, class A >
