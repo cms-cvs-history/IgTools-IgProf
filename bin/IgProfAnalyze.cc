@@ -1021,7 +1021,6 @@ IgProfAnalyzerApplication::selectCountedValue (const std::string &normalValue,
 }
 
 // Regular expressions matching the symbol information header.
-static lat::Regexp cRE ("^C(\\d+)\\s*");
 static lat::Regexp fnRE ("FN(\\d+)\\+\\d+\\s*");
 static lat::Regexp fnWithDefinitionRegExp ("FN(\\d+)=\\(");
 static lat::Regexp vRE ("V(\\d+):\\((\\d+),(\\d+)(,(\\d+))?\\)\\s*");
