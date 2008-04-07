@@ -9,6 +9,7 @@
 #include <classlib/utils/DebugAids.h>
 #include <classlib/utils/StringOps.h>
 #include <classlib/utils/Regexp.h>
+#include <classlib/utils/RegexpMatch.h>
 #include <string>
 #include <list>
 #include <iostream>
@@ -430,13 +431,25 @@ toString (int value)
 	return buffer;
 }
 
-int 
-toInt (const std::string & s)
+class IntConverter
 {
-	char *error = 0;
-	int i = strtol (s.c_str (), &error, 10);
-	return i;
-}
+public:
+	IntConverter (const std::string &string, lat::RegexpMatch *match)
+	:m_string (string.c_str ()),
+	 m_match(match) {}
+
+	IntConverter (const char *string, lat::RegexpMatch *match)
+	:m_string (string),
+	 m_match (match) {}
+	
+	int operator() (int position, int base=10)
+	{
+		return strtol (m_string + m_match->matchPos (position), 0, base);
+	}
+private:
+	const char *m_string;
+	lat::RegexpMatch *m_match;
+};
 
 class AlignedPrinter
 {

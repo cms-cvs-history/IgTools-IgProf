@@ -288,8 +288,6 @@ public:
 	void callgrind (ProfileInfo &prof);
 	void prepdata (ProfileInfo &prof);
 private:
-	int selectCountedValue (const std::string &normalValue,
-							const std::string &selfValue);
 	Configuration *m_config;
 	int m_argc;
 	const char **m_argv;
@@ -644,7 +642,6 @@ public:
 		
 		ProfileInfo::FileInfo *file = 0;
 		std::string symname;
-		lat::StringList matchResults;
 		int fileid;
 		int fileoff;
 
@@ -652,17 +649,18 @@ public:
 		
 		if (fRE.match (line, pos (), 0, &match))
 		{
-			matchResults = match.matchStrings (line);
-			fileoff = toInt (matchResults[2]);
-			symname = matchResults[3];
-			file = getFile (toInt (matchResults[1]));
+			IntConverter getIntMatch (line, &match);
+			fileoff = getIntMatch (2);
+			symname = match.matchString (line, 3);
+			file = getFile (getIntMatch (1));
 		}
 		else if (fWithFilenameRE.match (line, pos (), 0, &match))
 		{
-			matchResults = match.matchStrings (line);
-			fileoff = toInt (matchResults[3]);
-			symname = matchResults[4];
-			file = createFileInfo (matchResults[2], toInt (matchResults[1]));
+			IntConverter getIntMatch (line, &match);
+			fileoff = getIntMatch (3);
+			symname = match.matchString (line, 4);
+			file = createFileInfo (match.matchString (line, 2), 
+								   getIntMatch (1));
 		}
 		else
 		{
@@ -1011,15 +1009,6 @@ private:
 	SymbolFilter m_filter;
 };
 
-
-
-int
-IgProfAnalyzerApplication::selectCountedValue (const std::string &normalValue,
- 											   const std::string &selfValue)
-{
-	return toInt (m_config->normalValue () ? normalValue : selfValue);
-}
-
 // Regular expressions matching the symbol information header.
 static lat::Regexp vRE ("V(\\d+):\\((\\d+),(\\d+)(,(\\d+))?\\)\\s*");
 static lat::Regexp vWithDefinitionRE ("V(\\d+)=\\((.*?)\\):\\((\\d+),(\\d+)(,(\\d+))?\\)\\s*");
@@ -1160,7 +1149,6 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 		
 		// Find out the information about the current stack line.
 		ProfileInfo::SymbolInfo *sym;
-		match.reset (); 
 
 		int symid = -1;
 		
@@ -1216,10 +1204,11 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 			{
 				// FIXME: should really do:
 				// $ctrname = $ctrbyid{$1} || die;
-				ctrid = toInt (match.matchString (line, 1));
-				ctrfreq = toInt (match.matchString (line, 2));
-				ctrval = this->selectCountedValue (match.matchString (line, 3),
-				 								   match.matchString (line, 5));
+				IntConverter getIntMatch (line, &match);
+				ctrid = getIntMatch (1);
+				ctrfreq = getIntMatch (2);
+				ctrval = m_config->normalValue () ? getIntMatch (3)
+				 								    : getIntMatch (5);
 			}
 			else if (line.size() >= pos()+2
 					 && line[pos()] == 'V'
@@ -1228,11 +1217,12 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 				// FIXME: should really do:
 				// die if exists $ctrbyid{$1};
 				std::string ctrname = match.matchString (line, 2);
-				ctrid = toInt (match.matchString (line, 1));
+				IntConverter getIntMatch (line, &match);
+				ctrid = getIntMatch (1);
 				Counter::addNameToIdMapping (ctrname, ctrid, (ctrname == "PERF_TICKS" && ! m_config->callgrind ()));
-				ctrfreq = toInt (match.matchString (line, 3));
-				ctrval = this->selectCountedValue (match.matchString (line, 4), 
-												   match.matchString (line, 6));
+				ctrfreq = getIntMatch (3);
+				ctrval = m_config->normalValue () ? getIntMatch (4)
+												    : getIntMatch (6);
 			}
 			else if (line.size() >= pos()+3
 					 && line[pos()] == ';'
