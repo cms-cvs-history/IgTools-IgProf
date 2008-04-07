@@ -62,7 +62,11 @@ public:
 		int 		FILEOFF;
 		int 		COUNT;
 		SymbolInfo (const char *name, FileInfo *file, int fileoff)
-			: NAME (name), FILE (file), FILEOFF (fileoff), COUNT (0) {};
+			: NAME (name), FILE (file), FILEOFF (fileoff), COUNT (0), RANK (-1) {};
+		int rank (void) { return RANK; }
+		void setRank (int rank) { RANK = rank; }
+	private:
+		int RANK;
 	};
 
 	class NodeInfo
@@ -535,7 +539,6 @@ public:
 	{
 		FlatInfo *result = new FlatInfo (info->SYMBOL, s_keyId);
 		result->DEPTH = info->DEPTH;
-		result->RANK = info->RANK;
 		result->REFS = info->REFS;
 		result->CLONED = true;
 		return result;
@@ -557,7 +560,8 @@ public:
 	Counter *COUNTERS;
 	int DEPTH;
 	int REFS;
-	int RANK;
+	int rank (void) {return SYMBOL->rank (); }
+	void setRank (int rank) {SYMBOL->setRank (rank); }
 
 	bool CLONED;
 	
@@ -570,7 +574,6 @@ protected:
 private:
 	static int s_keyId;
 	static FlatInfo *s_first;
-
 };
 
 int FlatInfo::s_keyId = -1;
@@ -765,7 +768,7 @@ public:
 						  << " to add to parent" << std::endl;
 				nodeInfo = FlatInfo::clone (recursiveNode);
 				parentInfo->CALLS.push_back (nodeInfo);
-				ASSERT (nodeInfo->RANK == recursiveNode->RANK);
+				ASSERT (nodeInfo->rank () == recursiveNode->rank ());
 				ASSERT (FlatInfo::flatMap ()[sym] != nodeInfo);
 			}
 			ASSERT (nodeInfo->SYMBOL->NAME == sym->NAME);
@@ -1353,7 +1356,7 @@ public:
 	
 	void initFromInfo (FlatInfo *info)
 	{
-		RANK = info->RANK;
+		RANK = info->rank ();
 		NAME = info->name ();
 		FILENAME = info->filename ();		
 	}
@@ -1556,7 +1559,7 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 		for (FlatVector::const_iterator i = sorted.begin ();
 			 i != sorted.end ();
 			 i++)
-		{ (*i)->RANK = rank++; }
+		{ (*i)->setRank (rank++); }
 		
 		if (m_config->doDemangle () || m_config->useGdb ())
 		{
