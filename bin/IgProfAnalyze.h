@@ -279,14 +279,16 @@ public:
 		m_streams.push_back (stream);
 	}
 	
-	std::string readLine (void)
+	void readLine (void)
 	{
 		int beginInBuffer = m_posInBuffer;
 		while (m_posInBuffer < m_lastInBuffer)
 		{
 			if (m_buffer[m_posInBuffer++] == '\n')
 			{
-				return std::string (m_buffer + beginInBuffer, m_posInBuffer-beginInBuffer-1);
+				m_curString = m_buffer + beginInBuffer;
+				m_curStringSize = m_posInBuffer-beginInBuffer-1;
+				return;
 			}
 		}
 		int remainingsSize = m_lastInBuffer-beginInBuffer;
@@ -303,12 +305,20 @@ public:
 		if (!readSize)
 		{	
 			m_eof = true;
-			return std::string (m_buffer, remainingsSize);
+			m_curString = m_buffer;
+			m_curStringSize = remainingsSize;
+			return;
 		}
 		m_posInBuffer = 0;
 		m_lastInBuffer = remainingsSize + readSize;
 		return this->readLine ();
 	}
+	
+	void assignLineToString (std::string &str)
+	{
+		str.assign (m_curString, m_curStringSize);
+	}
+	
 	bool eof (void) {return m_eof;}
 private:
 	typedef std::list<lat::InputStream *> Streams; 
@@ -318,6 +328,8 @@ private:
 	int m_posInBuffer;
 	int m_lastInBuffer;
 	int m_eof;
+	const char *m_curString;
+	int m_curStringSize;
 };
 
 class FileReader : public FileOpener

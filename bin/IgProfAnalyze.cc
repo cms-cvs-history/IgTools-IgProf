@@ -339,7 +339,7 @@ void
 printProgress (void)
 {
 	static int counter = 0;
-	counter = ++counter % 10000;
+	counter = ++counter % 100000;
 	if (! counter)
 		std::cerr << ".";
 }
@@ -1189,15 +1189,18 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 	lat::File f (filename);
 	if (m_config->verbose ())
 		std::cerr << " X" << filename << std::endl;
+	std::string line;
+	line.reserve (FileOpener::BUFFER_SIZE);
 	FileReader reader (filename);
-	checkHeaders (reader.readLine ());
+	
+	reader.readLine ();
+	reader.assignLineToString (line);	
+	checkHeaders (line);
 
 //	fnRE.study();
 //	fnWithDefinitionRegExp.study();
 //	vRE.study();
 //	vWithDefinitionRE.study();
-//	leakRE.study();
-//
 	PathCollection paths ("PATH");
 	
 	int lineCount = 1;
@@ -1210,8 +1213,6 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 	while (! reader.eof ())
 	{
 		// One node per line.
-		std::string symname;
-
 		int fileid;
 		int fileoff;
 		int ctrval;
@@ -1219,7 +1220,8 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 		Position pos;
 
 		printProgress ();
-		std::string line = reader.readLine ();
+		reader.readLine ();
+		reader.assignLineToString (line);
 	
 		int newPos = parseStackLine (line.c_str (), nodestack);
 		if (! newPos) 
