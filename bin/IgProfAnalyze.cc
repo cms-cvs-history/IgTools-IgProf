@@ -1032,10 +1032,14 @@ parseStackLine(const char *line,
 	do 
 	{ ++endptr; } while (*endptr == ' ' || *endptr == '\t');
 	
-	ASSERT (newPosition <= nodestack.size ());
+	int stackSize = nodestack.size ();
+	ASSERT (newPosition <= stackSize);
 	ASSERT (newPosition >= 0);
-	nodestack.resize (newPosition);
-	
+	int difference = newPosition - stackSize;
+	if (difference > 0)
+		nodestack.resize (newPosition);
+	else
+		nodestack.erase (nodestack.begin () + newPosition, nodestack.end ());
 	return endptr - line;
 }
 
@@ -1130,12 +1134,6 @@ parseCounterVal (const char *lineStart, Position &pos,
 	return true;
 }
 
-//static bool
-//parseCounterVal(const std::string &line, int pos, int flags, lat::RegexpMatch *match)
-//{
-//	return vRE.match (line, pos, 0, match);
-//}
-
 static bool
 parseCounterDef(const std::string &line, int pos, int flags, lat::RegexpMatch *match)
 {
@@ -1143,10 +1141,40 @@ parseCounterDef(const std::string &line, int pos, int flags, lat::RegexpMatch *m
 }
 
 static bool
-parseLeak (const std::string &line, int pos, int flags, lat::RegexpMatch *match)
+parseLeak (const char *lineStart, Position &pos, int &leakAddress, int &leakSize)
 {
-	return leakRE.match (line, pos, 0, match);
+	// ";LK=\\(0x[\\da-z]+,\\d+\\)\\s*"
+	const char *line = lineStart + pos ();
+	if (*line != ';' || *++line != 'L' || *++line != 'K' || *++line != '=' 
+		|| *++line != '(' || *++line != '0' || *++line != 'x')
+	{ return false; }
+	
+	char *endptr = 0;
+	int address = strtol (++line, &endptr, 16);
+	if (endptr == line)
+	{ return false; }
+	
+	if (*endptr++ != ',')
+	{ return false; }
+	
+	char *endptr2 = 0;
+	int64_t size = strtoll (endptr, &endptr2, 10);
+	if (endptr == line)
+	{ return false; }
+	if (*endptr2++ != ')')
+	{ return false; }
+	
+	leakAddress = address;
+	leakSize = size;
+	
+	while (*endptr2 == ' ' || *endptr2 == '\t')
+	{ endptr2++; }
+	
+	pos (endptr2 - lineStart);
+
+	return true;
 }
+
 
 void
 IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filename)
@@ -1177,6 +1205,7 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 
 	Counter::setKeyName (m_config->key ());
 	SymbolInfoFactory symbolsFactory (&prof, m_config->useGdb ());
+	
 	
 	while (! reader.eof ())
 	{
@@ -1243,12 +1272,13 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 		// Read the counter information.
 		while (true)
 		{
-			std::string ctrname;
 			int ctrid;
 			int ctrval;
 			int ctrfreq;
 			int ctrvalNormal;
 			int ctrvalStrange;
+			int leakAddress;
+			int leakSize;
 			
 			if (line.size () == pos())
 			{ break; }
@@ -1281,11 +1311,9 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 					 && line[pos()] == ';'
 					 && line[pos()+1] == 'L'
 					 && line[pos()+2] == 'K'
-					 && parseLeak (line, pos (), 0, &match))
+					 && parseLeak (line.c_str (), pos, leakAddress, leakSize))
 			{
 				//# FIXME: Ignore leak descriptors for now
-				pos (match.matchEnd ());
-				match.reset ();
 				continue;
 			}
 			else
