@@ -23,6 +23,9 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#define IGPROF_MAX_DEPTH 1000
+
+
 void dummy (void) {}
 
 
@@ -1085,16 +1088,65 @@ parseFunctionDef(const char *lineStart, Position &pos, int &symid)
 }
 
 static bool
-parseCounterVal()
-{}
+parseCounterVal (const char *lineStart, Position &pos, 
+				 int &ctrid, int &ctrfreq, int &ctrvalNormal, int &ctrvalStrange)
+{
+	// Matches "V(\\d+):\\((\\d+),(\\d+)(,(\\d+))?\\)\\s*" and then sets the arguments accordingly. 
+	const char *line = lineStart + pos ();
+	
+	if (line[0] != 'V')
+	{ return false; }
+	
+	char *endptr = 0;
+	int cntRef = strtol (++line, &endptr, 10);
+	if (endptr == line || *endptr != ':' || *++endptr != '(')
+	{ return false; }
+	
+	char *endptr2 = 0;
+	int64_t count1 = strtoll (++endptr, &endptr2, 10);
+	if (endptr2 == endptr || *endptr2 != ',')
+	{ return false; }
+
+	char *endptr3 = 0;
+	int64_t count2 = strtoll (++endptr2, &endptr3, 10);
+	if (endptr3 == endptr2 || *endptr3 != ',')
+	{ return false; }
+	
+	char *endptr4 = 0;
+	int64_t count3 = strtoll (++endptr3, &endptr4, 10);
+	if (endptr3 == endptr4)
+	{ return false; }
+
+	if (*endptr4++ != ')')
+	{ return false; }
+	
+	ctrid = cntRef;
+	ctrfreq = count1;
+	ctrvalNormal = count2;
+	ctrvalStrange = count3;
+	while (*endptr4 == ' ' || *endptr4 == '\t')
+	{ endptr4++; }
+	pos (endptr4 - lineStart);
+	return true;
+}
+
+//static bool
+//parseCounterVal(const std::string &line, int pos, int flags, lat::RegexpMatch *match)
+//{
+//	return vRE.match (line, pos, 0, match);
+//}
 
 static bool
-parseCounterDef()
-{}
+parseCounterDef(const std::string &line, int pos, int flags, lat::RegexpMatch *match)
+{
+	return vWithDefinitionRE.match (line, pos, 0, match);
+}
 
 static bool
-parseLeak()
-{}
+parseLeak (const std::string &line, int pos, int flags, lat::RegexpMatch *match)
+{
+	return leakRE.match (line, pos, 0, match);
+}
 
 void
 IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filename)
@@ -1104,6 +1156,7 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 	ProfileInfo::Nodes &nodes = prof.nodes ();
 	typedef std::vector<ProfileInfo::NodeInfo *> Nodes;
 	Nodes nodestack;
+	nodestack.reserve (IGPROF_MAX_DEPTH);
 	
 	lat::File f (filename);
 	if (m_config->verbose ())
@@ -1129,7 +1182,6 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 	{
 		// One node per line.
 		std::string symname;
-		std::string ctrname;
 
 		int fileid;
 		int fileoff;
@@ -1186,6 +1238,8 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 
 		nodestack.push_back (child);
 		
+		match.reset ();
+
 		// Read the counter information.
 		while (true)
 		{
@@ -1193,26 +1247,23 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 			int ctrid;
 			int ctrval;
 			int ctrfreq;
+			int ctrvalNormal;
+			int ctrvalStrange;
 			
-			match.reset ();
-
 			if (line.size () == pos())
 			{ break; }
 			else if (line.size() >= pos()+2
 					 && line[pos()] == 'V'
-					 && vRE.match (line, pos (), 0, &match))
+					 && parseCounterVal (line.c_str (), pos, ctrid, ctrfreq, ctrvalNormal, ctrvalStrange))
 			{
 				// FIXME: should really do:
 				// $ctrname = $ctrbyid{$1} || die;
-				IntConverter getIntMatch (line, &match);
-				ctrid = getIntMatch (1);
-				ctrfreq = getIntMatch (2);
-				ctrval = m_config->normalValue () ? getIntMatch (3)
-				 								    : getIntMatch (5);
+
+				ctrval = m_config->normalValue () ? ctrvalNormal : ctrvalStrange;
 			}
 			else if (line.size() >= pos()+2
 					 && line[pos()] == 'V'
-					 && vWithDefinitionRE.match (line, pos (), 0, &match))
+					 && parseCounterDef (line, pos (), 0, &match))
 			{
 				// FIXME: should really do:
 				// die if exists $ctrbyid{$1};
@@ -1223,15 +1274,18 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 				ctrfreq = getIntMatch (3);
 				ctrval = m_config->normalValue () ? getIntMatch (4)
 												    : getIntMatch (6);
+				pos (match.matchEnd ());
+				match.reset ();
 			}
 			else if (line.size() >= pos()+3
 					 && line[pos()] == ';'
 					 && line[pos()+1] == 'L'
 					 && line[pos()+2] == 'K'
-					 && leakRE.match (line, pos (), 0, &match))
+					 && parseLeak (line, pos (), 0, &match))
 			{
 				//# FIXME: Ignore leak descriptors for now
 				pos (match.matchEnd ());
+				match.reset ();
 				continue;
 			}
 			else
@@ -1239,13 +1293,13 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 				printSyntaxError (line, filename, lineCount, pos ());
 				exit (1);
 			}
-			pos (match.matchEnd ());
 
 			Counter *counter = Counter::addCounterToRing (child->COUNTERS, ctrid);
-
+			ASSERT (counter);
+		
 			if (m_config->hasKey () && ! Counter::isKey (ctrid)) continue;
 			if (! m_config->hasKey () && Counter::ringSize (counter) > 1) continue;
-
+			
 			counter->addFreqs (ctrfreq);
 			counter->addCounts (ctrval);
 		}
