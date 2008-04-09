@@ -1328,12 +1328,6 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 	}
 }
 
-template < template <class KK, class VV, class CC, class AA> class T, class K, class V, class C, class A >
-std::string join (typename T<K,V,C,A>::const_iterator begin, typename T<K,V,C,A>::const_iterator end, const std::string &sep)
-{
-	typedef typename T<K,V,C,A>::const_iterator iterator;
-}
-
 void
 printAvailableCounters (const Counter::IdCache &cache)
 {
