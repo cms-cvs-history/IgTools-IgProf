@@ -94,6 +94,7 @@ public:
 			return 0;
 		}
 		
+		
 		void printDebugInfo (void)
 		{
 			std::cerr << "Node: " << this
@@ -1202,10 +1203,10 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 	while (! reader.eof ())
 	{
 		// One node per line.
-		int fileid;
-		int fileoff;
-		int ctrval;
-		int ctrfreq;
+		// int fileid;
+		// int fileoff;
+		// int ctrval;
+		// int ctrfreq;
 		Position pos;
 
 		printProgress ();

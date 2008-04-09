@@ -58,7 +58,7 @@ public:
 	
 	bool isMax (void) { return Counter::isMax (m_type); }
 	
-	int add (Counter *counter)
+	void add (Counter *counter)
 	{
 		counter->setNext (this->next ());
 		this->setNext (counter);
