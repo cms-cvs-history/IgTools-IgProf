@@ -1655,6 +1655,12 @@ printHeader (const char *description, const char *kind,
 	std::cout << "Function\n";
 }
 
+int
+max (int a, int b)
+{
+	return a > b ? a : b;
+}
+
 void
 IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 {
