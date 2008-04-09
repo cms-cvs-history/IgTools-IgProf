@@ -1,0 +1,2 @@
+<use name="classlib"/>
+<bin file="IgProfAnalyze.cc" name="igprof-analyze2"/>
