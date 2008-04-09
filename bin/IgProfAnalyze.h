@@ -93,7 +93,7 @@ public:
 		return i->second; 
 	}
 
-	static int addNameToIdMapping (const std::string &name, int id, bool isTick)
+	static void addNameToIdMapping (const std::string &name, int id, bool isTick)
 	{
 		ASSERT (id < 31);
 		ASSERT ((s_isMaxMask & (1 << id)) == 0);
