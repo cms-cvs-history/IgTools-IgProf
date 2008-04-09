@@ -124,7 +124,7 @@ public:
 
 	static Counter* getCounterInRing (Counter *&initialCounter, int id)
 	{
-		Counter::popCounterFromRing (initialCounter, id, false);
+		return Counter::popCounterFromRing (initialCounter, id, false);
 	}
 
 	static int ringSize (Counter *initialCounter)
