@@ -870,7 +870,7 @@ public:
 		return *this;
 	}
 	TextStreamer &operator<< (const char *text)
-	{ m_file->write (text, strlen (text)); }
+	{ m_file->write (text, strlen (text)); return *this; }
 private:
 	lat::File *m_file;
 };
