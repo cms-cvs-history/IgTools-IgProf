@@ -1665,247 +1665,242 @@ max (int a, int b)
 void
 IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 {
-	//std::list <int> ccnt;
-	//std::list <int> cfreq;
 	prepdata (prof);
-	if (m_config->useGdb () || m_config->doDemangle ())
+	if (m_config->verbose ())
+		{ std::cerr << "Building call tree map" << std::endl; }
+	IgProfFilter *callTreeBuilder = new TreeMapBuilderFilter (&prof, m_config);
+	walk (prof, callTreeBuilder);
+	// Sorting flat entries
+	if (m_config->verbose ())
+		{ std::cerr << "Sorting" << std::endl; }
+	int rank = 1;
+	typedef std::vector <FlatInfo *> FlatVector;
+	FlatVector sorted;	
+	for (FlatInfo::FlatMap::const_iterator i = FlatInfo::flatMap ().begin ();
+		 i != FlatInfo::flatMap ().end ();
+	     i++)
+	{ sorted.push_back (i->second); }
+	
+	sort (sorted.begin (), sorted.end (), FlatInfoComparator (m_config->keyId (),
+														  m_config->ordering ()));
+	for (FlatVector::const_iterator i = sorted.begin ();
+		 i != sorted.end ();
+		 i++)
+	{ (*i)->setRank (rank++); }
+	
+	if (m_config->doDemangle () || m_config->useGdb ())
 	{
 		if (m_config->verbose ())
-			{ std::cerr << "Building call tree map" << std::endl; }
-		IgProfFilter *callTreeBuilder = new TreeMapBuilderFilter (&prof, m_config);
-		walk (prof, callTreeBuilder);
-		// Sorting flat entries
-		if (m_config->verbose ())
-			{ std::cerr << "Sorting" << std::endl; }
-		int rank = 1;
-		typedef std::vector <FlatInfo *> FlatVector;
-		FlatVector sorted;	
-		for (FlatInfo::FlatMap::const_iterator i = FlatInfo::flatMap ().begin ();
-			 i != FlatInfo::flatMap ().end ();
-		     i++)
-		{ sorted.push_back (i->second); }
+			std::cerr << "Resolving symbols" << std::endl;
+		// TODO: Enable symremap
+		//symremap (prof, m_config->useGdb (), m_config->doDemangle ());
+	}
+	
+	if (m_config->verbose ())
+		std::cerr << "Generating report\n" << std::endl;
+	
+	int keyId = m_config->keyId ();
+	
+	Counter *topCounter = Counter::getCounterInRing (FlatInfo::first ()->COUNTERS, 
+											 		 keyId);
+	int totals = topCounter->cumulativeCounts ();
+	int totfreq = topCounter->cumulativeFreqs ();
+	
+	typedef std::list <MainGProfRow *> FinalTable;
+	
+	FinalTable table;
+	
+	for (FlatVector::const_iterator i = sorted.begin ();
+		 i != sorted.end ();
+		 i++)
+	{
+		FlatInfo *info = *i;
+		// FIXME: Can we assume we have only the counters on the nodes 
+		// 		  which have cumulativeCounts () > 0?
+		Counter *counter = Counter::getCounterInRing ((*i)->COUNTERS, keyId);
+		ASSERT (counter);
+		if (!counter->cumulativeCounts ())
+			continue;
+		// Sort calling and called functions.
+		// FIXME: should sort callee and callers
+		GProfMainRowBuilder builder (info, keyId, totals, totfreq);
 		
-		sort (sorted.begin (), sorted.end (), FlatInfoComparator (m_config->keyId (),
-															  m_config->ordering ()));
-		for (FlatVector::const_iterator i = sorted.begin ();
-			 i != sorted.end ();
+		for (FlatInfo::ReferenceList::const_iterator j = info->CALLERS.begin ();
+			 j != info->CALLERS.end ();
+			 j++)
+		{ builder.addCaller (*j); }
+		
+		for (FlatInfo::ReferenceList::const_iterator j = info->CALLS.begin ();
+			 j != info->CALLS.end ();
+			 j++)
+		{ builder.addCallee (*j); }
+		table.push_back (builder.build ()); 
+	}
+	
+	if (m_config->outputType () == Configuration::TEXT)
+	{
+		bool showpaths = m_config->showPaths ();
+		bool showcalls = m_config->showCalls ();
+		bool showlibs = m_config->showLib ();
+		std::cout << "Counter: " << m_config->key () << std::endl;
+		int maxcnt = max (8,
+						  max (thousands (totals).size (), 
+						       thousands (totfreq).size ()));
+		bool isPerfTicks = m_config->key () == "PERF_TICKS";
+		int maxval = maxcnt + (isPerfTicks ? 1 : 0);
+		std::string basefmt = isPerfTicks ? "%.2f" : "%s";
+		FractionPrinter valfmt (maxval, maxval);
+		FractionPrinter cntfmt (maxcnt, maxcnt);
+		
+		printHeader ("Flat profile (cumulative >= 1%)", "Total", 
+					 showpaths, showcalls, maxval, maxcnt);
+		
+		for (FinalTable::const_iterator i = table.begin ();
+			 i != table.end ();
 			 i++)
-		{ (*i)->setRank (rank++); }
-		
-		if (m_config->doDemangle () || m_config->useGdb ())
 		{
-			if (m_config->verbose ())
-				std::cerr << "Resolving symbols" << std::endl;
-			// TODO: Enable symremap
-			//symremap (prof, m_config->useGdb (), m_config->doDemangle ());
-		}
-		
-		if (m_config->verbose ())
-			std::cerr << "Generating report\n" << std::endl;
-		
-		int keyId = m_config->keyId ();
-		
-		Counter *topCounter = Counter::getCounterInRing (FlatInfo::first ()->COUNTERS, 
-												 		 keyId);
-		int totals = topCounter->cumulativeCounts ();
-		int totfreq = topCounter->cumulativeFreqs ();
-		
-		typedef std::list <MainGProfRow *> FinalTable;
-		
-		FinalTable table;
-		
-		for (FlatVector::const_iterator i = sorted.begin ();
-			 i != sorted.end ();
-			 i++)
-		{
-			FlatInfo *info = *i;
-			// FIXME: Can we assume we have only the counters on the nodes 
-			// 		  which have cumulativeCounts () > 0?
-			Counter *counter = Counter::getCounterInRing ((*i)->COUNTERS, keyId);
-			ASSERT (counter);
-			if (!counter->cumulativeCounts ())
+			MainGProfRow &row = **i; 
+			// Should really break, since we display only items with > 1%
+			if (row.PCT < 1.)
 				continue;
-			// Sort calling and called functions.
-			// FIXME: should sort callee and callers
-			GProfMainRowBuilder builder (info, keyId, totals, totfreq);
-			
-			for (FlatInfo::ReferenceList::const_iterator j = info->CALLERS.begin ();
-				 j != info->CALLERS.end ();
-				 j++)
-			{ builder.addCaller (*j); }
-			
-			for (FlatInfo::ReferenceList::const_iterator j = info->CALLS.begin ();
-				 j != info->CALLS.end ();
-				 j++)
-			{ builder.addCallee (*j); }
-			table.push_back (builder.build ()); 
+			printf ("%7.1f  ", row.PCT);
+			printf ("%*s  ", maxval, thousands (row.CUM).c_str ());
+			PrintIf p (maxcnt);
+			p (showpaths, thousands (row.CUMALL.COUNTS));
+			p (showcalls, thousands (row.CUMALL.FREQS));
+			printf ("%s [%d]", row.NAME.c_str (), row.RANK);
+			if (showlibs) { std::cerr << row.FILENAME; }
+			std::cout << "\n";
 		}
 		
-		if (m_config->outputType () == Configuration::TEXT)
+		std::cout << "\n";
+		
+		printHeader ("Flat profile (self >= 0.01%)", "Self", 
+					 showpaths, showcalls, maxval, maxcnt);
+		
+		for (FinalTable::const_iterator i = table.begin ();
+			i != table.end ();
+			i++)
 		{
-			bool showpaths = m_config->showPaths ();
-			bool showcalls = m_config->showCalls ();
-			bool showlibs = m_config->showLib ();
-			std::cout << "Counter: " << m_config->key () << std::endl;
-			int maxcnt = max (8,
-							  max (thousands (totals).size (), 
-							       thousands (totfreq).size ()));
-			bool isPerfTicks = m_config->key () == "PERF_TICKS";
-			int maxval = maxcnt + (isPerfTicks ? 1 : 0);
-			std::string basefmt = isPerfTicks ? "%.2f" : "%s";
-			FractionPrinter valfmt (maxval, maxval);
-			FractionPrinter cntfmt (maxcnt, maxcnt);
-			
-			printHeader ("Flat profile (cumulative >= 1%)", "Total", 
-						 showpaths, showcalls, maxval, maxcnt);
-			
-			for (FinalTable::const_iterator i = table.begin ();
-				 i != table.end ();
-				 i++)
-			{
-				MainGProfRow &row = **i; 
-				// Should really break, since we display only items with > 1%
-				if (row.PCT < 1.)
-					continue;
-				printf ("%7.1f  ", row.PCT);
-				printf ("%*s  ", maxval, thousands (row.CUM).c_str ());
-				PrintIf p (maxcnt);
-				p (showpaths, thousands (row.CUMALL.COUNTS));
-				p (showcalls, thousands (row.CUMALL.FREQS));
-				printf ("%s [%d]", row.NAME.c_str (), row.RANK);
-				if (showlibs) { std::cerr << row.FILENAME; }
-				std::cout << "\n";
-			}
+			MainGProfRow &row = **i;
+			float pct = percent (row.SELF, totals);
+			if (pct < 0.01)
+				continue;
+				
+			printf ("%7.2f  ", pct);
+			printf ("%*s  ", maxval, thousands (row.SELF).c_str ());
+			PrintIf p (maxcnt);
+			p (showcalls, thousands (row.SELFALL.FREQS));
+			p (showpaths, thousands (row.SELFALL.FREQS));
+			printf ("%s [%d]", row.NAME.c_str (), row.RANK);
+			if (showlibs) { std::cout << row.FILENAME; }
+			std::cout << "\n";
+		}
+		std::cout << "\n\n" << std::string (70, '-') << "\n";
+		std::cout << "Call tree profile (cumulative)\n";
+    
+		bool first = true;
+		
+		for (FinalTable::const_iterator i = table.begin ();
+			 i != table.end ();
+			 i++)
+		{
+			int divlen = 34+3*maxval 
+						 + (showcalls ? 1 : 0)*(2*maxcnt+5) 
+						 + (showpaths ? 1 : 0)*(2*maxcnt+5);
 			
 			std::cout << "\n";
+			for (int x = 0 ; x <= (divlen/2); x++) {printf ("- "); }
+			std::cout << std::endl;
+			if (first)
+			{	
+				first = false;
+				printf ("%-8s", "Rank");
+				printf ("%% total  ");
+				(AlignedPrinter (maxcnt)) ("Self");
+				valfmt ("Self", "Children");
+				printf ("  ");
+				if (showcalls) {cntfmt ("Calls", "Total"); printf ("  ");}
+				
+				if (showpaths) {cntfmt ("Paths", "Total"); printf ("  ");}
+				printf ("Function\n");
 			
-			printHeader ("Flat profile (self >= 0.01%)", "Self", 
-						 showpaths, showcalls, maxval, maxcnt);
-			
-			for (FinalTable::const_iterator i = table.begin ();
-				i != table.end ();
-				i++)
+			}	
+			MainGProfRow &mainRow = **i;
+			for (MainGProfRow::Callers::const_iterator c = mainRow.CALLERS.begin ();
+				 c != mainRow.CALLERS.end ();
+				 c++)
 			{
-				MainGProfRow &row = **i;
-				float pct = percent (row.SELF, totals);
-				if (pct < 0.01)
-					continue;
-					
-				printf ("%7.2f  ", pct);
-				printf ("%*s  ", maxval, thousands (row.SELF).c_str ());
-				PrintIf p (maxcnt);
-				p (showcalls, thousands (row.SELFALL.FREQS));
-				p (showpaths, thousands (row.SELFALL.FREQS));
-				printf ("%s [%d]", row.NAME.c_str (), row.RANK);
-				if (showlibs) { std::cout << row.FILENAME; }
-				std::cout << "\n";
-			}
-			std::cout << "\n\n" << std::string (70, '-') << "\n";
-			std::cout << "Call tree profile (cumulative)\n";
-
-			bool first = true;
-			
-			for (FinalTable::const_iterator i = table.begin ();
-				 i != table.end ();
-				 i++)
-			{
-				int divlen = 34+3*maxval 
-							 + (showcalls ? 1 : 0)*(2*maxcnt+5) 
-							 + (showpaths ? 1 : 0)*(2*maxcnt+5);
-				
-				std::cout << "\n";
-				for (int x = 0 ; x <= (divlen/2); x++) {printf ("- "); }
-				std::cout << std::endl;
-				if (first)
-				{	
-					first = false;
-					printf ("%-8s", "Rank");
-					printf ("%% total  ");
-					(AlignedPrinter (maxcnt)) ("Self");
-					valfmt ("Self", "Children");
-					printf ("  ");
-					if (showcalls) {cntfmt ("Calls", "Total"); printf ("  ");}
-					
-					if (showpaths) {cntfmt ("Paths", "Total"); printf ("  ");}
-					printf ("Function\n");
-				
-				}	
-				MainGProfRow &mainRow = **i;
-				for (MainGProfRow::Callers::const_iterator c = mainRow.CALLERS.begin ();
-					 c != mainRow.CALLERS.end ();
-					 c++)
-				{
-					OtherGProfRow &row = **c;
-					std::cout << std::string (8, ' ');
-					printf ("%7.1f  ", row.PCT);
-					ASSERT (maxval);
-					std::cout << std::string (maxval, '.') << "  ";
-					valfmt (thousands (row.SELF_COUNTS), thousands (row.CHILDREN_COUNTS));
-					printf ("  ");
-					if (showcalls) 
-					{ 
-						cntfmt (thousands (row.SELF_CALLS), 
-								thousands (row.TOTAL_CALLS));
-					}
-					if (showpaths)
-					{
-						cntfmt (thousands (row.SELF_PATHS), 
-					            thousands (row.TOTAL_PATHS));
-					}
-					printf ("    %s [%d]", row.NAME.c_str (), row.RANK);
-					if (showlibs) {std::cout << "  " << row.FILENAME; }
-					std::cout << "\n";
-				}
-				
-				char rankBuffer[256];
-				sprintf (rankBuffer, "[%d]", mainRow.RANK);
-				printf ("%-8s", rankBuffer);
-				printf ("%7.1f  ", mainRow.PCT);
-				(AlignedPrinter (maxval)) (thousands (mainRow.CUM));
-				valfmt (thousands (mainRow.SELF), thousands (mainRow.KIDS));
+				OtherGProfRow &row = **c;
+				std::cout << std::string (8, ' ');
+				printf ("%7.1f  ", row.PCT);
+				ASSERT (maxval);
+				std::cout << std::string (maxval, '.') << "  ";
+				valfmt (thousands (row.SELF_COUNTS), thousands (row.CHILDREN_COUNTS));
 				printf ("  ");
 				if (showcalls) 
-				{ (AlignedPrinter (maxcnt)) (thousands (mainRow.CUMALL.FREQS));
-					  (AlignedPrinter (maxcnt)) (""); printf (" "); }
-				if (showpaths)
-					{ (AlignedPrinter (maxcnt)) (thousands (mainRow.CUMALL.COUNTS));
-					  (AlignedPrinter (maxcnt)) (""); printf (" "); }
-				
-				std::cout << mainRow.NAME;
-				
-				if (showlibs) { std::cout << mainRow.FILENAME; }
-				std::cout << "\n";
-				
-				for (MainGProfRow::Calls::const_iterator c = mainRow.CALLS.begin ();
-					 c != mainRow.CALLS.end ();
-					 c++)
-				{
-					OtherGProfRow &row = **c;
-					std::cout << std::string (8, ' ');
-					printf ("%7.1f  ", row.PCT);
-					std::cout << std::string (maxval, '.') << "  ";
-					valfmt (thousands (row.SELF_COUNTS), thousands (row.CHILDREN_COUNTS));
-					printf ("  ");
-					
-					if (showcalls) 
-					{ cntfmt (thousands (row.SELF_CALLS), 
-							  thousands (row.TOTAL_CALLS)); }
-					if (showpaths)
-					{
-						cntfmt (thousands (row.SELF_PATHS), 
-					            thousands (row.TOTAL_PATHS));
-					}
-					printf ("    %s [%d]", row.NAME.c_str (), row.RANK);
-
-					if (showlibs) {std::cout << "  " << row.FILENAME; }
-					std::cout << "\n";
+				{ 
+					cntfmt (thousands (row.SELF_CALLS), 
+							thousands (row.TOTAL_CALLS));
 				}
+				if (showpaths)
+				{
+					cntfmt (thousands (row.SELF_PATHS), 
+				            thousands (row.TOTAL_PATHS));
+				}
+				printf ("    %s [%d]", row.NAME.c_str (), row.RANK);
+				if (showlibs) {std::cout << "  " << row.FILENAME; }
+				std::cout << "\n";
+			}
+			
+			char rankBuffer[256];
+			sprintf (rankBuffer, "[%d]", mainRow.RANK);
+			printf ("%-8s", rankBuffer);
+			printf ("%7.1f  ", mainRow.PCT);
+			(AlignedPrinter (maxval)) (thousands (mainRow.CUM));
+			valfmt (thousands (mainRow.SELF), thousands (mainRow.KIDS));
+			printf ("  ");
+			if (showcalls) 
+			{ (AlignedPrinter (maxcnt)) (thousands (mainRow.CUMALL.FREQS));
+				  (AlignedPrinter (maxcnt)) (""); printf (" "); }
+			if (showpaths)
+				{ (AlignedPrinter (maxcnt)) (thousands (mainRow.CUMALL.COUNTS));
+				  (AlignedPrinter (maxcnt)) (""); printf (" "); }
+			
+			std::cout << mainRow.NAME;
+			
+			if (showlibs) { std::cout << mainRow.FILENAME; }
+			std::cout << "\n";
+			
+			for (MainGProfRow::Calls::const_iterator c = mainRow.CALLS.begin ();
+				 c != mainRow.CALLS.end ();
+				 c++)
+			{
+				OtherGProfRow &row = **c;
+				std::cout << std::string (8, ' ');
+				printf ("%7.1f  ", row.PCT);
+				std::cout << std::string (maxval, '.') << "  ";
+				valfmt (thousands (row.SELF_COUNTS), thousands (row.CHILDREN_COUNTS));
+				printf ("  ");
+				
+				if (showcalls) 
+				{ cntfmt (thousands (row.SELF_CALLS), 
+						  thousands (row.TOTAL_CALLS)); }
+				if (showpaths)
+				{
+					cntfmt (thousands (row.SELF_PATHS), 
+				            thousands (row.TOTAL_PATHS));
+				}
+				printf ("    %s [%d]", row.NAME.c_str (), row.RANK);
+    
+				if (showlibs) {std::cout << "  " << row.FILENAME; }
+				std::cout << "\n";
 			}
 		}
-		else
-		{
-			ASSERT (false);
-		}
+	}
+	else
+	{
+		ASSERT (false);
 	}
 }
 
@@ -2058,12 +2053,8 @@ IgProfAnalyzerApplication::parseArgs (const ArgsList &args)
 			// TODO:
 			// { $output = "html"; shift (@ARGV); }
 		}
-		else if (is ("--text", "-h"))
-		{
-			ASSERT (false);
-			// TODO:
-			// { $output = "text"; shift (@ARGV); }
-		}
+		else if (is ("--text", "-t"))
+		{ m_config->setOutputType (Configuration::TEXT); }
 		else if (is ("--demangle", "-d"))
 		{ m_config->setDoDemangle (true); }
 		else if (is ("--gdb", "-g"))
