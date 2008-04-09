@@ -419,21 +419,6 @@ thousands (int value, int leftPadding=0)
 }
 
 
-int maxOf ( int amount, ...)
-{
-  int i,val,greater;
-  va_list vl;
-  va_start(vl,amount);
-  greater=va_arg(vl,int);
-  for (i=1;i<amount;i++)
-  {
-    val=va_arg(vl,int);
-    greater=(greater>val)?greater:val;
-  }
-  va_end(vl);
-  return greater;
-}
-
 std::string
 toString (int value)
 {

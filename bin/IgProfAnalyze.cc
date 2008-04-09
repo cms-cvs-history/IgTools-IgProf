@@ -1740,9 +1740,9 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 			bool showcalls = m_config->showCalls ();
 			bool showlibs = m_config->showLib ();
 			std::cout << "Counter: " << m_config->key () << std::endl;
-			int maxcnt = maxOf (3, 8, 
-								thousands (totals).size (), 
-								thousands (totfreq).size ());
+			int maxcnt = max (8,
+							  max (thousands (totals).size (), 
+							       thousands (totfreq).size ()));
 			bool isPerfTicks = m_config->key () == "PERF_TICKS";
 			int maxval = maxcnt + (isPerfTicks ? 1 : 0);
 			std::string basefmt = isPerfTicks ? "%.2f" : "%s";
