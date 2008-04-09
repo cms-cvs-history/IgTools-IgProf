@@ -454,17 +454,13 @@ public:
 				         ProfileInfo::NodeInfo *node)
 	{
 		ASSERT (node);
-		std::cerr << "Parsing node" << node->symbol ()->NAME << std::endl;
 		if (!parent) return;
-		std::cerr << "Son of " << parent->symbol ()->NAME << std::endl;
 		Counter *initialCounter = node->COUNTERS;
 		if (! initialCounter) return;
 		Counter *next = initialCounter;
-		std::cerr << "Initial counter" << initialCounter << std::endl;
 		int loopCount = 0;
 		do
 		{
-			next->printDebugInfo ();
 			ASSERT (loopCount++ < 32);
 			int id = next->id ();
 			ASSERT (parent);
@@ -730,7 +726,6 @@ public:
 	{
 		ASSERT (node);
 		std::cerr << "Now parsing" << std::endl;
-		node->printDebugInfo ();
 		ProfileInfo::SymbolInfo *sym = symfor (node);
 		std::cerr << "Actual symbol name" << sym->NAME << std::endl;
 		ASSERT (sym);
@@ -743,8 +738,6 @@ public:
 														  m_keyId);
 		
 		ASSERT (nodeCounter);
-		std::cerr<< "Associated counter" << nodeCounter << std::endl;
-		nodeCounter->printDebugInfo ();
 		
 		if (parent)
 		{
@@ -752,8 +745,6 @@ public:
 			Counter *parentCounter = Counter::getCounterInRing (parent->COUNTERS, 
 															  	m_keyId);
 			ASSERT (parentCounter);
-			parent->printDebugInfo ();
-			parentCounter->printDebugInfo ();
 	
 			ProfileInfo::SymbolInfo *parsym = parent->symbol ();
 			FlatInfo *parentInfo = FlatInfo::get (parsym, false);
@@ -780,7 +771,6 @@ public:
 			nodeInfo->COUNTERS->accumulateCounts (nodeCounter->cumulativeCounts ());
 			nodeInfo->COUNTERS->accumulateFreqs (nodeCounter->cumulativeFreqs ());
 			nodeInfo->REFS++;
-			nodeInfo->COUNTERS->printDebugInfo ();
 			ASSERT (recursiveNode != nodeInfo);
 		}
 		
@@ -1001,10 +991,9 @@ public:
 	virtual void pre (ProfileInfo::NodeInfo *parent,
 					  ProfileInfo::NodeInfo *node) 
 	{
-		node->printDebugInfo ();
 		Counter *i = node->COUNTERS;
 		while (i)
-			{i->printDebugInfo (); i = i->next (); if (i == node->COUNTERS) break;}
+			{i = i->next (); if (i == node->COUNTERS) break;}
 	}
 	virtual std::string name (void) const { return "tree_info_filter"; }
 	virtual enum FilterType type (void) const { return PRE; }
@@ -1435,9 +1424,6 @@ IgProfAnalyzerApplication::prepdata (ProfileInfo& prof/*, // FIXME: is all this 
 									 std::list<int> &ccnt, 
 									 std::list<int> &cfreq*/)
 {
-	std::cerr << "TreeInfo start..." << std::endl;
-	walk (prof, new TreeInfoFilter ());
-	std::cerr << "TreeInfo end..." << std::endl;
 	for (Configuration::Filters::const_iterator i = m_config->filters ().begin ();
 		 i != m_config->filters ().end ();
 		 i++)
@@ -1449,9 +1435,6 @@ IgProfAnalyzerApplication::prepdata (ProfileInfo& prof/*, // FIXME: is all this 
 			walk (prof, *i);
 	}
 
-	std::cerr << "TreeInfo start..." << std::endl;
-	walk (prof, new TreeInfoFilter ());
-	std::cerr << "TreeInfo end..." << std::endl;
 	
 	if (m_config->verbose ())
 	{
@@ -1459,9 +1442,6 @@ IgProfAnalyzerApplication::prepdata (ProfileInfo& prof/*, // FIXME: is all this 
 	}
 	IgProfFilter *sumFilter = new AddCumulativeInfoFilter ();
 	walk (prof, sumFilter);
-	std::cerr << "TreeInfo start..." << std::endl;
-	walk (prof, new TreeInfoFilter ());
-	std::cerr << "TreeInfo end..." << std::endl;
 }
 
 class FlatInfoComparator 
@@ -1646,7 +1626,6 @@ public:
 		m_row = new MainGProfRow ();
 		m_row->initFromInfo (m_info);
 		std::cerr << m_row->NAME << std::endl;
-		m_selfCounter->printDebugInfo ();
 		m_row->PCT = percent (m_selfCounter->cumulativeCounts (), m_totals);
 		m_row->CUM = m_selfCounter->cumulativeCounts ();
 		m_row->SELF = m_selfCounter->counts ();		
@@ -1817,7 +1796,6 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 				i++)
 			{
 				MainGProfRow &row = **i;
-				row.printDebugInfo ();
 				float pct = percent (row.SELF, totals);
 				if (pct < 0.01)
 					continue;
@@ -1891,7 +1869,6 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 				char rankBuffer[256];
 				sprintf (rankBuffer, "[%d]", mainRow.RANK);
 				std::cerr << rankBuffer;
-				mainRow.printDebugInfo ();
 				printf ("%-8s", rankBuffer);
 				printf ("%7.1f  ", mainRow.PCT);
 				(AlignedPrinter (maxval)) (thousands (mainRow.CUM));
@@ -1930,7 +1907,6 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 					}
 					printf ("    %s [%d]", row.NAME.c_str (), row.RANK);
 					std::cerr << row.RANK << "***";
-					row.printDebugInfo ();
 
 					if (showlibs) {std::cout << "  " << row.FILENAME; }
 					std::cout << "\n";
