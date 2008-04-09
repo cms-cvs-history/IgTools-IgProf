@@ -81,7 +81,7 @@ public:
 		Counter *COUNTERS;
 		
 		NodeInfo (SymbolInfo *symbol)
-		: SYMBOL (symbol), COUNTERS (0), m_reportSymbol (0) {};
+		: COUNTERS (0), SYMBOL (symbol), m_reportSymbol (0) {};
 		NodeInfo *getChildrenBySymbol (SymbolInfo *symbol)
 		{
 			for (Nodes::const_iterator i = CHILDREN.begin ();
@@ -337,12 +337,13 @@ checkHeaders (const std::string &headerLine)
 	}
 }
 
+static int s_counter = 0;
+
 void 
 printProgress (void)
 {
-	static int counter = 0;
-	counter = ++counter % 100000;
-	if (! counter)
+	s_counter = (s_counter + 1) % 100000;
+	if (! s_counter)
 		std::cerr << ".";
 }
 
@@ -379,13 +380,15 @@ std::string
 symlookup (ProfileInfo &prof, ProfileInfo::FileInfo *file, 
 		   int fileoff, const std::string& symname, bool useGdb)
 {
+	// TODO: implement the symbol resolution stuff.
+	return symname;
 	if ((lat::StringOps::find (symname, "@?") == 0) && (file->NAME != "") && (fileoff > 0))
 	{
 		std::string basename (lat::Filename (file->NAME).directory ().asFile ());
 		return "@{" + basename + "+" + toString (fileoff) + "}";
 	}
 	
-	ProfileInfo::SymCacheBySymbol &cacheBySymbol = prof.symcacheBySymbol ();
+	//ProfileInfo::SymCacheBySymbol &cacheBySymbol = prof.symcacheBySymbol ();
 	ProfileInfo::SymCacheByFile &cacheByFile = prof.symcacheByFile ();
 	
 	if (useGdb)
@@ -394,7 +397,7 @@ symlookup (ProfileInfo &prof, ProfileInfo::FileInfo *file,
 		if (cacheByFile.find (static_cast<const char *>(filename)) != cacheByFile.end () 
 			&& filename.isRegular ())
 		{
-			int vmbase = 0;
+			// int vmbase = 0;
 			lat::Argz objectDumpCmdline (std::string ("objdump -p ") + std::string (filename));
 			lat::SubProcess objectDump (objectDumpCmdline.argz ());
 			
@@ -402,7 +405,6 @@ symlookup (ProfileInfo &prof, ProfileInfo::FileInfo *file,
 	}
 	
 	ASSERT (false);
-	// TODO: implement the symbol resolution stuff.
 	return symname;
 }
 
@@ -539,7 +541,6 @@ public:
 		FlatInfo *result = new FlatInfo (info->SYMBOL, s_keyId);
 		result->DEPTH = info->DEPTH;
 		result->REFS = info->REFS;
-		result->CLONED = true;
 		return result;
 	}
 	
@@ -562,11 +563,9 @@ public:
 	int rank (void) {return SYMBOL->rank (); }
 	void setRank (int rank) {SYMBOL->setRank (rank); }
 
-	bool CLONED;
-	
 protected:
 	FlatInfo (ProfileInfo::SymbolInfo *symbol, int id)
-	: SYMBOL (symbol), DEPTH (0), COUNTERS (0), CLONED (false) {
+	: SYMBOL (symbol), COUNTERS (0), DEPTH (0) {
 		ASSERT (id != -1);
 		Counter::addCounterToRing (COUNTERS, id);
 	}
@@ -585,19 +584,19 @@ public:
 	 :m_prof (prof), m_useGdb (useGdb)
 	{}
 
-	ProfileInfo::SymbolInfo *getSymbol (int id)
+	ProfileInfo::SymbolInfo *getSymbol (unsigned int id)
 	{
-		ASSERT (id <= m_symbols.size ());
+		ASSERT ( id <= m_symbols.size ());
 		return m_symbols[id];
 	}
 
-	ProfileInfo::FileInfo *getFile (int id)
+	ProfileInfo::FileInfo *getFile (unsigned int id)
 	{
 		ASSERT (id <= m_files.size ());
 		return m_files[id];
 	}
 
-	ProfileInfo::FileInfo *createFileInfo (const std::string &origname, int fileid)
+	ProfileInfo::FileInfo *createFileInfo (const std::string &origname, unsigned int fileid)
 	{
 		
 		static PathCollection paths ("PATH");
@@ -633,7 +632,7 @@ public:
 	}
 
 	
-	ProfileInfo::SymbolInfo *createSymbolInfo (const std::string &line, int symid, 
+	ProfileInfo::SymbolInfo *createSymbolInfo (const std::string &line, unsigned int symid, 
 											   Position &pos, int lineCount)
 	{
 		// Regular expressions matching the file and symbolname information.
@@ -643,8 +642,7 @@ public:
 		
 		ProfileInfo::FileInfo *file = 0;
 		std::string symname;
-		int fileid;
-		int fileoff;
+		unsigned int fileoff;
 
 		match.reset ();
 		
@@ -672,9 +670,7 @@ public:
 
 		pos (match.matchEnd ());
 		
-		// TODO: enable symlookup
-		// symname = symlookup (*m_prof, file, fileoff, symname, m_useGdb);
-
+		symname = symlookup (*m_prof, file, fileoff, symname, m_useGdb);
 
 		ProfileInfo::SymbolInfo *sym = namedSymbols()[symname];
 		if (! sym)
@@ -1035,7 +1031,7 @@ parseStackLine(const char *line,
 }
 
 static bool
-parseFunctionRef(const char *lineStart, Position &pos, int &symid) 
+parseFunctionRef(const char *lineStart, Position &pos, unsigned int &symid, unsigned int fileoff) 
 {
 	const char *line = lineStart + pos ();
 	// Matches "FN(\\d+)\\+\\d+\\s*" and sets symid = $1
@@ -1053,6 +1049,7 @@ parseFunctionRef(const char *lineStart, Position &pos, int &symid)
 	{ return false; }
 	
 	symid = fnRef;
+	fileoff = offset;
 
 	while (*endptr2 == ' ' || *endptr2 == '\t')
 	{ ++endptr2; }
@@ -1061,7 +1058,7 @@ parseFunctionRef(const char *lineStart, Position &pos, int &symid)
 }
 
 static bool
-parseFunctionDef(const char *lineStart, Position &pos, int &symid)
+parseFunctionDef(const char *lineStart, Position &pos, unsigned int &symid)
 {
 	const char *line = lineStart + pos ();
 	// Matches FN(\\d+)=\\( and sets symid = $1
@@ -1170,8 +1167,6 @@ parseLeak (const char *lineStart, Position &pos, int &leakAddress, int &leakSize
 void
 IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filename)
 {
-	Position pos;
-	float res = 1./100;
 	ProfileInfo::Nodes &nodes = prof.nodes ();
 	typedef std::vector<ProfileInfo::NodeInfo *> Nodes;
 	Nodes nodestack;
@@ -1200,12 +1195,11 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 	Counter::setKeyName (m_config->key ());
 	SymbolInfoFactory symbolsFactory (&prof, m_config->useGdb ());
 	
-	
 	while (! reader.eof ())
 	{
 		// One node per line.
 		// int fileid;
-		// int fileoff;
+		unsigned int fileoff;
 		// int ctrval;
 		// int ctrfreq;
 		Position pos;
@@ -1224,7 +1218,7 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 		// Find out the information about the current stack line.
 		ProfileInfo::SymbolInfo *sym;
 
-		int symid = -1;
+		unsigned int symid = 0xdeadbeef;
 		
 		if (line.size() <= pos())
 		{
@@ -1232,7 +1226,7 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 			exit (1);
 		}
 		else  if (line.size () > pos()+2
-				  && parseFunctionRef (line.c_str (), pos, symid))
+				  && parseFunctionRef (line.c_str (), pos, symid, fileoff))
 		{
 			sym = symbolsFactory.getSymbol (symid);
 		}
@@ -1276,7 +1270,6 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 			if (line.size () == pos())
 			{ break; }
 			else if (line.size() >= pos()+2
-					 && line[pos()] == 'V'
 					 && parseCounterVal (line.c_str (), pos, ctrid, ctrfreq, ctrvalNormal, ctrvalStrange))
 			{
 				// FIXME: should really do:
@@ -1285,7 +1278,6 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 				ctrval = m_config->normalValue () ? ctrvalNormal : ctrvalStrange;
 			}
 			else if (line.size() >= pos()+2
-					 && line[pos()] == 'V'
 					 && parseCounterDef (line, pos (), 0, &match))
 			{
 				// FIXME: should really do:
@@ -1301,9 +1293,6 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 				match.reset ();
 			}
 			else if (line.size() >= pos()+3
-					 && line[pos()] == ';'
-					 && line[pos()+1] == 'L'
-					 && line[pos()+2] == 'K'
 					 && parseLeak (line.c_str (), pos, leakAddress, leakSize))
 			{
 				//# FIXME: Ignore leak descriptors for now
@@ -1557,8 +1546,8 @@ class GProfMainRowBuilder
 {
 public:
 	GProfMainRowBuilder (FlatInfo *info, int keyId, int totals, int totfreq)
-	 : m_info (info), m_row (0), m_callmax (0), 
-	   m_keyId (keyId), m_totals (totals), m_totfreq (totfreq)
+	 : m_info (info), m_row (0), m_keyId (keyId), 
+	   m_callmax (0), m_totals (totals), m_totfreq (totfreq)
 	{
 		m_selfCounter = getKeyCounter (m_info->COUNTERS);
 		init ();
@@ -1567,7 +1556,6 @@ public:
 	void addCallee (FlatInfo *calleeInfo)
 	{
 		ASSERT (m_row);
-		ASSERT (calleeInfo->CLONED);
 		FlatInfo *origin = FlatInfo::flatMap ()[m_info->SYMBOL];
 		FlatInfo *thisCall = origin->findBySymbol (origin->CALLS, calleeInfo->SYMBOL);
 
@@ -1644,13 +1632,13 @@ private:
 		return Counter::getCounterInRing (counter, m_keyId);
 	}
 
-	MainGProfRow *m_row;
 	FlatInfo *m_info;
-	int m_keyId;
+	MainGProfRow *m_row;
+	unsigned int m_keyId;
+	int m_callmax;
 	int m_totals;
 	int m_totfreq;
 	Counter *m_selfCounter;
-	int m_callmax;
 	MainGProfRow *m_mainCallrow; 
 };
 
@@ -1864,7 +1852,6 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 				
 				char rankBuffer[256];
 				sprintf (rankBuffer, "[%d]", mainRow.RANK);
-				std::cerr << rankBuffer;
 				printf ("%-8s", rankBuffer);
 				printf ("%7.1f  ", mainRow.PCT);
 				(AlignedPrinter (maxval)) (thousands (mainRow.CUM));

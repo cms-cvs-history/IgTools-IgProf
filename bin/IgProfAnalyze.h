@@ -28,12 +28,12 @@ public:
 	typedef int StorageType;
 
 	Counter (int type, int counts=0, int freqs=0)
-	: m_next (this),
+	: m_type (type),
+	  m_next (this),
 	  m_counts (counts),
 	  m_freqs (freqs),
 	  m_cumulativeCounts (0),
-	  m_cumulativeFreqs (0),
-	  m_type (type)
+	  m_cumulativeFreqs (0)
 	{ 
 	}
 	
@@ -207,8 +207,8 @@ private:
 	static int s_ticksCounterId;
 	static int s_keyValue;
 	static std::string s_keyName;
-	Counter *m_next;
 	int m_type;
+	Counter *m_next;
 	StorageType m_counts;
 	StorageType m_freqs;
 	StorageType m_cumulativeCounts;
