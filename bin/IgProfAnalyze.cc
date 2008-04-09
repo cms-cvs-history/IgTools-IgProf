@@ -367,10 +367,10 @@ index (const std::string &s, char c)
 class Position 
 {
 public:
-	int operator ()(void) { return m_pos; }
-	void operator ()(int newPos) { m_pos = newPos; }
+	unsigned int operator ()(void) { return m_pos; }
+	void operator ()(unsigned int newPos) { m_pos = newPos; }
 private:
-	int m_pos;
+	unsigned int m_pos;
 };
 
 
