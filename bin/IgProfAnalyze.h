@@ -253,7 +253,8 @@ class FileOpener
 public:
 	static const int BUFFER_SIZE=10000000; 
 	FileOpener (void)
-		: m_posInBuffer (BUFFER_SIZE),
+		: m_buffer (new char[BUFFER_SIZE]),
+		  m_posInBuffer (BUFFER_SIZE),
 		  m_lastInBuffer (BUFFER_SIZE),
 		  m_eof (false)
 	{
@@ -324,7 +325,7 @@ private:
 	typedef std::list<lat::InputStream *> Streams; 
 	typedef Streams::iterator StreamsIterator;
 	Streams m_streams;
-	char m_buffer[BUFFER_SIZE];
+	char *m_buffer;
 	int m_posInBuffer;
 	int m_lastInBuffer;
 	int m_eof;

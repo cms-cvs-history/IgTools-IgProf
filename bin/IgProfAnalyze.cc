@@ -1661,6 +1661,7 @@ max (int a, int b)
 	return a > b ? a : b;
 }
 
+
 void
 IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 {
