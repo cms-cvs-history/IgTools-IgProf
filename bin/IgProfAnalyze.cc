@@ -328,6 +328,7 @@ void
 checkHeaders (const std::string &headerLine)
 {
 	lat::Regexp matchHeader ("^P=\\(.*T=(.*)\\)");
+	std::cerr << headerLine << std::endl;
 	if (!matchHeader.match (headerLine))
 	{
 		std::cerr << "\nThis does not look like an igprof profile stats:\n  ";
@@ -1179,14 +1180,14 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 	lat::File f (filename);
 	if (m_config->verbose ())
 		std::cerr << " X" << filename << std::endl;
-	std::string line;
-	line.reserve (FileOpener::BUFFER_SIZE);
 	FileReader reader (filename);
 	
+	std::string line;
+	line.reserve (FileOpener::BUFFER_SIZE);
 	reader.readLine ();
-	reader.assignLineToString (line);	
+	reader.assignLineToString (line);
 	checkHeaders (line);
-
+	
 //	fnRE.study();
 //	fnWithDefinitionRegExp.study();
 //	vRE.study();
@@ -1907,7 +1908,6 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 					            thousands (row.TOTAL_PATHS));
 					}
 					printf ("    %s [%d]", row.NAME.c_str (), row.RANK);
-					std::cerr << row.RANK << "***";
 
 					if (showlibs) {std::cout << "  " << row.FILENAME; }
 					std::cout << "\n";
