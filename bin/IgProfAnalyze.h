@@ -268,6 +268,7 @@ public:
 		{
 			delete *i;
 		}
+		delete[] m_buffer;
 	}
 	
 	lat::InputStream &stream (void)
