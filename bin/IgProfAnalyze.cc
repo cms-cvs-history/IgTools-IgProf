@@ -18,6 +18,7 @@
 #include <vector>
 #include <list>
 #include <map>
+#include <set>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -483,22 +484,25 @@ public:
 class FlatInfo
 {
 public:
-	typedef std::list<FlatInfo *> ReferenceList;
+	struct CompareBySymbol
+	{
+		bool operator () (FlatInfo *a, FlatInfo *b) const
+		{
+			return a->SYMBOL < b->SYMBOL;
+		}
+	};
+	
+	typedef std::set<FlatInfo *, CompareBySymbol> ReferenceList;
 	typedef std::map<ProfileInfo::SymbolInfo *, FlatInfo *> FlatMap;
 
 	static FlatInfo *findBySymbol (ReferenceList &list, 
 								   ProfileInfo::SymbolInfo *symbol)
 	{
 		ASSERT (symbol);
-		for (ReferenceList::const_iterator i  = list.begin ();
-		   	 i != list.end ();
-			 i++)
-		{
-			ASSERT (*i);
-			ASSERT ((*i)->SYMBOL);
-			if ((*i)->SYMBOL == symbol)
-			{ return *i; }
-		}
+		FlatInfo dummy (symbol, 0xdeadbeef);
+		ReferenceList::const_iterator i = list.find (&dummy);
+		if (i != list.end ())
+		{ return *i; }
 		return 0;
 	}
 	
@@ -749,7 +753,7 @@ public:
 			ASSERT (parentInfo);
 
 			if (! FlatInfo::findBySymbol (recursiveNode->CALLERS, parsym))
-				recursiveNode->CALLERS.push_back (parentInfo);
+				recursiveNode->CALLERS.insert (parentInfo);
 
 			FlatInfo *nodeInfo = FlatInfo::findBySymbol (parentInfo->CALLS, 
 												     	 sym);
@@ -758,7 +762,7 @@ public:
 				//std::cerr << "   Creating instance of symbol " << sym->NAME
 				//		  << " to add to parent" << std::endl;
 				nodeInfo = FlatInfo::clone (recursiveNode);
-				parentInfo->CALLS.push_back (nodeInfo);
+				parentInfo->CALLS.insert (nodeInfo);
 				ASSERT (nodeInfo->rank () == recursiveNode->rank ());
 				ASSERT (FlatInfo::flatMap ()[sym] != nodeInfo);
 			}
@@ -1535,12 +1539,24 @@ public:
 	}
 };
 
+template <int ORDER>
+struct CompareCallersRow
+{
+	bool operator () (OtherGProfRow *a, OtherGProfRow *b)
+	{ 
+		int callsDiff = ORDER * (a->SELF_CALLS - b->SELF_CALLS);
+		int cumDiff = ORDER * (a->SELF_COUNTS - b->SELF_COUNTS);
+		if (callsDiff) return callsDiff < 0;
+		if (cumDiff) return cumDiff < 0;
+		return a->NAME < b->NAME;
+	}
+};
+
 class MainGProfRow : public GProfRow 
 {
 public:
-	typedef std::list <OtherGProfRow *> OtherRows;
-	typedef OtherRows Callers;
-	typedef OtherRows Calls;
+	typedef std::set <OtherGProfRow *, CompareCallersRow<1> > Callers;
+	typedef std::set <OtherGProfRow *, CompareCallersRow<-1> > Calls;
 
 	struct CountsData
 	{
@@ -1605,7 +1621,7 @@ public:
 		callrow->TOTAL_CALLS = otherCounter->cumulativeFreqs ();
 		callrow->SELF_PATHS = thisCall->REFS; 
 		callrow->TOTAL_PATHS = calleeInfo->REFS;
-		m_row->CALLS.push_back (callrow);
+		m_row->CALLS.insert (callrow);
 		ASSERT (callrow->SELF_CALLS <= callrow->TOTAL_CALLS);
 		
 	}
@@ -1629,7 +1645,7 @@ public:
 		callrow->TOTAL_CALLS = otherCounter->cumulativeFreqs ();
 		callrow->SELF_PATHS = thisCall->REFS; 
 		callrow->TOTAL_PATHS = callerInfo->REFS;
-		m_row->CALLERS.push_back (callrow);
+		m_row->CALLERS.insert (callrow);
 		// ASSERT ((callrow->SELF_CALLS <= callrow->TOTAL_CALLS) || (! isChild));
 	}
 
@@ -1638,7 +1654,6 @@ public:
 	{
 		m_row = new MainGProfRow ();
 		m_row->initFromInfo (m_info);
-		std::cerr << m_row->NAME << std::endl;
 		m_row->PCT = percent (m_selfCounter->cumulativeCounts (), m_totals);
 		m_row->CUM = m_selfCounter->cumulativeCounts ();
 		m_row->SELF = m_selfCounter->counts ();		
@@ -1689,7 +1704,6 @@ max (int a, int b)
 {
 	return a > b ? a : b;
 }
-
 
 void
 IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
@@ -1758,7 +1772,7 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 			 j != info->CALLERS.end ();
 			 j++)
 		{ builder.addCaller (*j); }
-		
+
 		for (FlatInfo::ReferenceList::const_iterator j = info->CALLS.begin ();
 			 j != info->CALLS.end ();
 			 j++)
@@ -1855,6 +1869,7 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 				printf ("Function\n");
 			
 			}	
+			
 			MainGProfRow &mainRow = **i;
 			for (MainGProfRow::Callers::const_iterator c = mainRow.CALLERS.begin ();
 				 c != mainRow.CALLERS.end ();
@@ -1958,7 +1973,6 @@ IgProfAnalyzerApplication::run (void)
 	ArgsLeftCounter left (args.end ());
 	ASSERT (left (firstFile));
 	ArgsList::const_iterator lastFile = args.end ();
-	std::cerr << *firstFile << std::endl;
 	ProfileInfo *prof = readAllDumps (firstFile, lastFile);
 
 	if (!Counter::countersByName ().size ())
