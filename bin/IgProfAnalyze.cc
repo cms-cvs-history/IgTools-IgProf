@@ -63,9 +63,8 @@ public:
 		std::string NAME;
 		FileInfo 	*FILE;
 		int 		FILEOFF;
-		int 		COUNT;
 		SymbolInfo (const char *name, FileInfo *file, int fileoff)
-			: NAME (name), FILE (file), FILEOFF (fileoff), COUNT (0), RANK (-1) {};
+			: NAME (name), FILE (file), FILEOFF (fileoff), RANK (-1) {};
 		int rank (void) { return RANK; }
 		void setRank (int rank) { RANK = rank; }
 	private:
@@ -88,7 +87,7 @@ public:
 				 i != CHILDREN.end ();
 				 i++)
 			{
-				if ((*i)->SYMBOL == symbol)
+				if ((*i)->SYMBOL->NAME == symbol->NAME)
 					return *i;
 			}
 			return 0;
@@ -328,7 +327,6 @@ void
 checkHeaders (const std::string &headerLine)
 {
 	lat::Regexp matchHeader ("^P=\\(.*T=(.*)\\)");
-	std::cerr << headerLine << std::endl;
 	if (!matchHeader.match (headerLine))
 	{
 		std::cerr << "\nThis does not look like an igprof profile stats:\n  ";
@@ -565,7 +563,7 @@ public:
 
 protected:
 	FlatInfo (ProfileInfo::SymbolInfo *symbol, int id)
-	: SYMBOL (symbol), COUNTERS (0), DEPTH (0) {
+	: SYMBOL (symbol), COUNTERS (0), DEPTH (0), REFS (0) {
 		ASSERT (id != -1);
 		Counter::addCounterToRing (COUNTERS, id);
 	}
@@ -723,13 +721,13 @@ public:
 					  ProfileInfo::NodeInfo *node)
 	{
 		ASSERT (node);
-		std::cerr << "Now parsing" << std::endl;
+		//std::cerr << "\nNow parsing at depth " << seen ().size() << std::endl;
 		ProfileInfo::SymbolInfo *sym = symfor (node);
-		std::cerr << "Actual symbol name" << sym->NAME << std::endl;
 		ASSERT (sym);
+		//std::cerr << "Actual symbol name " << sym->NAME << std::endl;
 		FlatInfo *recursiveNode = FlatInfo::get (sym);
-		std::cerr << "FlatInfo associated: " << recursiveNode << std::endl;
 		ASSERT (recursiveNode);
+		//std::cerr << "FlatInfo associated: " << recursiveNode << std::endl;
 		recursiveNode->DEPTH = seen ().size ();
 
 		Counter *nodeCounter = Counter::getCounterInRing (node->COUNTERS, 
@@ -739,23 +737,26 @@ public:
 		
 		if (parent)
 		{
-			std::cerr << "Parent :" << std::endl;
+			//std::cerr << "Parent : ";
 			Counter *parentCounter = Counter::getCounterInRing (parent->COUNTERS, 
 															  	m_keyId);
 			ASSERT (parentCounter);
 	
 			ProfileInfo::SymbolInfo *parsym = parent->symbol ();
+			//std::cerr << parsym->NAME << std::endl;
+			
 			FlatInfo *parentInfo = FlatInfo::get (parsym, false);
 			ASSERT (parentInfo);
 
-			recursiveNode->CALLERS.push_back (parentInfo);
+			if (! FlatInfo::findBySymbol (recursiveNode->CALLERS, parsym))
+				recursiveNode->CALLERS.push_back (parentInfo);
 
 			FlatInfo *nodeInfo = FlatInfo::findBySymbol (parentInfo->CALLS, 
 												     	 sym);
 			if (!nodeInfo)
 			{
-				std::cerr << "Creating instance of symbol " << sym->NAME
-						  << " to add to parent" << std::endl;
+				//std::cerr << "   Creating instance of symbol " << sym->NAME
+				//		  << " to add to parent" << std::endl;
 				nodeInfo = FlatInfo::clone (recursiveNode);
 				parentInfo->CALLS.push_back (nodeInfo);
 				ASSERT (nodeInfo->rank () == recursiveNode->rank ());
@@ -784,8 +785,12 @@ public:
 	virtual void post (ProfileInfo::NodeInfo *parent,
 					   ProfileInfo::NodeInfo *node)
 	{
-		std::cerr << node->symbol ()->NAME << std::endl;
+		ASSERT (node);
+		ASSERT (node->symbol ());
+		//std::cerr << "Removing: " << node->symbol ()->NAME << std::endl;
+		ASSERT (seen ().count(node->symbol()->NAME) > 0);
 		seen ().erase (node->symbol ()->NAME);
+		ASSERT (seen ().count(node->symbol()->NAME) == 0);
 	}
 
 	virtual std::string name () const { return "tree map builder"; }
@@ -797,46 +802,70 @@ private:
 
 	ProfileInfo::SymbolInfo *symfor (ProfileInfo::NodeInfo *node) 
 	{
-		static lat::Regexp removeSuffixRE ("(.*)'[0-9]+$");
-		ProfileInfo::SymbolInfo *reportSymbol = 0;
-		reportSymbol = node->reportSymbol ();
+		ASSERT (node);
+		//std::cerr << "symfor " << origsym << " " << origsym->NAME << std::endl;
+		ProfileInfo::SymbolInfo *reportSymbol = node->reportSymbol ();
 		if (reportSymbol)
 		{
 			seen ().insert (SeenSymbols::value_type (reportSymbol->NAME, 
 				                                     reportSymbol));
-			return node->reportSymbol ();
+			//std::cerr << " -> returning " << reportSymbol << " " << reportSymbol->NAME << std::endl;
+			return reportSymbol;
 		}
 		
 		std::string suffix = "";
+		
+		ASSERT (node->originalSymbol ());
 		std::string symbolName = node->originalSymbol ()->NAME;
 		
 		SeenSymbols::iterator i = seen ().find (symbolName);
 		if (i != seen ().end ())
 		{
-			std::string origName = lat::StringOps::remove (symbolName, 
-						                                   removeSuffixRE);
-			std::string newName = getUniqueName (origName);
+			std::string newName = getUniqueName (symbolName);
+			//std::cerr << " -> using unique name " << newName << std::endl;
 			SymbolInfoFactory::SymbolsByName &namedSymbols = SymbolInfoFactory::namedSymbols ();
-			ASSERT (namedSymbols.find (newName) == namedSymbols.end ());
-			ProfileInfo::SymbolInfo *originalSymbol = node->originalSymbol ();
-			reportSymbol = new ProfileInfo::SymbolInfo (newName.c_str (),
-														originalSymbol->FILE,
-														originalSymbol->FILEOFF);
-			reportSymbol->COUNT = originalSymbol->COUNT;
-			namedSymbols.insert (SymbolInfoFactory::SymbolsByName::value_type (newName, 
-								                            		    	   reportSymbol));
+			//if (namedSymbols.find (newName) != namedSymbols.end ())
+			//{
+			//	std::cerr << "Symbols seen:" << symbolName << " -> " << newName << std::endl;
+			//	for (SymbolInfoFactory::SymbolsByName::const_iterator i = namedSymbols.begin ();
+			//		 i != namedSymbols.end ();
+			//		 i++)
+			//		std::cerr << "   key: " << i->first << " -> " << i->second;
+			//	std::cerr << newName << std::endl;
+			//	ASSERT (false);
+			//}
+
+			//ASSERT (seen ().find (newName) == seen ().end ());
+			SymbolInfoFactory::SymbolsByName::iterator s = namedSymbols.find (newName);
+			if (s == namedSymbols.end ())
+			{
+				ProfileInfo::SymbolInfo *originalSymbol = node->originalSymbol ();
+				reportSymbol = new ProfileInfo::SymbolInfo (newName.c_str (),
+															originalSymbol->FILE,
+															originalSymbol->FILEOFF);
+				namedSymbols.insert (SymbolInfoFactory::SymbolsByName::value_type (newName, 
+							                            		    	   		   reportSymbol));
+			}
+			else
+				reportSymbol = s->second;
 		}
+		ASSERT (node);
 		node->reportSymbol (reportSymbol);
 		ASSERT (node->symbol ());
 		seen ().insert (SeenSymbols::value_type (node->symbol ()->NAME, 
 												 node->symbol ()));
+		//std::cerr << " -> returning " << node->symbol() << " " << node->symbol()->NAME << std::endl;
 		return node->symbol ();
 	}
 	
-	static std::string getUniqueName (const std::string origname)
+	static std::string getUniqueName (const std::string &symbolName)
 	{
+		static lat::Regexp removeSuffixRE ("'[0-9]+$");
 		int index = 2;
-		std::string candidate;
+		std::string origname = lat::StringOps::remove (symbolName, 
+													   removeSuffixRE);
+		std::string candidate = origname;
+		
 		do 
 		{
 			candidate = origname + "'" + toString (index++);
@@ -1457,7 +1486,7 @@ private:
 		int aVal = aCounter->cumulativeCounts ();
 		int bVal = bCounter->cumulativeCounts ();
 		int result = -1 * m_ordering * (bVal - aVal);
-		std::cerr << bVal << " " << aVal << " "<< result << std::endl;
+		//std::cerr << bVal << " " << aVal << " "<< result << std::endl;
 		return result;
 	}
 
@@ -1810,7 +1839,7 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 						 + (showpaths ? 1 : 0)*(2*maxcnt+5);
 			
 			std::cout << "\n";
-			for (int x = 0 ; x <= (divlen/2); x++) {printf ("- "); }
+			for (int x = 0 ; x < (divlen/2); x++) {printf ("- "); }
 			std::cout << std::endl;
 			if (first)
 			{	
