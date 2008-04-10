@@ -496,7 +496,7 @@ public:
 		{
 			ASSERT (*i);
 			ASSERT ((*i)->SYMBOL);
-			if ((*i)->SYMBOL->NAME == symbol->NAME)
+			if ((*i)->SYMBOL == symbol)
 			{ return *i; }
 		}
 		return 0;
