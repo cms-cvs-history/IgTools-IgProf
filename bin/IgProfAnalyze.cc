@@ -68,6 +68,7 @@ public:
 			: NAME (name), FILE (file), FILEOFF (fileoff), RANK (-1) {};
 		int rank (void) { return RANK; }
 		void setRank (int rank) { RANK = rank; }
+
 	private:
 		int RANK;
 	};
@@ -95,12 +96,17 @@ public:
 		}
 		
 		
-		void printDebugInfo (void)
+		void printDebugInfo (int level=0)
 		{
-			std::cerr << "Node: " << this
+			std::string indent (level*4, ' ');
+			std::cerr << indent << "Node: " << this
 					  << " Symbol name: " << this->symbol ()->NAME
 					  << " File name: " << this->symbol ()->FILE->NAME
 					  << std::endl;
+			for (Nodes::const_iterator i = CHILDREN.begin ();
+			i != CHILDREN.end ();
+			i++)
+			{(*i)->printDebugInfo (level+1);}
 		}
 		
 		Counter &counter (const std::string &name)
@@ -121,6 +127,7 @@ public:
 			if (new_end != CHILDREN.end ())
 			{ CHILDREN.erase (new_end, CHILDREN.end ()); }
 		}
+		
 		SymbolInfo *symbol (void) const
 		{ return m_reportSymbol ? m_reportSymbol : SYMBOL; }
 		
@@ -478,6 +485,106 @@ public:
 	}
 	virtual std::string name (void) const { return "cumulative info"; }
 	virtual enum FilterType type (void) const {return POST; }
+};
+
+void mergeToNode (ProfileInfo::NodeInfo *parent, 
+					ProfileInfo::NodeInfo *node)
+{
+	ProfileInfo::NodeInfo::Nodes::const_iterator i = node->CHILDREN.begin ();
+	while (i != node->CHILDREN.end ())
+	{
+		ProfileInfo::NodeInfo *nodeChild = *i;
+		ASSERT (nodeChild->symbol ());
+		ProfileInfo::NodeInfo *parentChild = parent->getChildrenBySymbol (nodeChild->symbol ());
+		
+		// If the child is not already child of parent, simply add it.
+		if (!parentChild)
+		{
+			parent->CHILDREN.push_back (nodeChild);
+			node->removeChild (*i++);
+			continue;
+		}
+		
+		// If the child is child of the parent, accumulate all its counters to the child of the parent
+		// and recursively merge it.
+		while (Counter *nodeChildCounter = Counter::popCounterFromRing (nodeChild->COUNTERS))
+		{
+			Counter *parentChildCounter = Counter::addCounterToRing (parentChild->COUNTERS,
+																	 nodeChildCounter->id ());
+			parentChildCounter->addFreqs (nodeChildCounter->freqs ());
+			parentChildCounter->addCounts (nodeChildCounter->counts ());
+		}
+		mergeToNode (parentChild, nodeChild);
+		++i;
+	}
+	std::cerr << "Before" << std::endl;
+	parent->printDebugInfo ();
+	ASSERT (node == parent->getChildrenBySymbol (node->symbol ()));
+	std::cerr << "After" << std::endl;		
+	unsigned int numOfChildren = parent->CHILDREN.size ();
+	parent->removeChild (node);
+	ASSERT (numOfChildren == parent->CHILDREN.size () + 1);		
+	ASSERT (!parent->getChildrenBySymbol (node->symbol ()));
+	parent->printDebugInfo ();
+}
+
+
+class RemoveIgProfFilter : public IgProfFilter
+{
+public:
+	virtual void post (ProfileInfo::NodeInfo *parent,
+					   ProfileInfo::NodeInfo *node)
+	{
+		if (!parent)
+			return;
+		
+		ASSERT (node);
+		ASSERT (node->originalSymbol ());
+		ASSERT (node->originalSymbol ()->FILE);
+		
+		if (strstr (node->originalSymbol ()->FILE->NAME.c_str (), "IgProf.")
+			|| strstr (node->originalSymbol ()->FILE->NAME.c_str (), "IgHook."))
+		{
+			std::cerr << "Symbol " << node->originalSymbol ()->NAME << " is "
+					  << " in " << node->originalSymbol ()->FILE->NAME <<". Merging." << std::endl;
+			mergeToNode (parent, node);
+		}
+	}
+	
+	virtual std::string name (void) const {return "igprof remover"; }
+	virtual enum FilterType type (void) const {return POST; }
+};
+
+class RemoveStdFilter : public IgProfFilter
+{
+public:
+	/// Merge use by C++ std namespace entities to parents.
+	
+	virtual void post (ProfileInfo::NodeInfo *parent,
+					   ProfileInfo::NodeInfo *node)
+	{
+		if (!parent)
+			return;
+		ASSERT (node);
+		ASSERT (node->originalSymbol ());
+		// Check if the symbol refers to a definition in the c++ "std" namespace.
+		const char *symbolName = node->originalSymbol ()->NAME.c_str ();
+	
+		if (*symbolName++ != '_' || *symbolName++ != 'Z')
+			return;
+		if (strncmp (symbolName, "NSt", 3) || strncmp (symbolName, "St", 2))
+			return;
+    	
+		// Yes it was.  Squash resource usage to the caller and hide this
+    	// function from the call tree.  (Note that the std entry may end
+    	// up calling something in the user space again, so we don't want
+    	// to lose that information.)
+		std::cerr << "Symbol " << node->originalSymbol ()->NAME << " is "
+				  << " in " << node->originalSymbol ()->FILE->NAME <<". Merging." << std::endl;
+		mergeToNode (parent, node);
+	}
+	virtual std::string name (void) const { return "remove std"; }
+	virtual enum FilterType type (void) const { return POST; }
 };
 
 
@@ -1478,7 +1585,7 @@ public:
 		cmp = cmpcallers (a, b);
 		if (cmp > 0) return true;
 		else if (cmp < 0) return false;
-		return a < b;
+		return a->name () < b->name ();
 	}
 private:
 	int cmpnodekey (FlatInfo *a, FlatInfo *b)
@@ -1803,9 +1910,6 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 			 i++)
 		{
 			MainGProfRow &row = **i; 
-			// Should really break, since we display only items with > 1%
-			if (row.PCT < 1.)
-				continue;
 			printf ("%7.1f  ", row.PCT);
 			printf ("%*s  ", maxval, thousands (row.CUM).c_str ());
 			PrintIf p (maxcnt);
@@ -1814,6 +1918,8 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 			printf ("%s [%d]", row.NAME.c_str (), row.RANK);
 			if (showlibs) { std::cerr << row.FILENAME; }
 			std::cout << "\n";
+			if (row.PCT < 1.)
+				break;
 		}
 		
 		std::cout << "\n";
@@ -1842,8 +1948,6 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 		std::cout << "\n\n" << std::string (70, '-') << "\n";
 		std::cout << "Call tree profile (cumulative)\n";
     
-		bool first = true;
-		
 		for (FinalTable::const_iterator i = table.begin ();
 			 i != table.end ();
 			 i++)
@@ -1853,11 +1957,13 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 						 + (showpaths ? 1 : 0)*(2*maxcnt+5);
 			
 			std::cout << "\n";
-			for (int x = 0 ; x < (divlen/2); x++) {printf ("- "); }
+			for (int x = 0 ; x < ((1+divlen)/2); x++) {printf ("- "); }
 			std::cout << std::endl;
-			if (first)
+
+			MainGProfRow &mainRow = **i;
+
+			if ((mainRow.RANK % 10) == 1)
 			{	
-				first = false;
 				printf ("%-8s", "Rank");
 				printf ("%% total  ");
 				(AlignedPrinter (maxcnt)) ("Self");
@@ -1870,7 +1976,6 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 			
 			}	
 			
-			MainGProfRow &mainRow = **i;
 			for (MainGProfRow::Callers::const_iterator c = mainRow.CALLERS.begin ();
 				 c != mainRow.CALLERS.end ();
 				 c++)
@@ -2028,6 +2133,7 @@ IgProfAnalyzerApplication::parseArgs (const ArgsList &args)
 				m_config->filters ().push_back (new MallocFilter ());
 			if (key == "MEM_LIVE")
 				m_config->filters ().push_back (new IgProfGccPoolAllocFilter ());
+			m_config->filters ().push_back (new RemoveIgProfFilter ());
 		}
 		else if (is ("--value") && left (arg) > 1)
 		{
