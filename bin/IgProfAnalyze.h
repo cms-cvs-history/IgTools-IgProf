@@ -5,6 +5,7 @@
 #include <classlib/iotools/StorageInputStream.h>
 #include <classlib/iotools/BufferInputStream.h>
 #include <classlib/iobase/File.h>
+#include <classlib/iobase/FileError.h>
 #include <classlib/iobase/Filename.h>
 #include <classlib/utils/DebugAids.h>
 #include <classlib/utils/StringOps.h>
@@ -266,7 +267,7 @@ public:
 			 i != m_streams.end ();
 			 i++)
 		{
-			delete *i;
+		//	delete *i;
 		}
 		delete[] m_buffer;
 	}
@@ -339,18 +340,33 @@ class FileReader : public FileOpener
 public:
 	FileReader (const std::string &filename)
 	: FileOpener (),
-	  m_file (filename)
+	  m_file (openFile (filename))
 	{	
-		lat::StorageInputStream *storageInput = new lat::StorageInputStream (&m_file);
+        ASSERT (m_file);
+		lat::StorageInputStream *storageInput = new lat::StorageInputStream (m_file);
 		addStream (storageInput);
 		addStream (new lat::BufferInputStream (storageInput));
 	}
 	~FileReader (void)
 	{
-		m_file.close ();
+		m_file->close ();
 	}
 private:
-	lat::File m_file;
+    static lat::File *openFile (const std::string &filename)
+    {
+        try 
+        {
+            lat::File *file = new lat::File (filename);
+            return file;
+        }
+        catch (lat::FileError &e)
+        {
+            std::cerr << "ERROR: Unable to open file " << filename << " for input." 
+                      << std::endl;
+            exit (1);
+        }
+    }
+	lat::File *m_file;
 };
 
 class PathCollection

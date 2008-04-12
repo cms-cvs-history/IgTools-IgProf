@@ -7,11 +7,14 @@
 #include <classlib/utils/Regexp.h>
 #include <classlib/utils/Argz.h>
 #include <classlib/iobase/SubProcess.h>
+#include <classlib/iobase/Pipe.h>
 #include <classlib/iobase/File.h>
 #include <classlib/iobase/TempFile.h>
-#include <classlib/iotools/InputStream.h>
 #include <classlib/iotools/StorageInputStream.h>
 #include <classlib/iotools/BufferInputStream.h>
+#include <classlib/iotools/IOChannelInputStream.h>
+#include <classlib/iotools/InputStream.h>
+#include <classlib/iotools/InputStreamBuf.h>
 #include <iostream>
 #include <cstdarg>
 #include <string>
@@ -154,19 +157,19 @@ public:
 	typedef std::map<std::string, Counts> CountsMap;
 	typedef std::map<std::string, std::string> Freqs;
 	typedef std::map<std::string, std::string> LeaksMap;
-	typedef std::map<std::string, std::string> SymCacheByFile;
-	typedef std::map<std::string, std::string> SymCacheBySymbol;
+	typedef std::map<std::string, SymbolInfo*> SymCacheByFile;
+	typedef std::map<std::string, SymbolInfo*> SymCacheByName;
 
 	ProfileInfo (void);
 
-	Files & files (void) {return m_files;};
-	Syms & syms (void){ return m_syms;}
-	Nodes & nodes (void) {return m_nodes;}
-	CountsMap & counts (void) {return m_counts;}
-	Freqs  & freqs (void) {return m_freqs;}
-	NodeInfo *spontaneous (void) {return m_spontaneous;}
-	SymCacheByFile &symcacheByFile (void) {return m_symcacheFile;}
-	SymCacheBySymbol &symcacheBySymbol (void) {return m_symcacheSymbol;}
+	Files & files(void) { return m_files; }
+	Syms & syms(void) { return m_syms; }
+	Nodes & nodes(void) { return m_nodes; }
+	CountsMap & counts(void) { return m_counts; }
+	Freqs  & freqs(void) { return m_freqs; }
+	NodeInfo *spontaneous(void) { return m_spontaneous; }
+	SymCacheByFile &symcacheByFile(void) { return m_symcacheFile; }
+	SymCacheByName &symcacheByName(void) { return m_symcacheSymbol; }
 private:
 	Files m_files;
 	Syms m_syms;
@@ -175,7 +178,7 @@ private:
 	Freqs m_freqs;
 	LeaksMap m_leaks;
 	SymCacheByFile m_symcacheFile;
-	SymCacheBySymbol m_symcacheSymbol;
+	SymCacheByName m_symcacheSymbol;
 	NodeInfo  *m_spontaneous;
 };
 
@@ -323,7 +326,6 @@ IgProfAnalyzerApplication::readAllDumps (ArgsList::const_iterator &begin,
 		 profileFilename != end;
 		 profileFilename++)
 	{
-		std::cerr << *profileFilename << std::endl;
 		this->readDump (*prof, *profileFilename);
 		if (m_config->verbose ())
 			{ std::cerr << std::endl; }
@@ -350,7 +352,7 @@ printProgress (void)
 {
 	s_counter = (s_counter + 1) % 100000;
 	if (! s_counter)
-		std::cerr << ".";
+		std::cerr << "o";
 }
 
 
@@ -387,16 +389,19 @@ symlookup (ProfileInfo &prof, ProfileInfo::FileInfo *file,
 		   int fileoff, const std::string& symname, bool useGdb)
 {
 	// TODO: implement the symbol resolution stuff.
-	return symname;
 	if ((lat::StringOps::find (symname, "@?") == 0) && (file->NAME != "") && (fileoff > 0))
 	{
-		std::string basename (lat::Filename (file->NAME).directory ().asFile ());
-		return "@{" + basename + "+" + toString (fileoff) + "}";
+        char buffer[32];
+        sprintf (buffer, "+%d}",fileoff);
+		return std::string ("@{") 
+		       + lat::Filename (file->NAME).asFile ().nondirectory ().name () 
+		       + buffer;
 	}
+	return symname;
 	
-	//ProfileInfo::SymCacheBySymbol &cacheBySymbol = prof.symcacheBySymbol ();
+	ProfileInfo::SymCacheByName &cacheByName = prof.symcacheByName ();
 	ProfileInfo::SymCacheByFile &cacheByFile = prof.symcacheByFile ();
-	
+    (void) cacheByName;
 	if (useGdb)
 	{
 		lat::Filename filename (file->NAME);
@@ -517,15 +522,11 @@ void mergeToNode (ProfileInfo::NodeInfo *parent,
 		mergeToNode (parentChild, nodeChild);
 		++i;
 	}
-	std::cerr << "Before" << std::endl;
-	parent->printDebugInfo ();
 	ASSERT (node == parent->getChildrenBySymbol (node->symbol ()));
-	std::cerr << "After" << std::endl;		
 	unsigned int numOfChildren = parent->CHILDREN.size ();
 	parent->removeChild (node);
 	ASSERT (numOfChildren == parent->CHILDREN.size () + 1);		
 	ASSERT (!parent->getChildrenBySymbol (node->symbol ()));
-	parent->printDebugInfo ();
 }
 
 
@@ -545,8 +546,6 @@ public:
 		if (strstr (node->originalSymbol ()->FILE->NAME.c_str (), "IgProf.")
 			|| strstr (node->originalSymbol ()->FILE->NAME.c_str (), "IgHook."))
 		{
-			std::cerr << "Symbol " << node->originalSymbol ()->NAME << " is "
-					  << " in " << node->originalSymbol ()->FILE->NAME <<". Merging." << std::endl;
 			mergeToNode (parent, node);
 		}
 	}
@@ -605,8 +604,9 @@ public:
 	static FlatInfo *findBySymbol (ReferenceList &list, 
 								   ProfileInfo::SymbolInfo *symbol)
 	{
+		static FlatInfo dummy (0, 0xdeadbeef);
 		ASSERT (symbol);
-		FlatInfo dummy (symbol, 0xdeadbeef);
+        dummy.SYMBOL = symbol;
 		ReferenceList::const_iterator i = list.find (&dummy);
 		if (i != list.end ())
 		{ return *i; }
@@ -658,9 +658,9 @@ public:
 		return SYMBOL->FILE->NAME;
 	}
 	
-	std::string name (void)
+	const char *name (void)
 	{
-		return SYMBOL->NAME;
+		return SYMBOL->NAME.c_str ();
 	}
 	
 	ReferenceList CALLERS;
@@ -812,6 +812,33 @@ private:
 	bool m_useGdb;
 };
 
+struct SuffixOps
+{
+	static void splitSuffix (const std::string &fullSymbol, 
+				   			 std::string &oldSymbol, 
+				   			 std::string &suffix)
+	{
+		unsigned int tickPos = fullSymbol.rfind ("'");
+		if (tickPos == std::string::npos)
+		{
+            oldSymbol = fullSymbol;
+            suffix = "";
+            return;
+		}
+		ASSERT (tickPos < fullSymbol.size ());
+		oldSymbol.assign (fullSymbol.c_str (), tickPos - 1);
+		suffix.assign (fullSymbol.c_str () + tickPos + 1);
+	}
+
+	static std::string removeSuffix (const std::string &fullSymbol)
+	{
+		unsigned int tickPos = fullSymbol.rfind ("'");
+		if (tickPos == std::string::npos)
+		{ return fullSymbol; }
+		ASSERT (tickPos < fullSymbol.size ());
+		return std::string (fullSymbol.c_str (), tickPos - 1);
+	}
+};
 
 class TreeMapBuilderFilter : public IgProfFilter
 {
@@ -971,10 +998,8 @@ private:
 	
 	static std::string getUniqueName (const std::string &symbolName)
 	{
-		static lat::Regexp removeSuffixRE ("'[0-9]+$");
 		int index = 2;
-		std::string origname = lat::StringOps::remove (symbolName, 
-													   removeSuffixRE);
+		std::string origname = SuffixOps::removeSuffix (symbolName);
 		std::string candidate = origname;
 		
 		do 
@@ -1011,40 +1036,86 @@ private:
 	lat::File *m_file;
 };
 
-//void symremap (ProfileInfo &prof, bool usegdb, bool demangle)
-//{
-//	if (usegdb)
-//	{
-//		lat::Filename tmpFilename ("/tmp/igprof-analyse.gdb.XXXXXXXX");
-//		lat::File *file = lat::TempFile::file (tmpFilename);
-//		lat::Filename prevfile ("");
-//		TextStreamer out (file);
-//		out << "set width 10000\n";
-//
-//		for (ProfileInfo::Syms::const_iterator i = prof.syms ().begin ();
-//			 i != prof.syms ().end ();
-//			 i++)
-//		{
-//			ASSERT (*i);
-//			ProfileInfo::SymbolInfo *symPtr = *i;
-//			ProfileInfo::SymbolInfo &sym = *symPtr;
-//			if ((! sym.FILE) || (! sym.FILEOFF) || (sym.FILE->NAME != ""))
-//				continue;
-//			if (sym.FILE->NAME != prevfile)
-//				out << "file " << sym.FILE->NAME << "\n";
-//			out << "echo IGPROF_SYMCHECK <" << toString (int(symPtr)) << ">\\n\n";
-//			out << "info line *" << toString (sym.FILEOFF);
-//			prevfile = sym.FILE->NAME; 
-//		}
-//		file->close ();
-//		
-//		lat::Argz args (std::string ("gdb --batch --command=") + std::string (tmpFilename));
-//		lat::SubProcess gdb (args.argz (), SubProcess::First);
-//	}
-//	
-//		ASSERT (false);
-//}
-//
+void symremap (ProfileInfo &prof, bool usegdb, bool demangle)
+{
+	if (usegdb)
+	{
+		lat::Filename tmpFilename ("/tmp/igprof-analyse.gdb.XXXXXXXX");
+		lat::File *file = lat::TempFile::file (tmpFilename);
+		lat::Filename prevfile ("");
+		TextStreamer out (file);
+		out << "set width 10000\n";
+
+		for (ProfileInfo::Syms::const_iterator i = prof.syms ().begin ();
+			 i != prof.syms ().end ();
+			 i++)
+		{
+			ASSERT (*i);
+			ProfileInfo::SymbolInfo *symPtr = *i;
+			ProfileInfo::SymbolInfo &sym = *symPtr;
+			if ((! sym.FILE) || (! sym.FILEOFF) || (sym.FILE->NAME != ""))
+				continue;
+			if (sym.FILE->NAME != prevfile)
+				out << "file " << sym.FILE->NAME << "\n";
+			out << "echo IGPROF_SYMCHECK <" << toString (int(symPtr)) << ">\\n\n";
+			out << "info line *" << toString (sym.FILEOFF);
+			prevfile = sym.FILE->NAME; 
+		}
+		file->close ();
+		
+		lat::Argz args (std::string ("gdb --batch --command=") + std::string (tmpFilename));
+		lat::Pipe pipe;
+		lat::SubProcess gdb (args.argz (), 
+							 lat::SubProcess::One
+							 | lat::SubProcess::Read,
+							 &pipe);
+		lat::IOChannelInputStream is (pipe.source ());
+		lat::InputStreamBuf  isbuf (&is);
+		std::istream istd (&isbuf);
+		
+		lat::Regexp SYMCHECK_RE ("IGPROF_SYMCHECK<.*>");
+		lat::Regexp STARTS_AT_RE ("starts at .* <([A-Za-z0-9_]+)(\\+\\d+)?>");
+		lat::Regexp NO_LINE_NUMBER ("^No line number .* <([A-Za-z0-9_]+)(\\+\\d+)?>");
+		
+		std::string oldname;
+		std::string suffix;
+		ProfileInfo::SymbolInfo *sym = 0;
+		
+		while (istd)
+		{
+			std::string line;
+			std::getline (istd, line);
+			
+			if (!istd)
+				break;
+			if (line.empty ())
+				continue;
+
+			lat::RegexpMatch match;
+
+			if (SYMCHECK_RE.match (line, 0, 0, &match))
+			{
+				sym = prof.symcacheByName ()[match.matchString (line, 1)];
+				SuffixOps::splitSuffix (sym->NAME, oldname, suffix);
+			}
+			else if (STARTS_AT_RE.match (line, 0, 0, &match))
+			{
+				ASSERT (sym);
+				sym->NAME = match.matchString (line, 1) + "'" + suffix;
+				suffix = "";
+				sym = 0; 
+			}
+			else
+			{
+			    //TODO: Implement here...
+                ASSERT (false);
+			}
+		}
+		ASSERT (false);
+	}
+	ASSERT (false);
+}
+
 class MallocFilter : public IgProfFilter
 {
 public:
@@ -1140,9 +1211,7 @@ private:
 };
 
 // Regular expressions matching the symbol information header.
-static lat::Regexp vRE ("V(\\d+):\\((\\d+),(\\d+)(,(\\d+))?\\)\\s*");
 static lat::Regexp vWithDefinitionRE ("V(\\d+)=\\((.*?)\\):\\((\\d+),(\\d+)(,(\\d+))?\\)\\s*");
-static lat::Regexp leakRE (";LK=\\(0x[\\da-z]+,\\d+\\)\\s*");
 
 static int
 parseStackLine(const char *line, 
@@ -1312,7 +1381,6 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 	Nodes nodestack;
 	nodestack.reserve (IGPROF_MAX_DEPTH);
 	
-	lat::File f (filename);
 	if (m_config->verbose ())
 		std::cerr << " X" << filename << std::endl;
 	FileReader reader (filename);
@@ -1323,9 +1391,6 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 	reader.assignLineToString (line);
 	checkHeaders (line);
 	
-//	fnRE.study();
-//	fnWithDefinitionRegExp.study();
-//	vRE.study();
 //	vWithDefinitionRE.study();
 	PathCollection paths ("PATH");
 	
@@ -1339,7 +1404,7 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 	{
 		// One node per line.
 		// int fileid;
-		unsigned int fileoff;
+		unsigned int fileoff = 0xdeadbeef;
 		// int ctrval;
 		// int ctrfreq;
 		Position pos;
@@ -1572,9 +1637,10 @@ IgProfAnalyzerApplication::prepdata (ProfileInfo& prof/*, // FIXME: is all this 
 class FlatInfoComparator 
 {
 public:
-	FlatInfoComparator (int counterId, int ordering)
+	FlatInfoComparator (int counterId, int ordering, bool cumulative=true)
 	:m_counterId (counterId),
-	 m_ordering (ordering)
+	 m_ordering (ordering),
+	 m_cumulative (cumulative)
 	{}
 	bool operator() (FlatInfo *a, FlatInfo *b)
 	{
@@ -1585,7 +1651,7 @@ public:
 		cmp = cmpcallers (a, b);
 		if (cmp > 0) return true;
 		else if (cmp < 0) return false;
-		return a->name () < b->name ();
+		return strcmp (a->name (), b->name ());
 	}
 private:
 	int cmpnodekey (FlatInfo *a, FlatInfo *b)
@@ -1594,8 +1660,18 @@ private:
 		Counter *bCounter = Counter::getCounterInRing (b->COUNTERS, m_counterId);
 		if (!aCounter) return -1;
 		if (!bCounter) return 1;
-		int aVal = aCounter->cumulativeCounts ();
-		int bVal = bCounter->cumulativeCounts ();
+		int aVal;
+		int bVal;
+		if (m_cumulative)
+		{
+			aVal = aCounter->cumulativeCounts ();
+			bVal = bCounter->cumulativeCounts ();
+		}
+		else
+		{
+			aVal = aCounter->counts ();
+			bVal = bCounter->counts ();
+		}
 		int result = -1 * m_ordering * (bVal - aVal);
 		//std::cerr << bVal << " " << aVal << " "<< result << std::endl;
 		return result;
@@ -1608,6 +1684,7 @@ private:
 	
 	int m_counterId;
 	int m_ordering;
+	int m_cumulative;
 };
 
 
@@ -1619,12 +1696,14 @@ public:
 	int RANK;
 	int FILEOFF;
 	float PCT;
+	int DEPTH;
 	
 	void initFromInfo (FlatInfo *info)
 	{
 		RANK = info->rank ();
 		NAME = info->name ();
-		FILENAME = info->filename ();		
+		FILENAME = info->filename ();
+		DEPTH = info->DEPTH;
 	}
 };
 
@@ -1812,6 +1891,18 @@ max (int a, int b)
 	return a > b ? a : b;
 }
 
+class SortRowBySelf
+{
+public:
+	bool operator () (MainGProfRow *a, MainGProfRow *b) {
+		int diffSelf = a->SELF - b->SELF;
+		if (diffSelf) return diffSelf > 0;
+		int diffDepth = a->DEPTH - b->DEPTH;
+		if (diffDepth) return diffDepth > 0;
+		return a->NAME < b->NAME;
+	}
+};
+
 void
 IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 {
@@ -1832,7 +1923,7 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 	{ sorted.push_back (i->second); }
 	
 	sort (sorted.begin (), sorted.end (), FlatInfoComparator (m_config->keyId (),
-														  m_config->ordering ()));
+														  	  m_config->ordering ()));
 	for (FlatVector::const_iterator i = sorted.begin ();
 		 i != sorted.end ();
 		 i++)
@@ -1856,7 +1947,9 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 	int totals = topCounter->cumulativeCounts ();
 	int totfreq = topCounter->cumulativeFreqs ();
 	
-	typedef std::list <MainGProfRow *> FinalTable;
+	typedef std::vector <MainGProfRow *> CumulativeSortedTable;
+	typedef CumulativeSortedTable FinalTable;
+	typedef std::vector <MainGProfRow *> SelfSortedTable;
 	
 	FinalTable table;
 	
@@ -1886,7 +1979,18 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 		{ builder.addCallee (*j); }
 		table.push_back (builder.build ()); 
 	}
+
+	SelfSortedTable selfSortedTable;
 	
+	for (FinalTable::const_iterator i = table.begin ();
+		 i != table.end ();
+		 i++)
+	{
+		selfSortedTable.push_back (*i);
+	}
+	
+	sort (selfSortedTable.begin (), selfSortedTable.end (), SortRowBySelf ());
+		
 	if (m_config->outputType () == Configuration::TEXT)
 	{
 		bool showpaths = m_config->showPaths ();
@@ -1927,14 +2031,12 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 		printHeader ("Flat profile (self >= 0.01%)", "Self", 
 					 showpaths, showcalls, maxval, maxcnt);
 		
-		for (FinalTable::const_iterator i = table.begin ();
-			i != table.end ();
+		for (SelfSortedTable::const_iterator i = selfSortedTable.begin ();
+			i != selfSortedTable.end ();
 			i++)
 		{
 			MainGProfRow &row = **i;
 			float pct = percent (row.SELF, totals);
-			if (pct < 0.01)
-				continue;
 				
 			printf ("%7.2f  ", pct);
 			printf ("%*s  ", maxval, thousands (row.SELF).c_str ());
@@ -1944,6 +2046,8 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 			printf ("%s [%d]", row.NAME.c_str (), row.RANK);
 			if (showlibs) { std::cout << row.FILENAME; }
 			std::cout << "\n";
+			if (pct < 0.01)
+				break;
 		}
 		std::cout << "\n\n" << std::string (70, '-') << "\n";
 		std::cout << "Call tree profile (cumulative)\n";
