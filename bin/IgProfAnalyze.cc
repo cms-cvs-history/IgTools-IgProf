@@ -1651,7 +1651,7 @@ public:
 		cmp = cmpcallers (a, b);
 		if (cmp > 0) return true;
 		else if (cmp < 0) return false;
-		return strcmp (a->name (), b->name ());
+		return strcmp (a->name (), b->name ()) < 0;
 	}
 private:
 	int cmpnodekey (FlatInfo *a, FlatInfo *b)
