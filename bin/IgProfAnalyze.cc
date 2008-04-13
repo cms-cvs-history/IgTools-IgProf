@@ -13,6 +13,7 @@
 #include <classlib/iotools/StorageInputStream.h>
 #include <classlib/iotools/BufferInputStream.h>
 #include <classlib/iotools/IOChannelInputStream.h>
+#include <classlib/iotools/IOChannelOutputStream.h>
 #include <classlib/iotools/InputStream.h>
 #include <classlib/iotools/InputStreamBuf.h>
 #include <iostream>
@@ -37,119 +38,117 @@ void
 usage ()
 {
 	std::cerr << "igprof-analyse\n"
-		 		 "  [-r/--report KEY[,KEY]...] [-o/--order ORDER]\n"
-		 		 "  [-p/--paths] [-c/--calls] [--value peak|normal]\n"
-				 "  [-F/--filter-module FILE] [ -f FILTER[,FILTER...] ]\n"
-				 "  [-nf/--no-filter] [-lf/--list-filters]\n"
-				 "  { [-x/--xml] | [-h/--html] | [-t/--text] }\n"
-				 "  [--libs] [--demangle] [--gdb] [-v/--verbose]\n"
-				 "  [--] [FILE]...\n" << std::endl;
+	             "  [-r/--report KEY[,KEY]...] [-o/--order ORDER]\n"
+	             "  [-p/--paths] [-c/--calls] [--value peak|normal]\n"
+				       "  [-F/--filter-module FILE] [ -f FILTER[,FILTER...] ]\n"
+				       "  [-nf/--no-filter] [-lf/--list-filters]\n"
+				       "  { [-x/--xml] | [-h/--html] | [-t/--text] }\n"
+				       "  [--libs] [--demangle] [--gdb] [-v/--verbose]\n"
+				       "  [--] [FILE]...\n" << std::endl;
 }
+
+
+class FileInfo
+{
+public:
+	std::string NAME;
+	FileInfo (void) : NAME ("") {}
+	FileInfo (const std::string &name)
+	: NAME (name) {}
+};
+
+class SymbolInfo
+{
+public:
+  std::string NAME;
+	FileInfo 	*FILE;
+	int 		FILEOFF;
+	SymbolInfo (const char *name, FileInfo *file, int fileoff)
+		: NAME (name), FILE (file), FILEOFF (fileoff), RANK (-1) {};
+	int rank (void) { return RANK; }
+	void setRank (int rank) { RANK = rank; }
+private:
+	int RANK;
+};
+
+class NodeInfo
+{
+public:
+	typedef std::list <NodeInfo *> Nodes;
+	
+	Nodes CHILDREN;
+	Counter *COUNTERS;
+	
+	NodeInfo (SymbolInfo *symbol)
+	: COUNTERS (0), SYMBOL (symbol), m_reportSymbol (0) {};
+	NodeInfo *getChildrenBySymbol (SymbolInfo *symbol)
+	{
+		for (Nodes::const_iterator i = CHILDREN.begin ();
+			 i != CHILDREN.end ();
+			 i++)
+		{
+			if ((*i)->SYMBOL->NAME == symbol->NAME)
+				return *i;
+		}
+		return 0;
+	}
+	
+	
+	void printDebugInfo (int level=0)
+	{
+		std::string indent (level*4, ' ');
+		std::cerr << indent << "Node: " << this
+				  << " Symbol name: " << this->symbol ()->NAME
+				  << " File name: " << this->symbol ()->FILE->NAME
+				  << std::endl;
+		for (Nodes::const_iterator i = CHILDREN.begin ();
+		i != CHILDREN.end ();
+		i++)
+		{(*i)->printDebugInfo (level+1);}
+	}
+	
+	Counter &counter (const std::string &name)
+	{ return this->counter (Counter::getIdForCounterName (name)); }
+
+	Counter &counter (int id)
+	{
+		Counter *result = Counter::getCounterInRing (this->COUNTERS, id);
+		ASSERT (result);
+		return *result;
+	}
+	
+	void removeChild (NodeInfo *node) {
+		ASSERT (node);
+		Nodes::iterator new_end = std::remove_if (CHILDREN.begin (), 
+							CHILDREN.end (), 
+							std::bind2nd(std::equal_to<NodeInfo *>(), node));
+		if (new_end != CHILDREN.end ())
+		{ CHILDREN.erase (new_end, CHILDREN.end ()); }
+	}
+	
+	SymbolInfo *symbol (void) const
+	{ return m_reportSymbol ? m_reportSymbol : SYMBOL; }
+	
+	void reportSymbol (SymbolInfo *reportSymbol)
+	{ m_reportSymbol = reportSymbol; }
+	
+	SymbolInfo *reportSymbol (void) const
+	{
+		return m_reportSymbol;
+	}
+	SymbolInfo *originalSymbol (void) const
+	{
+		return SYMBOL;
+	}
+private:
+	SymbolInfo *SYMBOL;	
+	SymbolInfo *m_reportSymbol;
+};
 
 
 class ProfileInfo 
 {
 public:
-	struct CounterInfo
-	{
-	};
-	
-	struct FileInfo
-	{
-		std::string NAME;
-		FileInfo (void) : NAME ("") {}
-		FileInfo (const std::string &name)
-		: NAME (name) {}
-	};
-	
-	struct SymbolInfo
-	{
-		std::string NAME;
-		FileInfo 	*FILE;
-		int 		FILEOFF;
-		SymbolInfo (const char *name, FileInfo *file, int fileoff)
-			: NAME (name), FILE (file), FILEOFF (fileoff), RANK (-1) {};
-		int rank (void) { return RANK; }
-		void setRank (int rank) { RANK = rank; }
-
-	private:
-		int RANK;
-	};
-
-	class NodeInfo
-	{
-	public:
-		typedef std::list <NodeInfo *> Nodes;
-		
-		Nodes CHILDREN;
-		Counter *COUNTERS;
-		
-		NodeInfo (SymbolInfo *symbol)
-		: COUNTERS (0), SYMBOL (symbol), m_reportSymbol (0) {};
-		NodeInfo *getChildrenBySymbol (SymbolInfo *symbol)
-		{
-			for (Nodes::const_iterator i = CHILDREN.begin ();
-				 i != CHILDREN.end ();
-				 i++)
-			{
-				if ((*i)->SYMBOL->NAME == symbol->NAME)
-					return *i;
-			}
-			return 0;
-		}
-		
-		
-		void printDebugInfo (int level=0)
-		{
-			std::string indent (level*4, ' ');
-			std::cerr << indent << "Node: " << this
-					  << " Symbol name: " << this->symbol ()->NAME
-					  << " File name: " << this->symbol ()->FILE->NAME
-					  << std::endl;
-			for (Nodes::const_iterator i = CHILDREN.begin ();
-			i != CHILDREN.end ();
-			i++)
-			{(*i)->printDebugInfo (level+1);}
-		}
-		
-		Counter &counter (const std::string &name)
-		{ return this->counter (Counter::getIdForCounterName (name)); }
-
-		Counter &counter (int id)
-		{
-			Counter *result = Counter::getCounterInRing (this->COUNTERS, id);
-			ASSERT (result);
-			return *result;
-		}
-		
-		void removeChild (NodeInfo *node) {
-			ASSERT (node);
-			Nodes::iterator new_end = std::remove_if (CHILDREN.begin (), 
-								CHILDREN.end (), 
-								std::bind2nd(std::equal_to<NodeInfo *>(), node));
-			if (new_end != CHILDREN.end ())
-			{ CHILDREN.erase (new_end, CHILDREN.end ()); }
-		}
-		
-		SymbolInfo *symbol (void) const
-		{ return m_reportSymbol ? m_reportSymbol : SYMBOL; }
-		
-		void reportSymbol (SymbolInfo *reportSymbol)
-		{ m_reportSymbol = reportSymbol; }
-		
-		SymbolInfo *reportSymbol (void) const
-		{
-			return m_reportSymbol;
-		}
-		SymbolInfo *originalSymbol (void) const
-		{
-			return SYMBOL;
-		}
-	private:
-		SymbolInfo *SYMBOL;	
-		SymbolInfo *m_reportSymbol;
-	};
-
 	typedef std::vector<FileInfo *> Files;
 	typedef std::vector<SymbolInfo *> Syms;
 	typedef std::vector<NodeInfo *> Nodes;
@@ -160,7 +159,15 @@ public:
 	typedef std::map<std::string, SymbolInfo*> SymCacheByFile;
 	typedef std::map<std::string, SymbolInfo*> SymCacheByName;
 
-	ProfileInfo (void);
+	ProfileInfo (void)
+	{
+		FileInfo *unknownFile = new FileInfo ("<unknown>");
+		SymbolInfo *spontaneousSym = new SymbolInfo ("<spontaneous>", unknownFile, 0);
+		m_spontaneous = new NodeInfo (spontaneousSym);
+		m_files.push_back (unknownFile);
+		m_syms.push_back (spontaneousSym);
+		m_nodes.push_back (m_spontaneous);	
+	};
 
 	Files & files(void) { return m_files; }
 	Syms & syms(void) { return m_syms; }
@@ -181,16 +188,6 @@ private:
 	SymCacheByName m_symcacheSymbol;
 	NodeInfo  *m_spontaneous;
 };
-
-ProfileInfo::ProfileInfo ()
-{
-	FileInfo *unknownFile = new FileInfo ("<unknown>");
-	SymbolInfo *spontaneousSym = new SymbolInfo ("<spontaneous>", unknownFile, 0);
-	m_spontaneous = new NodeInfo (spontaneousSym);
-	m_files.push_back (unknownFile);
-	m_syms.push_back (spontaneousSym);
-	m_nodes.push_back (m_spontaneous);
-}
 
 class IgProfFilter;
 
@@ -323,8 +320,8 @@ IgProfAnalyzerApplication::readAllDumps (ArgsList::const_iterator &begin,
 	ProfileInfo *prof = new ProfileInfo;
 	
 	for (ArgsList::const_iterator profileFilename = begin;
-		 profileFilename != end;
-		 profileFilename++)
+			 profileFilename != end;
+		 	 profileFilename++)
 	{
 		this->readDump (*prof, *profileFilename);
 		if (m_config->verbose ())
@@ -355,8 +352,6 @@ printProgress (void)
 		std::cerr << "o";
 }
 
-
-
 int 
 index (const std::string &s, char c)
 {
@@ -372,7 +367,6 @@ index (const std::string &s, char c)
 	return -1;
 }
 
-
 class Position 
 {
 public:
@@ -385,7 +379,7 @@ private:
 
 
 std::string
-symlookup (ProfileInfo &prof, ProfileInfo::FileInfo *file, 
+symlookup (ProfileInfo &prof, FileInfo *file, 
 		   int fileoff, const std::string& symname, bool useGdb)
 {
 	// TODO: implement the symbol resolution stuff.
@@ -449,10 +443,10 @@ public:
 	virtual void init (ProfileInfo *prof)
 	{ m_prof = prof; }
 	
-	virtual void pre (ProfileInfo::NodeInfo *parent,
-					     ProfileInfo::NodeInfo *node) {};
-	virtual void post (ProfileInfo::NodeInfo *parent,
-					     ProfileInfo::NodeInfo *node) {};
+	virtual void pre (NodeInfo *parent,
+					     NodeInfo *node) {};
+	virtual void post (NodeInfo *parent,
+					     NodeInfo *node) {};
 	virtual std::string name (void) const = 0;
 	virtual enum FilterType type (void) const = 0;
 protected:
@@ -465,8 +459,8 @@ private:
 class AddCumulativeInfoFilter : public IgProfFilter 
 {
 public:
-	virtual void post (ProfileInfo::NodeInfo *parent,
-				         ProfileInfo::NodeInfo *node)
+	virtual void post (NodeInfo *parent,
+				         NodeInfo *node)
 	{
 		ASSERT (node);
 		if (!parent) return;
@@ -492,15 +486,15 @@ public:
 	virtual enum FilterType type (void) const {return POST; }
 };
 
-void mergeToNode (ProfileInfo::NodeInfo *parent, 
-					ProfileInfo::NodeInfo *node)
+void mergeToNode (NodeInfo *parent, 
+					NodeInfo *node)
 {
-	ProfileInfo::NodeInfo::Nodes::const_iterator i = node->CHILDREN.begin ();
+	NodeInfo::Nodes::const_iterator i = node->CHILDREN.begin ();
 	while (i != node->CHILDREN.end ())
 	{
-		ProfileInfo::NodeInfo *nodeChild = *i;
+		NodeInfo *nodeChild = *i;
 		ASSERT (nodeChild->symbol ());
-		ProfileInfo::NodeInfo *parentChild = parent->getChildrenBySymbol (nodeChild->symbol ());
+		NodeInfo *parentChild = parent->getChildrenBySymbol (nodeChild->symbol ());
 		
 		// If the child is not already child of parent, simply add it.
 		if (!parentChild)
@@ -533,8 +527,8 @@ void mergeToNode (ProfileInfo::NodeInfo *parent,
 class RemoveIgProfFilter : public IgProfFilter
 {
 public:
-	virtual void post (ProfileInfo::NodeInfo *parent,
-					   ProfileInfo::NodeInfo *node)
+	virtual void post (NodeInfo *parent,
+					   NodeInfo *node)
 	{
 		if (!parent)
 			return;
@@ -559,8 +553,8 @@ class RemoveStdFilter : public IgProfFilter
 public:
 	/// Merge use by C++ std namespace entities to parents.
 	
-	virtual void post (ProfileInfo::NodeInfo *parent,
-					   ProfileInfo::NodeInfo *node)
+	virtual void post (NodeInfo *parent,
+					   NodeInfo *node)
 	{
 		if (!parent)
 			return;
@@ -599,10 +593,10 @@ public:
 	};
 	
 	typedef std::set<FlatInfo *, CompareBySymbol> ReferenceList;
-	typedef std::map<ProfileInfo::SymbolInfo *, FlatInfo *> FlatMap;
+	typedef std::map<SymbolInfo *, FlatInfo *> FlatMap;
 
 	static FlatInfo *findBySymbol (ReferenceList &list, 
-								   ProfileInfo::SymbolInfo *symbol)
+								   SymbolInfo *symbol)
 	{
 		static FlatInfo dummy (0, 0xdeadbeef);
 		ASSERT (symbol);
@@ -630,7 +624,7 @@ public:
 		return s_first;
 	}
 	
-	static FlatInfo *get (ProfileInfo::SymbolInfo *sym, bool create=true)
+	static FlatInfo *get (SymbolInfo *sym, bool create=true)
 	{
 		FlatMap::iterator i = FlatInfo::flatMap ().find (sym);
 		if (i != FlatInfo::flatMap ().end ())
@@ -665,7 +659,7 @@ public:
 	
 	ReferenceList CALLERS;
 	ReferenceList CALLS;
-	ProfileInfo::SymbolInfo *SYMBOL;
+	SymbolInfo *SYMBOL;
 	Counter *COUNTERS;
 	int DEPTH;
 	int REFS;
@@ -673,7 +667,7 @@ public:
 	void setRank (int rank) {SYMBOL->setRank (rank); }
 
 protected:
-	FlatInfo (ProfileInfo::SymbolInfo *symbol, int id)
+	FlatInfo (SymbolInfo *symbol, int id)
 	: SYMBOL (symbol), COUNTERS (0), DEPTH (0), REFS (0) {
 		ASSERT (id != -1);
 		Counter::addCounterToRing (COUNTERS, id);
@@ -693,19 +687,19 @@ public:
 	 :m_prof (prof), m_useGdb (useGdb)
 	{}
 
-	ProfileInfo::SymbolInfo *getSymbol (unsigned int id)
+	SymbolInfo *getSymbol (unsigned int id)
 	{
 		ASSERT ( id <= m_symbols.size ());
 		return m_symbols[id];
 	}
 
-	ProfileInfo::FileInfo *getFile (unsigned int id)
+	FileInfo *getFile (unsigned int id)
 	{
 		ASSERT (id <= m_files.size ());
 		return m_files[id];
 	}
 
-	ProfileInfo::FileInfo *createFileInfo (const std::string &origname, unsigned int fileid)
+	FileInfo *createFileInfo (const std::string &origname, unsigned int fileid)
 	{
 		
 		static PathCollection paths ("PATH");
@@ -726,7 +720,7 @@ public:
 		{ return fileIter->second; }
 		else
 		{ 
-			ProfileInfo::FileInfo *file = new ProfileInfo::FileInfo (absname); 
+			FileInfo *file = new FileInfo (absname); 
 			m_namedFiles.insert (FilesByName::value_type (absname, file));
 			int oldsize = m_files.size ();
 			int missingSize = fileid + 1 - oldsize; 
@@ -741,7 +735,7 @@ public:
 	}
 
 	
-	ProfileInfo::SymbolInfo *createSymbolInfo (const std::string &line, unsigned int symid, 
+	SymbolInfo *createSymbolInfo (const std::string &line, unsigned int symid, 
 											   Position &pos, int lineCount)
 	{
 		// Regular expressions matching the file and symbolname information.
@@ -749,7 +743,7 @@ public:
 		static lat::Regexp fWithFilenameRE ("F(\\d+)=\\((.*?)\\)\\+(-?\\d+) N=\\((.*?)\\)\\)\\+\\d+\\s*");
 		static lat::RegexpMatch match;
 		
-		ProfileInfo::FileInfo *file = 0;
+		FileInfo *file = 0;
 		std::string symname;
 		unsigned int fileoff;
 
@@ -781,10 +775,10 @@ public:
 		
 		symname = symlookup (*m_prof, file, fileoff, symname, m_useGdb);
 
-		ProfileInfo::SymbolInfo *sym = namedSymbols()[symname];
+		SymbolInfo *sym = namedSymbols()[symname];
 		if (! sym)
 		{
-			sym = new ProfileInfo::SymbolInfo (symname.c_str (), file, fileoff);
+			sym = new SymbolInfo (symname.c_str (), file, fileoff);
 			namedSymbols ().insert (SymbolsByName::value_type (symname, sym));
 			ASSERT (symid >= m_symbols.size ()); 
 			m_symbols.resize (symid + 1);
@@ -793,7 +787,7 @@ public:
 		return sym;
 	}
 
-	typedef std::map<std::string, ProfileInfo::SymbolInfo *> SymbolsByName;
+	typedef std::map<std::string, SymbolInfo *> SymbolsByName;
 	
 	static SymbolsByName &namedSymbols (void)
 	{
@@ -802,9 +796,9 @@ public:
 	}
 	
 private:
-	typedef std::vector<ProfileInfo::FileInfo *> Files;
-	typedef std::map<std::string, ProfileInfo::FileInfo *> FilesByName;
-	typedef std::vector<ProfileInfo::SymbolInfo *> Symbols;
+	typedef std::vector<FileInfo *> Files;
+	typedef std::map<std::string, FileInfo *> FilesByName;
+	typedef std::vector<SymbolInfo *> Symbols;
 	Files m_files;
 	Symbols m_symbols;
 	FilesByName m_namedFiles;
@@ -855,12 +849,12 @@ public:
 		ASSERT (m_zeroCounter.freqs () == 0);		
 	}
 	
-	virtual void pre (ProfileInfo::NodeInfo *parent,
-					  ProfileInfo::NodeInfo *node)
+	virtual void pre (NodeInfo *parent,
+					  NodeInfo *node)
 	{
 		ASSERT (node);
 		//std::cerr << "\nNow parsing at depth " << seen ().size() << std::endl;
-		ProfileInfo::SymbolInfo *sym = symfor (node);
+		SymbolInfo *sym = symfor (node);
 		ASSERT (sym);
 		//std::cerr << "Actual symbol name " << sym->NAME << std::endl;
 		FlatInfo *recursiveNode = FlatInfo::get (sym);
@@ -880,7 +874,7 @@ public:
 															  	m_keyId);
 			ASSERT (parentCounter);
 	
-			ProfileInfo::SymbolInfo *parsym = parent->symbol ();
+			SymbolInfo *parsym = parent->symbol ();
 			//std::cerr << parsym->NAME << std::endl;
 			
 			FlatInfo *parentInfo = FlatInfo::get (parsym, false);
@@ -920,8 +914,8 @@ public:
 		ASSERT (flatCounter->freqs () <= flatCounter->cumulativeFreqs ());
 	}
 
-	virtual void post (ProfileInfo::NodeInfo *parent,
-					   ProfileInfo::NodeInfo *node)
+	virtual void post (NodeInfo *parent,
+					   NodeInfo *node)
 	{
 		ASSERT (node);
 		ASSERT (node->symbol ());
@@ -934,15 +928,15 @@ public:
 	virtual std::string name () const { return "tree map builder"; }
 	virtual enum FilterType type () const { return BOTH; }
 
-	typedef std::map<ProfileInfo::SymbolInfo *, FlatInfo *> FlatMap;
+	typedef std::map<SymbolInfo *, FlatInfo *> FlatMap;
 private:
-	typedef std::map<std::string, ProfileInfo::SymbolInfo *>  SeenSymbols;
+	typedef std::map<std::string, SymbolInfo *>  SeenSymbols;
 
-	ProfileInfo::SymbolInfo *symfor (ProfileInfo::NodeInfo *node) 
+	SymbolInfo *symfor (NodeInfo *node) 
 	{
 		ASSERT (node);
 		//std::cerr << "symfor " << origsym << " " << origsym->NAME << std::endl;
-		ProfileInfo::SymbolInfo *reportSymbol = node->reportSymbol ();
+		SymbolInfo *reportSymbol = node->reportSymbol ();
 		if (reportSymbol)
 		{
 			seen ().insert (SeenSymbols::value_type (reportSymbol->NAME, 
@@ -977,8 +971,8 @@ private:
 			SymbolInfoFactory::SymbolsByName::iterator s = namedSymbols.find (newName);
 			if (s == namedSymbols.end ())
 			{
-				ProfileInfo::SymbolInfo *originalSymbol = node->originalSymbol ();
-				reportSymbol = new ProfileInfo::SymbolInfo (newName.c_str (),
+				SymbolInfo *originalSymbol = node->originalSymbol ();
+				reportSymbol = new SymbolInfo (newName.c_str (),
 															originalSymbol->FILE,
 															originalSymbol->FILEOFF);
 				namedSymbols.insert (SymbolInfoFactory::SymbolsByName::value_type (newName, 
@@ -1025,6 +1019,7 @@ class TextStreamer
 public:
 	TextStreamer (lat::File *file)
 	:m_file (file) {}
+	
 	TextStreamer &operator<< (const std::string &string)
 	{	
 		m_file->write (string.c_str (), string.size ());
@@ -1032,6 +1027,15 @@ public:
 	}
 	TextStreamer &operator<< (const char *text)
 	{ m_file->write (text, strlen (text)); return *this; }
+	
+	TextStreamer &operator<< (int num)
+	{
+    char buffer[32];
+    sprintf (buffer, "%d", num);
+    m_file->write (buffer, strlen (buffer));
+    return *this;
+	}
+	
 private:
 	lat::File *m_file;
 };
@@ -1047,12 +1051,12 @@ void symremap (ProfileInfo &prof, bool usegdb, bool demangle)
 		out << "set width 10000\n";
 
 		for (ProfileInfo::Syms::const_iterator i = prof.syms ().begin ();
-			 i != prof.syms ().end ();
-			 i++)
+		     i != prof.syms ().end ();
+			   i++)
 		{
 			ASSERT (*i);
-			ProfileInfo::SymbolInfo *symPtr = *i;
-			ProfileInfo::SymbolInfo &sym = *symPtr;
+			SymbolInfo *symPtr = *i;
+			SymbolInfo &sym = *symPtr;
 			if ((! sym.FILE) || (! sym.FILEOFF) || (sym.FILE->NAME != ""))
 				continue;
 			if (sym.FILE->NAME != prevfile)
@@ -1062,13 +1066,11 @@ void symremap (ProfileInfo &prof, bool usegdb, bool demangle)
 			prevfile = sym.FILE->NAME; 
 		}
 		file->close ();
-		
+    
 		lat::Argz args (std::string ("gdb --batch --command=") + std::string (tmpFilename));
 		lat::Pipe pipe;
-		lat::SubProcess gdb (args.argz (), 
-							 lat::SubProcess::One
-							 | lat::SubProcess::Read,
-							 &pipe);
+		lat::SubProcess gdb (args.argz (), lat::SubProcess::One 
+												 | lat::SubProcess::Read, &pipe);
 		lat::IOChannelInputStream is (pipe.source ());
 		lat::InputStreamBuf  isbuf (&is);
 		std::istream istd (&isbuf);
@@ -1079,7 +1081,7 @@ void symremap (ProfileInfo &prof, bool usegdb, bool demangle)
 		
 		std::string oldname;
 		std::string suffix;
-		ProfileInfo::SymbolInfo *sym = 0;
+		SymbolInfo *sym = 0;
 		
 		while (istd)
 		{
@@ -1102,18 +1104,64 @@ void symremap (ProfileInfo &prof, bool usegdb, bool demangle)
 			{
 				ASSERT (sym);
 				sym->NAME = match.matchString (line, 1) + "'" + suffix;
-				suffix = "";
-				sym = 0; 
+				sym = 0; suffix = ""; 
 			}
-			else
+			else if (NO_LINE_NUMBER.match (line, 0, 0, &match))
 			{
-			    //TODO: Implement here...
-                ASSERT (false);
+			  //TODO: Implement here...
+				ASSERT (sym);
+				sym->NAME = match.matchString (line, 1) + suffix;
+				sym = 0; suffix = "";
 			}
 		}
-		ASSERT (false);
+    unlink (tmpFilename);
 	}
-	ASSERT (false);
+
+	if (demangle)
+	{
+		lat::Filename tmpFilename ("/tmp/igprof-analyse.c++filt.XXXXXXXX");
+		lat::File *file = lat::TempFile::file (tmpFilename);
+		TextStreamer out (file);
+
+		for (ProfileInfo::Syms::const_iterator i = prof.syms ().begin ();
+		     i != prof.syms ().end ();
+			   i++)
+		{
+      SymbolInfo *symbol = *i;
+      ASSERT (symbol);
+      out << (int) (*i) << ": " << symbol->NAME << "\n";
+    }
+    std::cerr << std::endl;
+		file->close ();
+
+    lat::File symbolFile (tmpFilename);
+		lat::Argz args (std::string ("c++filt"));
+    lat::Pipe pipe;
+		lat::SubProcess cppfilt (args.argz (), 
+		                         lat::SubProcess::One | lat::SubProcess::Read, 
+		                         &symbolFile, pipe.sink ());
+    lat::IOChannelInputStream is (pipe.source ());
+    lat::InputStreamBuf  isbuf (&is);
+    std::istream istd (&isbuf);
+    
+    while (istd)
+    {
+			std::string line;
+			std::getline (istd, line);
+      if (! istd)
+        break;
+      if (line.empty ())
+        continue;
+      const char *lineStart = line.c_str ();
+      char *endptr = 0;
+
+      SymbolInfo *symbolPtr = (SymbolInfo *)(strtol (lineStart, &endptr, 10));
+      ASSERT (endptr != lineStart);
+      ASSERT (*endptr == ':');
+      symbolPtr->NAME.assign (endptr+2, lineStart+line.size () - (endptr+2));
+    }
+    unlink (tmpFilename);
+	}
 }
 
 class MallocFilter : public IgProfFilter
@@ -1121,13 +1169,12 @@ class MallocFilter : public IgProfFilter
 public:
 	virtual void init (ProfileInfo *prof) {
 		IgProfFilter::init (prof);
-		m_filter = "malloc", "calloc", "realloc", "memalign", 
-				   "posix_memalign", "valloc", "zmalloc", "zcalloc", 
-				   "zrealloc", "_Znwj", "_Znaj", "_Znam";
+		m_filter = "malloc", "calloc", "realloc", "memalign", "posix_memalign", 
+							 "valloc", "zmalloc", "zcalloc", "zrealloc", "_Znwj", 
+							 "_Znaj", "_Znam";
 	}
 	
-	virtual void post (ProfileInfo::NodeInfo *parent,
-					     ProfileInfo::NodeInfo *node)
+	virtual void post (NodeInfo *parent, NodeInfo *node)
 	{
 		ASSERT (node);
 		ASSERT (node->symbol ());
@@ -1144,8 +1191,7 @@ public:
 	virtual enum FilterType type (void) const { return POST; }
 	
 private:
-	void addCountsToParent (ProfileInfo::NodeInfo *parent,
-							ProfileInfo::NodeInfo *node)
+	void addCountsToParent (NodeInfo *parent, NodeInfo *node)
 	{
 		ASSERT (parent);
 		ASSERT (node);
@@ -1175,11 +1221,10 @@ public:
 		IgProfFilter::init (prof);
 		m_filter = "_ZNSt24__default_alloc_templateILb1ELi0EE14_S_chunk_allocEjRi",
 		           "_ZNSt24__default_alloc_templateILb1ELi0EE9_S_refillEj",
-				   "_ZNSt24__default_alloc_templateILb1ELi0EE8allocateEj";
+				   		 "_ZNSt24__default_alloc_templateILb1ELi0EE8allocateEj";
 	}
 
-	virtual void post (ProfileInfo::NodeInfo *parent,
-					     ProfileInfo::NodeInfo *node) 
+	virtual void post (NodeInfo *parent, NodeInfo *node) 
 	{
 		if (! m_filter.contains (node->symbol ()->NAME)) return;
 		parent->removeChild (node);
@@ -1197,8 +1242,7 @@ public:
 		IgProfFilter::init (prof);
 	}
 
-	virtual void pre (ProfileInfo::NodeInfo *parent,
-					  ProfileInfo::NodeInfo *node) 
+	virtual void pre (NodeInfo *parent, NodeInfo *node) 
 	{
 		Counter *i = node->COUNTERS;
 		while (i)
@@ -1214,8 +1258,7 @@ private:
 static lat::Regexp vWithDefinitionRE ("V(\\d+)=\\((.*?)\\):\\((\\d+),(\\d+)(,(\\d+))?\\)\\s*");
 
 static int
-parseStackLine(const char *line, 
-			   std::vector<ProfileInfo::NodeInfo *> &nodestack)
+parseStackLine(const char *line, std::vector<NodeInfo *> &nodestack)
 {
 	// Matches the same as matching "^C(\\d+)\\s*" and resize nodestack to $1.
 	if ((line[0] == 0) || line[0] != 'C')
@@ -1240,7 +1283,8 @@ parseStackLine(const char *line,
 }
 
 static bool
-parseFunctionRef(const char *lineStart, Position &pos, unsigned int &symid, unsigned int fileoff) 
+parseFunctionRef(const char *lineStart, Position &pos, 
+								 unsigned int &symid, unsigned int fileoff) 
 {
 	const char *line = lineStart + pos ();
 	// Matches "FN(\\d+)\\+\\d+\\s*" and sets symid = $1
@@ -1290,7 +1334,8 @@ parseFunctionDef(const char *lineStart, Position &pos, unsigned int &symid)
 
 static bool
 parseCounterVal (const char *lineStart, Position &pos, 
-				 int &ctrid, int &ctrfreq, int &ctrvalNormal, int &ctrvalStrange)
+				 				 int &ctrid, int &ctrfreq, 
+								 int &ctrvalNormal, int &ctrvalStrange)
 {
 	// Matches "V(\\d+):\\((\\d+),(\\d+)(,(\\d+))?\\)\\s*" and then sets the arguments accordingly. 
 	const char *line = lineStart + pos ();
@@ -1377,7 +1422,7 @@ void
 IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filename)
 {
 	ProfileInfo::Nodes &nodes = prof.nodes ();
-	typedef std::vector<ProfileInfo::NodeInfo *> Nodes;
+	typedef std::vector<NodeInfo *> Nodes;
 	Nodes nodestack;
 	nodestack.reserve (IGPROF_MAX_DEPTH);
 	
@@ -1421,7 +1466,7 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 
 		
 		// Find out the information about the current stack line.
-		ProfileInfo::SymbolInfo *sym;
+		SymbolInfo *sym;
 
 		unsigned int symid = 0xdeadbeef;
 		
@@ -1446,12 +1491,12 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 			exit (1);
 		}
 		
-		ProfileInfo::NodeInfo* parent = nodestack.empty () ? prof.spontaneous () : nodestack.back ();
-		ProfileInfo::NodeInfo* child = parent ? parent->getChildrenBySymbol (sym) : 0;
+		NodeInfo* parent = nodestack.empty () ? prof.spontaneous () : nodestack.back ();
+		NodeInfo* child = parent ? parent->getChildrenBySymbol (sym) : 0;
 		
 		if (! child)
 		{
-			child = new ProfileInfo::NodeInfo (sym);
+			child = new NodeInfo (sym);
 			nodes.push_back (child);
 			if (parent)
 			{ parent->CHILDREN.push_back (child); }
@@ -1490,7 +1535,9 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
 				std::string ctrname = match.matchString (line, 2);
 				IntConverter getIntMatch (line, &match);
 				ctrid = getIntMatch (1);
-				Counter::addNameToIdMapping (ctrname, ctrid, (ctrname == "PERF_TICKS" && ! m_config->callgrind ()));
+				Counter::addNameToIdMapping (ctrname, ctrid,
+				                             (ctrname == "PERF_TICKS" 
+				                              && ! m_config->callgrind ()));
 				ctrfreq = getIntMatch (3);
 				ctrval = m_config->normalValue () ? getIntMatch (4)
 												    : getIntMatch (6);
@@ -1537,7 +1584,7 @@ printAvailableCounters (const Counter::IdCache &cache)
 class StackItem
 {
 public:
-	typedef ProfileInfo::NodeInfo Node;
+	typedef NodeInfo Node;
 	StackItem (Node *parent, Node *pre, Node *post)
 	: m_parent (parent),
 	  m_pre (pre),
@@ -1836,7 +1883,7 @@ public:
 	}
 
 	
-  	void init (void)
+  void init (void)
 	{
 		m_row = new MainGProfRow ();
 		m_row->initFromInfo (m_info);
@@ -1922,11 +1969,10 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 	     i++)
 	{ sorted.push_back (i->second); }
 	
-	sort (sorted.begin (), sorted.end (), FlatInfoComparator (m_config->keyId (),
-														  	  m_config->ordering ()));
-	for (FlatVector::const_iterator i = sorted.begin ();
-		 i != sorted.end ();
-		 i++)
+	sort (sorted.begin(), sorted.end(), FlatInfoComparator(m_config->keyId (),
+				m_config->ordering ()));
+	
+	for (FlatVector::const_iterator i = sorted.begin(); i != sorted.end(); i++)
 	{ (*i)->setRank (rank++); }
 	
 	if (m_config->doDemangle () || m_config->useGdb ())
@@ -1934,7 +1980,7 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 		if (m_config->verbose ())
 			std::cerr << "Resolving symbols" << std::endl;
 		// TODO: Enable symremap
-		//symremap (prof, m_config->useGdb (), m_config->doDemangle ());
+		symremap (prof, m_config->useGdb (), m_config->doDemangle ());
 	}
 	
 	if (m_config->verbose ())
