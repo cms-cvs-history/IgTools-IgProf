@@ -956,18 +956,6 @@ private:
 			std::string newName = getUniqueName (symbolName);
 			//std::cerr << " -> using unique name " << newName << std::endl;
 			SymbolInfoFactory::SymbolsByName &namedSymbols = SymbolInfoFactory::namedSymbols ();
-			//if (namedSymbols.find (newName) != namedSymbols.end ())
-			//{
-			//	std::cerr << "Symbols seen:" << symbolName << " -> " << newName << std::endl;
-			//	for (SymbolInfoFactory::SymbolsByName::const_iterator i = namedSymbols.begin ();
-			//		 i != namedSymbols.end ();
-			//		 i++)
-			//		std::cerr << "   key: " << i->first << " -> " << i->second;
-			//	std::cerr << newName << std::endl;
-			//	ASSERT (false);
-			//}
-
-			//ASSERT (seen ().find (newName) == seen ().end ());
 			SymbolInfoFactory::SymbolsByName::iterator s = namedSymbols.find (newName);
 			if (s == namedSymbols.end ())
 			{
@@ -1040,8 +1028,15 @@ private:
 	lat::File *m_file;
 };
 
-void symremap (ProfileInfo &prof, bool usegdb, bool demangle)
+static lat::Regexp SYMCHECK_RE ("IGPROF_SYMCHECK<(.*)>");
+static lat::Regexp STARTS_AT_RE ("starts at .* <([A-Za-z0-9_]+)(\\+\\d+)?>");
+static lat::Regexp NO_LINE_NUMBER ("^No line number .* <([A-Za-z0-9_]+)(\\+\\d+)?>");
+
+
+void symremap (ProfileInfo &prof, std::vector<FlatInfo *> infos, bool usegdb, bool demangle)
 {
+  typedef std::vector<FlatInfo *> FlatInfos;
+
 	if (usegdb)
 	{
 		lat::Filename tmpFilename ("/tmp/igprof-analyse.gdb.XXXXXXXX");
@@ -1050,24 +1045,25 @@ void symremap (ProfileInfo &prof, bool usegdb, bool demangle)
 		TextStreamer out (file);
 		out << "set width 10000\n";
 
-		for (ProfileInfo::Syms::const_iterator i = prof.syms ().begin ();
-		     i != prof.syms ().end ();
+		for (FlatInfos::const_iterator i = infos.begin ();
+		     i != infos.end ();
 			   i++)
 		{
-			ASSERT (*i);
-			SymbolInfo *symPtr = *i;
-			SymbolInfo &sym = *symPtr;
-			if ((! sym.FILE) || (! sym.FILEOFF) || (sym.FILE->NAME != ""))
+			SymbolInfo *sym = (*i)->SYMBOL;
+			if (!sym)
+        continue;
+			//ASSERT (sym);
+			if ((! sym->FILE) || (! sym->FILEOFF) || (sym->FILE->NAME != ""))
 				continue;
-			if (sym.FILE->NAME != prevfile)
-				out << "file " << sym.FILE->NAME << "\n";
-			out << "echo IGPROF_SYMCHECK <" << toString (int(symPtr)) << ">\\n\n";
-			out << "info line *" << toString (sym.FILEOFF);
-			prevfile = sym.FILE->NAME; 
+			if (sym->FILE->NAME != prevfile)
+				out << "file " << sym->FILE->NAME << "\n";
+			  out << "echo IGPROF_SYMCHECK <" << toString (int(sym)) << ">\\n\n";
+			  out << "info line *" << toString (sym->FILEOFF)<< "\n";
+			  prevfile = sym->FILE->NAME; 
 		}
 		file->close ();
     
-		lat::Argz args (std::string ("gdb --batch --command=") + std::string (tmpFilename));
+		lat::Argz args ("gdb --batch --command=" + std::string (tmpFilename));
 		lat::Pipe pipe;
 		lat::SubProcess gdb (args.argz (), lat::SubProcess::One 
 												 | lat::SubProcess::Read, &pipe);
@@ -1075,9 +1071,6 @@ void symremap (ProfileInfo &prof, bool usegdb, bool demangle)
 		lat::InputStreamBuf  isbuf (&is);
 		std::istream istd (&isbuf);
 		
-		lat::Regexp SYMCHECK_RE ("IGPROF_SYMCHECK<.*>");
-		lat::Regexp STARTS_AT_RE ("starts at .* <([A-Za-z0-9_]+)(\\+\\d+)?>");
-		lat::Regexp NO_LINE_NUMBER ("^No line number .* <([A-Za-z0-9_]+)(\\+\\d+)?>");
 		
 		std::string oldname;
 		std::string suffix;
@@ -1123,13 +1116,11 @@ void symremap (ProfileInfo &prof, bool usegdb, bool demangle)
 		lat::File *file = lat::TempFile::file (tmpFilename);
 		TextStreamer out (file);
 
-		for (ProfileInfo::Syms::const_iterator i = prof.syms ().begin ();
-		     i != prof.syms ().end ();
-			   i++)
+		for (FlatInfos::const_iterator i = infos.begin(); i != infos.end(); i++)
 		{
-      SymbolInfo *symbol = *i;
+      SymbolInfo *symbol = (*i)->SYMBOL;
       ASSERT (symbol);
-      out << (int) (*i) << ": " << symbol->NAME << "\n";
+      out << (int) (symbol) << ": " << symbol->NAME << "\n";
     }
     std::cerr << std::endl;
 		file->close ();
@@ -1980,7 +1971,7 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
 		if (m_config->verbose ())
 			std::cerr << "Resolving symbols" << std::endl;
 		// TODO: Enable symremap
-		symremap (prof, m_config->useGdb (), m_config->doDemangle ());
+		symremap (prof, sorted, m_config->useGdb (), m_config->doDemangle ());
 	}
 	
 	if (m_config->verbose ())
