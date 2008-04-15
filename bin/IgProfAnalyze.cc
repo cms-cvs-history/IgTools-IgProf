@@ -31,6 +31,45 @@
 #define IGPROF_MAX_DEPTH 1000
 
 
+class PipeReader
+{
+public:
+  PipeReader (const std::string &args, lat::IOChannel *source=0)
+    : m_argz(args),
+      m_is(0),
+      m_isbuf(0)
+  {
+    lat::SubProcess *cmd = 0;
+    if (!source)
+    {		
+      cmd = new lat::SubProcess(m_argz.argz(), 
+		                            lat::SubProcess::One | lat::SubProcess::Read,
+		                            &m_pipe);
+		}
+		else
+		{	
+		  cmd = new lat::SubProcess(m_argz.argz(), 
+	                              lat::SubProcess::One | lat::SubProcess::Read,
+	                              source, m_pipe.sink ());
+  	}
+		m_is = new lat::IOChannelInputStream(m_pipe.source ());
+    m_isbuf = new lat::InputStreamBuf(m_is);
+    m_istd  = new std::istream (m_isbuf);    
+  }
+  
+  std::istream &output (void)
+  {
+    return *m_istd;
+  }
+private:
+  lat::Argz m_argz;
+  lat::Pipe m_pipe;
+  std::istream *m_istd;
+  lat::IOChannelInputStream *m_is;
+  lat::InputStreamBuf *m_isbuf;
+};
+
+
 void dummy (void) {}
 
 
@@ -376,6 +415,7 @@ private:
 	unsigned int m_pos;
 };
 
+lat::Regexp LOAD_RE("LOAD\\s+off\\s+(0x[0-9A-Fa-f]+)\\s+vaddr\\s+(0x[0-9A-Fa-f]+) ");
 
 
 std::string
@@ -385,17 +425,17 @@ symlookup (ProfileInfo &prof, FileInfo *file,
 	// TODO: implement the symbol resolution stuff.
 	if ((lat::StringOps::find (symname, "@?") == 0) && (file->NAME != "") && (fileoff > 0))
 	{
-        char buffer[32];
-        sprintf (buffer, "+%d}",fileoff);
+    char buffer[32];
+    sprintf (buffer, "+%d}",fileoff);
 		return std::string ("@{") 
-		       + lat::Filename (file->NAME).asFile ().nondirectory ().name () 
-		       + buffer;
+		      + lat::Filename (file->NAME).asFile().nondirectory().name() 
+		      + buffer;
 	}
 	return symname;
 	
 	ProfileInfo::SymCacheByName &cacheByName = prof.symcacheByName ();
 	ProfileInfo::SymCacheByFile &cacheByFile = prof.symcacheByFile ();
-    (void) cacheByName;
+  (void) cacheByName;
 	if (useGdb)
 	{
 		lat::Filename filename (file->NAME);
@@ -403,9 +443,38 @@ symlookup (ProfileInfo &prof, FileInfo *file,
 			&& filename.isRegular ())
 		{
 			// int vmbase = 0;
-			lat::Argz objectDumpCmdline (std::string ("objdump -p ") + std::string (filename));
-			lat::SubProcess objectDump (objectDumpCmdline.argz ());
-			
+      PipeReader objdump ("objdump -p " + std::string (filename));
+      
+      std::string oldname;
+      std::string suffix;
+      SymbolInfo *sym = 0;
+      (void) sym;
+      lat::RegexpMatch match;
+      int vmbase;
+      
+      while (objdump.output())
+      {
+      	std::string line;
+      	std::getline (objdump.output(), line);
+      
+      	if (!objdump.output()) break;
+      	if (line.empty()) continue;
+
+      	if (LOAD_RE.match (line, 0, 0, &match))
+      	{
+          IntConverter toInt (line.c_str(), &match);
+          vmbase=toInt (2, 16) - toInt (1, 16);
+          break;
+        }
+      }
+      //file.close ();
+      if (! match.matched ())
+      {
+        std::cerr << "Cannot determine VM base address for " 
+                  << filename << std::endl;
+      }
+      //TODO: add the part that does the nm.
+      ASSERT (false);
 		}
 	}
 	
@@ -486,41 +555,40 @@ public:
 	virtual enum FilterType type (void) const {return POST; }
 };
 
-void mergeToNode (NodeInfo *parent, 
-					NodeInfo *node)
+void mergeToNode (NodeInfo *parent, NodeInfo *node)
 {
-	NodeInfo::Nodes::const_iterator i = node->CHILDREN.begin ();
-	while (i != node->CHILDREN.end ())
+	NodeInfo::Nodes::const_iterator i = node->CHILDREN.begin();
+	while (i != node->CHILDREN.end())
 	{
 		NodeInfo *nodeChild = *i;
-		ASSERT (nodeChild->symbol ());
-		NodeInfo *parentChild = parent->getChildrenBySymbol (nodeChild->symbol ());
+		ASSERT (nodeChild->symbol());
+		NodeInfo *parentChild = parent->getChildrenBySymbol(nodeChild->symbol());
 		
 		// If the child is not already child of parent, simply add it.
 		if (!parentChild)
 		{
-			parent->CHILDREN.push_back (nodeChild);
-			node->removeChild (*i++);
+			parent->CHILDREN.push_back(nodeChild);
+			node->removeChild(*i++);
 			continue;
 		}
 		
 		// If the child is child of the parent, accumulate all its counters to the child of the parent
 		// and recursively merge it.
-		while (Counter *nodeChildCounter = Counter::popCounterFromRing (nodeChild->COUNTERS))
+		while (Counter *nodeChildCounter = Counter::popCounterFromRing(nodeChild->COUNTERS))
 		{
-			Counter *parentChildCounter = Counter::addCounterToRing (parentChild->COUNTERS,
-																	 nodeChildCounter->id ());
-			parentChildCounter->addFreqs (nodeChildCounter->freqs ());
-			parentChildCounter->addCounts (nodeChildCounter->counts ());
+			Counter *parentChildCounter = Counter::addCounterToRing(parentChild->COUNTERS,
+																	                            nodeChildCounter->id());
+			parentChildCounter->addFreqs(nodeChildCounter->freqs());
+			parentChildCounter->addCounts(nodeChildCounter->counts());
 		}
-		mergeToNode (parentChild, nodeChild);
+		mergeToNode(parentChild, nodeChild);
 		++i;
 	}
-	ASSERT (node == parent->getChildrenBySymbol (node->symbol ()));
-	unsigned int numOfChildren = parent->CHILDREN.size ();
-	parent->removeChild (node);
-	ASSERT (numOfChildren == parent->CHILDREN.size () + 1);		
-	ASSERT (!parent->getChildrenBySymbol (node->symbol ()));
+	ASSERT(node == parent->getChildrenBySymbol(node->symbol()));
+	unsigned int numOfChildren = parent->CHILDREN.size();
+	parent->removeChild(node);
+	ASSERT(numOfChildren == parent->CHILDREN.size() + 1);		
+	ASSERT(!parent->getChildrenBySymbol(node->symbol()));
 }
 
 
@@ -573,7 +641,8 @@ public:
     	// up calling something in the user space again, so we don't want
     	// to lose that information.)
 		std::cerr << "Symbol " << node->originalSymbol ()->NAME << " is "
-				  << " in " << node->originalSymbol ()->FILE->NAME <<". Merging." << std::endl;
+				      << " in " << node->originalSymbol ()->FILE->NAME 
+				      << ". Merging." << std::endl;
 		mergeToNode (parent, node);
 	}
 	virtual std::string name (void) const { return "remove std"; }
@@ -1063,25 +1132,18 @@ void symremap (ProfileInfo &prof, std::vector<FlatInfo *> infos, bool usegdb, bo
 		}
 		file->close ();
     
-		lat::Argz args ("gdb --batch --command=" + std::string (tmpFilename));
-		lat::Pipe pipe;
-		lat::SubProcess gdb (args.argz (), lat::SubProcess::One 
-												 | lat::SubProcess::Read, &pipe);
-		lat::IOChannelInputStream is (pipe.source ());
-		lat::InputStreamBuf  isbuf (&is);
-		std::istream istd (&isbuf);
-		
+    PipeReader gdb ("gdb --batch --command=" + std::string (tmpFilename));
 		
 		std::string oldname;
 		std::string suffix;
 		SymbolInfo *sym = 0;
 		
-		while (istd)
+		while (gdb.output())
 		{
 			std::string line;
-			std::getline (istd, line);
+			std::getline (gdb.output(), line);
 			
-			if (!istd)
+			if (!gdb.output())
 				break;
 			if (line.empty ())
 				continue;
@@ -1124,22 +1186,15 @@ void symremap (ProfileInfo &prof, std::vector<FlatInfo *> infos, bool usegdb, bo
     }
     std::cerr << std::endl;
 		file->close ();
-
-    lat::File symbolFile (tmpFilename);
-		lat::Argz args (std::string ("c++filt"));
-    lat::Pipe pipe;
-		lat::SubProcess cppfilt (args.argz (), 
-		                         lat::SubProcess::One | lat::SubProcess::Read, 
-		                         &symbolFile, pipe.sink ());
-    lat::IOChannelInputStream is (pipe.source ());
-    lat::InputStreamBuf  isbuf (&is);
-    std::istream istd (&isbuf);
     
-    while (istd)
+    lat::File symbolFile (tmpFilename);
+    PipeReader cppfilt ("c++filt", &symbolFile);
+    
+    while (cppfilt.output ())
     {
 			std::string line;
-			std::getline (istd, line);
-      if (! istd)
+			std::getline (cppfilt.output (), line);
+      if (! cppfilt.output ())
         break;
       if (line.empty ())
         continue;
