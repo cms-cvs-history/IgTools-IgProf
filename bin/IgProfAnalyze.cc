@@ -5,17 +5,11 @@
 #include <classlib/utils/Error.h>
 #include <classlib/utils/Signal.h>
 #include <classlib/utils/Regexp.h>
-#include <classlib/utils/Argz.h>
-#include <classlib/iobase/SubProcess.h>
-#include <classlib/iobase/Pipe.h>
 #include <classlib/iobase/File.h>
 #include <classlib/iobase/TempFile.h>
 #include <classlib/iotools/StorageInputStream.h>
 #include <classlib/iotools/BufferInputStream.h>
-#include <classlib/iotools/IOChannelInputStream.h>
 #include <classlib/iotools/IOChannelOutputStream.h>
-#include <classlib/iotools/InputStream.h>
-#include <classlib/iotools/InputStreamBuf.h>
 #include <iostream>
 #include <cstdarg>
 #include <string>
@@ -30,48 +24,7 @@
 
 #define IGPROF_MAX_DEPTH 1000
 
-
-class PipeReader
-{
-public:
-  PipeReader (const std::string &args, lat::IOChannel *source=0)
-    : m_argz(args),
-      m_is(0),
-      m_isbuf(0)
-  {
-    lat::SubProcess *cmd = 0;
-    if (!source)
-    {		
-      cmd = new lat::SubProcess(m_argz.argz(), 
-		                            lat::SubProcess::One | lat::SubProcess::Read,
-		                            &m_pipe);
-		}
-		else
-		{	
-		  cmd = new lat::SubProcess(m_argz.argz(), 
-	                              lat::SubProcess::One | lat::SubProcess::Read,
-	                              source, m_pipe.sink ());
-  	}
-		m_is = new lat::IOChannelInputStream(m_pipe.source ());
-    m_isbuf = new lat::InputStreamBuf(m_is);
-    m_istd  = new std::istream (m_isbuf);    
-  }
-  
-  std::istream &output (void)
-  {
-    return *m_istd;
-  }
-private:
-  lat::Argz m_argz;
-  lat::Pipe m_pipe;
-  std::istream *m_istd;
-  lat::IOChannelInputStream *m_is;
-  lat::InputStreamBuf *m_isbuf;
-};
-
-
 void dummy (void) {}
-
 
 void
 usage ()
@@ -87,23 +40,14 @@ usage ()
 }
 
 
-class FileInfo
-{
-public:
-	std::string NAME;
-	FileInfo (void) : NAME ("") {}
-	FileInfo (const std::string &name)
-	: NAME (name) {}
-};
-
 class SymbolInfo
 {
 public:
   std::string NAME;
 	FileInfo 	*FILE;
 	int 		FILEOFF;
-	SymbolInfo (const char *name, FileInfo *file, int fileoff)
-		: NAME (name), FILE (file), FILEOFF (fileoff), RANK (-1) {};
+	SymbolInfo(const char *name, FileInfo *file, int fileoff)
+		: NAME (name), FILE (file), FILEOFF (fileoff), RANK (-1) {}
 	int rank (void) { return RANK; }
 	void setRank (int rank) { RANK = rank; }
 private:
@@ -187,8 +131,17 @@ private:
 
 class ProfileInfo 
 {
+private:
+  struct FilesComparator
+  {
+    bool operator()(FileInfo *f1, FileInfo *f2) const
+    {
+      return strcmp(f1->NAME.c_str(), f2->NAME.c_str()) < 0;
+    }
+  };
+  
 public:
-	typedef std::vector<FileInfo *> Files;
+	typedef std::set<FileInfo *, FilesComparator> Files;
 	typedef std::vector<SymbolInfo *> Syms;
 	typedef std::vector<NodeInfo *> Nodes;
 	typedef std::vector<int> Counts;
@@ -200,10 +153,10 @@ public:
 
 	ProfileInfo (void)
 	{
-		FileInfo *unknownFile = new FileInfo ("<unknown>");
+		FileInfo *unknownFile = new FileInfo ("<unknown>", false);
 		SymbolInfo *spontaneousSym = new SymbolInfo ("<spontaneous>", unknownFile, 0);
 		m_spontaneous = new NodeInfo (spontaneousSym);
-		m_files.push_back (unknownFile);
+		m_files.insert (unknownFile);
 		m_syms.push_back (spontaneousSym);
 		m_nodes.push_back (m_spontaneous);	
 	};
@@ -415,14 +368,16 @@ private:
 	unsigned int m_pos;
 };
 
-lat::Regexp LOAD_RE("LOAD\\s+off\\s+(0x[0-9A-Fa-f]+)\\s+vaddr\\s+(0x[0-9A-Fa-f]+) ");
 
 
 std::string
-symlookup (ProfileInfo &prof, FileInfo *file, 
-		   int fileoff, const std::string& symname, bool useGdb)
+symlookup (FileInfo *file, int fileoff, const std::string& symname, bool useGdb)
 {
-	// TODO: implement the symbol resolution stuff.
+  // This helper function beautifies a symbol name in the following fashion:
+  // * If the useGdb option is true, it uses the symbol offset to look up,
+  //   via nm, the closest matching symbol.
+  // * If the useGdb option is not given and the symbol starts with @?
+  // * If any of the above match, it simply 
 	if ((lat::StringOps::find (symname, "@?") == 0) && (file->NAME != "") && (fileoff > 0))
 	{
     char buffer[32];
@@ -431,54 +386,11 @@ symlookup (ProfileInfo &prof, FileInfo *file,
 		      + lat::Filename (file->NAME).asFile().nondirectory().name() 
 		      + buffer;
 	}
-	return symname;
 	
-	ProfileInfo::SymCacheByName &cacheByName = prof.symcacheByName ();
-	ProfileInfo::SymCacheByFile &cacheByFile = prof.symcacheByFile ();
-  (void) cacheByName;
-	if (useGdb)
+	if (useGdb && lat::Filename(file->NAME).isRegular ())
 	{
-		lat::Filename filename (file->NAME);
-		if (cacheByFile.find (static_cast<const char *>(filename)) != cacheByFile.end () 
-			&& filename.isRegular ())
-		{
-			// int vmbase = 0;
-      PipeReader objdump ("objdump -p " + std::string (filename));
-      
-      std::string oldname;
-      std::string suffix;
-      SymbolInfo *sym = 0;
-      (void) sym;
-      lat::RegexpMatch match;
-      int vmbase;
-      
-      while (objdump.output())
-      {
-      	std::string line;
-      	std::getline (objdump.output(), line);
-      
-      	if (!objdump.output()) break;
-      	if (line.empty()) continue;
-
-      	if (LOAD_RE.match (line, 0, 0, &match))
-      	{
-          IntConverter toInt (line.c_str(), &match);
-          vmbase=toInt (2, 16) - toInt (1, 16);
-          break;
-        }
-      }
-      //file.close ();
-      if (! match.matched ())
-      {
-        std::cerr << "Cannot determine VM base address for " 
-                  << filename << std::endl;
-      }
-      //TODO: add the part that does the nm.
-      ASSERT (false);
-		}
-	}
-	
-	ASSERT (false);
+    return file->symbolsByOffset().lower_bound(fileoff)->second;
+  }
 	return symname;
 }
 
@@ -789,7 +701,7 @@ public:
 		{ return fileIter->second; }
 		else
 		{ 
-			FileInfo *file = new FileInfo (absname); 
+			FileInfo *file = new FileInfo (absname, m_useGdb); 
 			m_namedFiles.insert (FilesByName::value_type (absname, file));
 			int oldsize = m_files.size ();
 			int missingSize = fileid + 1 - oldsize; 
@@ -842,7 +754,7 @@ public:
 
 		pos (match.matchEnd ());
 		
-		symname = symlookup (*m_prof, file, fileoff, symname, m_useGdb);
+		symname = symlookup(file, fileoff, symname, m_useGdb);
 
 		SymbolInfo *sym = namedSymbols()[symname];
 		if (! sym)

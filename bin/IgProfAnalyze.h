@@ -11,6 +11,12 @@
 #include <classlib/utils/StringOps.h>
 #include <classlib/utils/Regexp.h>
 #include <classlib/utils/RegexpMatch.h>
+#include <classlib/utils/Argz.h>
+#include <classlib/iobase/Pipe.h>
+#include <classlib/iotools/IOChannelInputStream.h>
+#include <classlib/iotools/InputStream.h>
+#include <classlib/iotools/InputStreamBuf.h>
+#include <classlib/iobase/SubProcess.h>
 #include <string>
 #include <list>
 #include <iostream>
@@ -22,6 +28,39 @@ void pickUpMax (int &old, int candidate)
 	if (candidate > old)
 		old = candidate;
 }
+
+bool isWhitespace(char c)
+{
+  //^ \t\n\r\f\v
+  if (c == ' '
+      || c == '\t'
+      || c == '\n'
+      || c == '\r'
+      || c == '\f'
+      || c == '\v') return true;
+  return false;
+}
+
+class IntConverter
+{
+public:
+	IntConverter (const std::string &string, lat::RegexpMatch *match)
+	:m_string (string.c_str ()),
+	 m_match(match) {}
+
+	IntConverter (const char *string, lat::RegexpMatch *match)
+	:m_string (string),
+	 m_match (match) {}
+	
+	int operator() (int position, int base=10)
+	{
+		return strtol (m_string + m_match->matchPos (position), 0, base);
+	}
+private:
+	const char *m_string;
+	lat::RegexpMatch *m_match;
+};
+
 
 class Counter
 {
@@ -220,6 +259,140 @@ int Counter::s_isMaxMask = 0;
 int Counter::s_ticksCounterId = -1;
 int Counter::s_keyValue = -1;
 std::string Counter::s_keyName;
+
+class PipeReader
+{
+public:
+  PipeReader (const std::string &args, lat::IOChannel *source=0)
+    : m_argz(args),
+      m_is(0),
+      m_isbuf(0)
+  {
+    lat::SubProcess *cmd = 0;
+    if (!source)
+    {		
+      cmd = new lat::SubProcess(m_argz.argz(), 
+		                            lat::SubProcess::One | lat::SubProcess::Read,
+		                            &m_pipe);
+		}
+		else
+		{	
+		  cmd = new lat::SubProcess(m_argz.argz(), 
+	                              lat::SubProcess::One | lat::SubProcess::Read,
+	                              source, m_pipe.sink ());
+  	}
+		m_is = new lat::IOChannelInputStream(m_pipe.source ());
+    m_isbuf = new lat::InputStreamBuf(m_is);
+    m_istd  = new std::istream (m_isbuf);    
+  }
+  
+  std::istream &output (void)
+  {
+    return *m_istd;
+  }
+private:
+  lat::Argz m_argz;
+  lat::Pipe m_pipe;
+  std::istream *m_istd;
+  lat::IOChannelInputStream *m_is;
+  lat::InputStreamBuf *m_isbuf;
+};
+
+lat::Regexp LOAD_RE("LOAD\\s+off\\s+(0x[0-9A-Fa-f]+)\\s+vaddr\\s+(0x[0-9A-Fa-f]+)");
+
+class FileInfo
+{
+public:
+  typedef int Offset;
+  typedef std::map<Offset, std::string> SymbolCache;
+
+	std::string NAME;
+	FileInfo (void) : NAME ("") {}
+	FileInfo (const std::string &name, bool useGdb)
+	: NAME (name) 
+	{
+	  if (useGdb)
+	  {
+      this->createOffsetMap ();
+	  }
+	}
+
+  SymbolCache &symbolsByOffset()
+  { return m_symbolCache; };
+
+private:
+  void createOffsetMap (void)
+  {
+  	// int vmbase = 0;
+    PipeReader objdump("objdump -p " + std::string(NAME));
+    
+    std::string oldname;
+    std::string suffix;
+    lat::RegexpMatch match;
+    int vmbase;
+    
+    while (objdump.output())
+    {
+    	std::string line;
+    	std::getline(objdump.output(), line);
+    
+    	if (!objdump.output()) break;
+    	if (line.empty()) continue;
+    
+    	if (LOAD_RE.match(line, 0, 0, &match))
+    	{
+        IntConverter toInt(line.c_str(), &match);
+        vmbase=toInt(2, 16) - toInt(1, 16);
+        break;
+      }
+    }
+    
+    if (! match.matched())
+    {
+      std::cerr << "Cannot determine VM base address for " 
+                << NAME << std::endl;
+      exit(1);
+    }
+    
+    PipeReader nm("nm -t d -n " + std::string(NAME) + " 2>/dev/null");
+    while (nm.output())
+    {
+      std::string line;
+      std::getline(nm.output (), line);
+    
+      if (!nm.output()) break;
+      if (line.empty()) continue;
+      // If line does not match "^(\\d+) \\S (\S+)$", exit.
+      const char *begin = line.c_str();
+      char *endptr = 0;
+      int address = strtol(begin, &endptr, 10);
+      if (endptr == begin)
+        { continue; }
+      if (*endptr++ != ' ')
+        { continue; }
+      if (isWhitespace(*endptr++))
+        { continue; }
+      char *symbolName = endptr;
+      while (*endptr)
+      {
+        if (isWhitespace(*endptr))
+          { break; }
+        endptr++;
+      }
+      if (*endptr != 0)
+        { continue; }
+      // If line starts with '.' forget about it.
+      if (symbolName[0] == '.')
+        { continue; }
+      // Create a new symbol with the given fileoffset.
+      // The symbol is automatically saved in the FileInfo cache by offset.
+      m_symbolCache[address-vmbase] = symbolName;
+    }
+  }
+
+  SymbolCache m_symbolCache;
+};
+
 
 
 class NameChecker
@@ -446,25 +619,6 @@ toString (int value)
 	return buffer;
 }
 
-class IntConverter
-{
-public:
-	IntConverter (const std::string &string, lat::RegexpMatch *match)
-	:m_string (string.c_str ()),
-	 m_match(match) {}
-
-	IntConverter (const char *string, lat::RegexpMatch *match)
-	:m_string (string),
-	 m_match (match) {}
-	
-	int operator() (int position, int base=10)
-	{
-		return strtol (m_string + m_match->matchPos (position), 0, base);
-	}
-private:
-	const char *m_string;
-	lat::RegexpMatch *m_match;
-};
 
 class AlignedPrinter
 {
