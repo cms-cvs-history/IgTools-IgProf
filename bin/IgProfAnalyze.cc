@@ -379,13 +379,13 @@ symlookup (FileInfo *file, int fileoff, const std::string& symname, bool useGdb)
   // * If the useGdb option is not given and the symbol starts with @?
   // * If any of the above match, it simply 
 	if ((lat::StringOps::find (symname, "@?") == 0) && (file->NAME != "") && (fileoff > 0))
-	{
+  {
     char buffer[32];
     sprintf (buffer, "+%d}",fileoff);
-		return std::string ("@{") 
-		      + lat::Filename (file->NAME).asFile().nondirectory().name() 
-		      + buffer;
-	}
+    return std::string ("@{") 
+          + lat::Filename (file->NAME).asFile().nondirectory().name() 
+          + buffer;
+  }
 	
 	if (useGdb && lat::Filename(file->NAME).isRegular ())
 	{
