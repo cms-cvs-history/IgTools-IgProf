@@ -298,7 +298,25 @@ private:
   lat::InputStreamBuf *m_isbuf;
 };
 
-lat::Regexp LOAD_RE("LOAD\\s+off\\s+(0x[0-9A-Fa-f]+)\\s+vaddr\\s+(0x[0-9A-Fa-f]+)");
+bool skipWhitespaces(char *srcbuffer, char **destbuffer)
+{
+  if (!isWhitespace(*srcbuffer++))
+    return false;
+  while (isWhitespace(*srcbuffer))
+    { srcbuffer++; }
+  *destbuffer = srcbuffer;
+  return true;
+}
+
+bool skipString(char *strptr, char *srcbuffer, char **dstbuffer)
+{
+  // Skips strings of the form '\\s+strptr\\s+' starting from buffer.
+  // Returns a pointer to the first char which does not match the above regexp,
+  // or 0 in case the regexp is not matched.
+  if(strncmp(srcbuffer, strptr, strlen(strptr))) return false;
+  *dstbuffer = srcbuffer + strlen(strptr);
+  return true;
+}
 
 class FileInfo
 {
@@ -313,7 +331,7 @@ public:
 	{
 	  if (useGdb)
 	  {
-      this->createOffsetMap ();
+      this->createOffsetMap();
 	  }
 	}
 
@@ -323,28 +341,43 @@ public:
 private:
   void createOffsetMap (void)
   {
-  	// int vmbase = 0;
+    // FIXME: On macosx we should really use otool
+    #ifndef __APPLE__
     PipeReader objdump("objdump -p " + std::string(NAME));
     
     std::string oldname;
     std::string suffix;
     lat::RegexpMatch match;
-    int vmbase;
+    int vmbase = 0;
     
     while (objdump.output())
     {
-    	std::string line;
-    	std::getline(objdump.output(), line);
+      // Checks the following regexp
+      //    
+      //    LOAD\\s+off\\s+(0x[0-9A-Fa-f]+)\\s+vaddr\\s+(0x[0-9A-Fa-f]+)
+      // 
+      // and sets vmbase to be $2 - $1 of the first matched entry.
+      
+      std::string line;
+      std::getline(objdump.output(), line);
     
-    	if (!objdump.output()) break;
-    	if (line.empty()) continue;
-    
-    	if (LOAD_RE.match(line, 0, 0, &match))
-    	{
-        IntConverter toInt(line.c_str(), &match);
-        vmbase=toInt(2, 16) - toInt(1, 16);
-        break;
-      }
+      if (!objdump.output()) break;
+      if (line.empty()) continue;
+      
+      char *lineptr = line.c_str();
+      if (!skipString("LOAD", lineptr, &lineptr)) continue;
+      if (!skipWhitespaces(lineptr, &lineptr)) continue;
+      if (!skipString("off", lineptr)) continue;
+      char *endptr = 0;
+      int initialBase = strtol(lineptr, &endptr, 16);
+      if (lineptr == endptr) continue;
+      if (!skipWhitespaces(endptr, &endptr)) continue;
+      if (!skipString("vaddr", endptr, &lineptr)) continue;
+      if (!skipWhitespaces(lineptr, &lineptr)) continue;
+      int finalBase = strtol(lineptr, &endptr, 16);
+      if (lineptr == endptr) continue;
+      vmbase=finalBase - initialBase;
+      break;
     }
     
     if (! match.matched())
@@ -388,6 +421,7 @@ private:
       // The symbol is automatically saved in the FileInfo cache by offset.
       m_symbolCache[address-vmbase] = symbolName;
     }
+    #endif /* __APPLE__ */
   }
 
   SymbolCache m_symbolCache;
