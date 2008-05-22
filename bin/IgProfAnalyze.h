@@ -298,7 +298,7 @@ private:
   lat::InputStreamBuf *m_isbuf;
 };
 
-bool skipWhitespaces(char *srcbuffer, char **destbuffer)
+bool skipWhitespaces(const char *srcbuffer, const char **destbuffer)
 {
   if (!isWhitespace(*srcbuffer++))
     return false;
@@ -308,7 +308,7 @@ bool skipWhitespaces(char *srcbuffer, char **destbuffer)
   return true;
 }
 
-bool skipString(char *strptr, char *srcbuffer, char **dstbuffer)
+bool skipString(const char *strptr, const char *srcbuffer, const char **dstbuffer)
 {
   // Skips strings of the form '\\s+strptr\\s+' starting from buffer.
   // Returns a pointer to the first char which does not match the above regexp,
@@ -347,9 +347,9 @@ private:
     
     std::string oldname;
     std::string suffix;
-    lat::RegexpMatch match;
     int vmbase = 0;
-    
+    bool matched = false;
+
     while (objdump.output())
     {
       // Checks the following regexp
@@ -364,30 +364,33 @@ private:
       if (!objdump.output()) break;
       if (line.empty()) continue;
       
-      char *lineptr = line.c_str();
+      const char *lineptr = line.c_str();
+      if (!skipWhitespaces(lineptr, &lineptr)) continue;
       if (!skipString("LOAD", lineptr, &lineptr)) continue;
       if (!skipWhitespaces(lineptr, &lineptr)) continue;
-      if (!skipString("off", lineptr)) continue;
+      if (!skipString("off", lineptr, &lineptr)) continue;
       char *endptr = 0;
       int initialBase = strtol(lineptr, &endptr, 16);
       if (lineptr == endptr) continue;
-      if (!skipWhitespaces(endptr, &endptr)) continue;
-      if (!skipString("vaddr", endptr, &lineptr)) continue;
+      lineptr = endptr;
+      if (!skipWhitespaces(lineptr, &lineptr)) continue;
+      if (!skipString("vaddr", lineptr, &lineptr)) continue;
       if (!skipWhitespaces(lineptr, &lineptr)) continue;
       int finalBase = strtol(lineptr, &endptr, 16);
       if (lineptr == endptr) continue;
       vmbase=finalBase - initialBase;
+      matched = true;
       break;
     }
     
-    if (! match.matched())
+    if (!matched)
     {
       std::cerr << "Cannot determine VM base address for " 
                 << NAME << std::endl;
       exit(1);
     }
     
-    PipeReader nm("nm -t d -n " + std::string(NAME) + " 2>/dev/null");
+    PipeReader nm("nm -t d -n " + std::string(NAME));
     while (nm.output())
     {
       std::string line;
@@ -399,17 +402,17 @@ private:
       const char *begin = line.c_str();
       char *endptr = 0;
       int address = strtol(begin, &endptr, 10);
-      if (endptr == begin)
-        { continue; }
-      if (*endptr++ != ' ')
-        { continue; }
+      if (endptr == begin) { continue; }
+
+      if (*endptr++ != ' ') { continue; }
+
       if (isWhitespace(*endptr++))
         { continue; }
+      if (*endptr++ != ' ') { continue; }
       char *symbolName = endptr;
-      while (*endptr)
+      
+      while (*endptr && !isWhitespace(*endptr))
       {
-        if (isWhitespace(*endptr))
-          { break; }
         endptr++;
       }
       if (*endptr != 0)
