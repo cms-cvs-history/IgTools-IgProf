@@ -322,8 +322,26 @@ class FileInfo
 {
 public:
   typedef int Offset;
-  typedef std::map<Offset, std::string> SymbolCache;
+private:
+  struct CacheItem {
+    CacheItem (Offset offset, const std::string &name)
+    :OFFSET(offset), NAME(name) {};
+    Offset OFFSET;
+    std::string NAME;
+  };
 
+  typedef std::vector<CacheItem> SymbolCache;
+  
+  struct CacheItemComparator {
+    bool operator()(const CacheItem& a, 
+                    const int &b) const
+    { return a.OFFSET < b; }
+      
+    bool operator()(const int& a, 
+                   const CacheItem &b) const
+    { return a > b.OFFSET; }    
+  };
+public:
   std::string NAME;
   FileInfo (void) : NAME ("") {}
   FileInfo (const std::string &name, bool useGdb)
@@ -335,9 +353,24 @@ public:
     }
   }
 
-  SymbolCache &symbolsByOffset()
-  { return m_symbolCache; };
-
+  const char *symbolByOffset(Offset offset)
+  {
+    SymbolCache::iterator i = lower_bound(m_symbolCache.begin(),
+                                          m_symbolCache.end(),
+                                          offset, CacheItemComparator());
+    if (i == m_symbolCache.end())
+      return 0;
+    return i->NAME.c_str();
+  }
+  Offset next(Offset offset)
+  {
+    SymbolCache::iterator i = upper_bound(m_symbolCache.begin(),
+                                          m_symbolCache.end(),
+                                          offset, CacheItemComparator());
+    if (i == m_symbolCache.end())
+      return 0;
+    return i->OFFSET;      
+  }
 private:
   void createOffsetMap (void)
   {
@@ -422,7 +455,7 @@ private:
         { continue; }
       // Create a new symbol with the given fileoffset.
       // The symbol is automatically saved in the FileInfo cache by offset.
-      m_symbolCache[address-vmbase] = symbolName;
+      m_symbolCache.push_back(CacheItem(address-vmbase, symbolName));
     }
     #endif /* __APPLE__ */
   }

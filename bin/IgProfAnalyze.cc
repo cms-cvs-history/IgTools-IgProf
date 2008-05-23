@@ -389,7 +389,7 @@ symlookup (FileInfo *file, int fileoff, const std::string& symname, bool useGdb)
   
   if (useGdb && lat::Filename(file->NAME).isRegular ())
   {
-    return file->symbolsByOffset().lower_bound(fileoff)->second;
+    return file->symbolByOffset(fileoff);
   }
   return symname;
 }
