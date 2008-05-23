@@ -324,10 +324,11 @@ public:
   typedef int Offset;
 private:
   struct CacheItem {
-    CacheItem (Offset offset, const std::string &name)
-    :OFFSET(offset), NAME(name) {};
+    CacheItem (Offset offset, const std::string &name, Offset size)
+    :OFFSET(offset), NAME(name), SIZE(size) {};
     Offset OFFSET;
     std::string NAME;
+    Offset SIZE;
   };
 
   typedef std::vector<CacheItem> SymbolCache;
@@ -339,7 +340,7 @@ private:
       
     bool operator()(const int& a, 
                    const CacheItem &b) const
-    { return a > b.OFFSET; }    
+    { return a < b.OFFSET; }    
   };
 public:
   std::string NAME;
@@ -355,13 +356,26 @@ public:
 
   const char *symbolByOffset(Offset offset)
   {
+    if (m_symbolCache.empty())
+    { return 0; }
+
     SymbolCache::iterator i = lower_bound(m_symbolCache.begin(),
                                           m_symbolCache.end(),
                                           offset, CacheItemComparator());
-    if (i == m_symbolCache.end())
-      return 0;
-    return i->NAME.c_str();
+    if (i->OFFSET == offset)
+      return i->NAME.c_str();
+    
+    if (i == m_symbolCache.begin())
+    { return m_symbolCache.begin()->NAME.c_str(); }
+
+    --i;
+
+    if (offset - i->OFFSET <= i->SIZE)
+    { return i->NAME.c_str(); }
+
+    return 0;
   }
+
   Offset next(Offset offset)
   {
     SymbolCache::iterator i = upper_bound(m_symbolCache.begin(),
@@ -423,7 +437,7 @@ private:
       exit(1);
     }
     
-    PipeReader nm("nm -t d -n " + std::string(NAME));
+    PipeReader nm("nm -t d -n -S " + std::string(NAME));
     while (nm.output())
     {
       std::string line;
@@ -431,16 +445,23 @@ private:
     
       if (!nm.output()) break;
       if (line.empty()) continue;
-      // If line does not match "^(\\d+) \\S (\S+)$", exit.
+      // If line does not match "^(\\d+) ([0-9]+ )\\S (\S+)$", exit.
       const char *begin = line.c_str();
       char *endptr = 0;
       int address = strtol(begin, &endptr, 10);
       if (endptr == begin) { continue; }
 
       if (*endptr++ != ' ') { continue; }
-
-      if (isWhitespace(*endptr++))
-        { continue; }
+      // TODO: for the time being we ignore sizeless symbols, because they are
+      //       most likely not function. In the future we should try to
+      //       keep them in a separate (multi) map so that we can refer to 
+      //       symbols that are somehow out of 
+      char *endptr2;
+      int size = strtol(endptr, &endptr2, 10);
+      if (endptr == endptr2) { continue; }
+      if (*endptr2++ != ' ') { continue; }
+        endptr = endptr2;
+      if (isWhitespace(*endptr++)) { continue; }
       if (*endptr++ != ' ') { continue; }
       char *symbolName = endptr;
       
@@ -455,7 +476,7 @@ private:
         { continue; }
       // Create a new symbol with the given fileoffset.
       // The symbol is automatically saved in the FileInfo cache by offset.
-      m_symbolCache.push_back(CacheItem(address-vmbase, symbolName));
+      m_symbolCache.push_back(CacheItem(address-vmbase, symbolName, size));
     }
     #endif /* __APPLE__ */
   }
