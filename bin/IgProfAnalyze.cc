@@ -378,13 +378,14 @@ symlookup (FileInfo *file, int fileoff, const std::string& symname, bool useGdb)
   //   via nm, the closest matching symbol.
   // * If the useGdb option is not given and the symbol starts with @?
   // * If any of the above match, it simply 
+  std::string result = symname;
   if ((lat::StringOps::find (symname, "@?") == 0) && (file->NAME != "") && (fileoff > 0))
   {
     char buffer[32];
     sprintf (buffer, "+%d}",fileoff);
-    return std::string ("@{") 
-          + lat::Filename (file->NAME).asFile().nondirectory().name() 
-          + buffer;
+    result = std::string ("@{") 
+             + lat::Filename (file->NAME).asFile().nondirectory().name() 
+             + buffer;
   }
   
   if (useGdb && lat::Filename(file->NAME).isRegular ())
@@ -392,7 +393,7 @@ symlookup (FileInfo *file, int fileoff, const std::string& symname, bool useGdb)
     const char *name = file->symbolByOffset(fileoff); 
     if (name) return name; 
   }
-  return symname;
+  return result;
 }
 
 void
@@ -756,7 +757,7 @@ public:
     pos (match.matchEnd ());
     
     symname = symlookup(file, fileoff, symname, m_useGdb);
-
+    
     SymbolInfo *sym = namedSymbols()[symname];
     if (! sym)
     {
