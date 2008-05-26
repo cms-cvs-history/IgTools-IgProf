@@ -1396,7 +1396,6 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
   reader.assignLineToString (line);
   checkHeaders (line);
   
-//  vWithDefinitionRE.study();
   PathCollection paths ("PATH");
   
   int lineCount = 1;
@@ -1939,7 +1938,6 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
   {
     if (m_config->verbose ())
       std::cerr << "Resolving symbols" << std::endl;
-    // TODO: Enable symremap
     symremap (prof, sorted, m_config->useGdb (), m_config->doDemangle ());
   }
   
@@ -2183,7 +2181,6 @@ IgProfAnalyzerApplication::run (void)
     args.push_back (m_argv[i]);
   }
   ArgsList::const_iterator firstFile = this->parseArgs (args);
-  std::cerr << *firstFile << std::endl;
   ASSERT (firstFile != args.end ());
   ArgsLeftCounter left (args.end ());
   ASSERT (left (firstFile));
@@ -2257,31 +2254,31 @@ IgProfAnalyzerApplication::parseArgs (const ArgsList &args)
     else if (is ("--order", "-o"))
     {
       ASSERT (false);
-      // TODO:
+      // TODO: Implement --order option. (e201134) 
       // { $order = $ARGV[1] eq 'ascending' ? -1 : 1; shift (@ARGV); shift (@ARGV); }
     }
     else if (is ("--filter-file", "-F"))
     {
       ASSERT (false);
       // TODO:
-        // { push (@filterfiles, $ARGV[1]); shift (@ARGV); shift (@ARGV); }
+      // { push (@filterfiles, $ARGV[1]); shift (@ARGV); shift (@ARGV); }
     }
     else if (is ("--filter", "-f"))
     {
       ASSERT (false);
-      //TODO:
+      // TODO: Implement user filters. (84dd354) 
       // push (@userfilters, split(/,/, $ARGV[1])); shift (@ARGV); shift (@ARGV); }
     }
     else if (is ("--no-filter", "-nf"))
     {
       ASSERT (false);
-        // TODO:
+      // TODO: Implement the --no-filter option. (4572c80) 
       //{ @filters = (); shift (@ARGV); }     
     }
     else if (is ("--list-filters", "-lf"))
     {
       ASSERT (false);
-      // TODO:
+      // TODO: Implement external filters. (e3b0572) 
       // my %filters = map { s/igprof_filter_(.*)_(pre|post)/$1/g; $_ => 1}
       //        grep(/^igprof_filter_.*_(pre|post)$/, keys %{::});
       // print "Available filters are: @{[sort keys %filters]}\n";
@@ -2290,26 +2287,24 @@ IgProfAnalyzerApplication::parseArgs (const ArgsList &args)
     }
     else if (is ("--libs", "-l"))
     {
-      ASSERT (false);
-      // TODO:
-        // { $showlibs = 1; shift (@ARGV); }
+      m_config->setShowLib(true);
     }
     else if (is ("--callgrind", "-C"))
     {
       ASSERT (false);
-      // TODO:
+      // TODO: implement callgrind output (7e2618e)
       // { $callgrind = 1; shift (@ARGV); }
     }
     else if (is ("--xml", "-x"))
     {
       ASSERT (false);
-      // TODO:
+      // TODO: Implement XML output. (88bed9e) 
       // { $output = "xml"; shift (@ARGV); }
     }
     else if (is ("--html", "-h"))
     {
       ASSERT (false);
-      // TODO:
+      // TODO: Implement html output. (a5120da) 
       // { $output = "html"; shift (@ARGV); }
     }
     else if (is ("--text", "-t"))
