@@ -1698,7 +1698,7 @@ private:
 
   int cmpcallers (FlatInfo *a, FlatInfo *b)
   {
-    return a->DEPTH < b->DEPTH;
+    return b->DEPTH - a->DEPTH;
   }
   
   int m_counterId;
