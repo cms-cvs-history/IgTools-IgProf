@@ -201,7 +201,11 @@ public:
   Configuration (void);
 
   Filters & filters (void) {return m_filters;}
-  void addFilter (IgProfFilter *filter) {};
+  
+  void addFilter (IgProfFilter *filter) {
+    if (m_filtersEnabled)
+    { m_filters.push_back(filter); }
+  }
 
   void setKey (const std::string &value) {m_key = value; };
   bool hasKey (void) { return ! m_key.empty (); }
@@ -245,6 +249,13 @@ public:
   void setNormalValue (bool value) {m_normalValue = value; }
   bool normalValue (void) {return m_normalValue; }
   
+  void disableFilters(void) 
+  { 
+    m_filtersEnabled = false; 
+    m_filters.erase(m_filters.begin(), m_filters.end());
+    // TODO: remove dummy assertion. (bbc800a) 
+    ASSERT(m_filters.empty());
+  }
 private:
   Filters m_filters;
   std::string m_key;
@@ -258,6 +269,7 @@ private:
   int m_showCalls;
   bool m_verbose;
   bool m_normalValue;
+  bool m_filtersEnabled;
 };
 
 Configuration::Configuration ()
@@ -271,7 +283,8 @@ Configuration::Configuration ()
   m_showPaths (false),
   m_showCalls (-1),
   m_verbose (false),
-  m_normalValue (true)
+  m_normalValue (true),
+  m_filtersEnabled (true)
 {
 }
 
@@ -510,7 +523,7 @@ class RemoveIgProfFilter : public IgProfFilter
 {
 public:
   virtual void post (NodeInfo *parent,
-             NodeInfo *node)
+            NodeInfo *node)
   {
     if (!parent)
       return;
@@ -2235,12 +2248,12 @@ IgProfAnalyzerApplication::parseArgs (const ArgsList &args)
     else if (is ("--report", "-r") && left (arg))
     {
       std::string key = *(++arg);
-      m_config->setKey (key);
+      m_config->setKey(key);
       if (lat::StringOps::find (key, "MEM_") != -1)
-        m_config->filters ().push_back (new MallocFilter ());
+        m_config->addFilter(new MallocFilter());
       if (key == "MEM_LIVE")
-        m_config->filters ().push_back (new IgProfGccPoolAllocFilter ());
-      m_config->filters ().push_back (new RemoveIgProfFilter ());
+        m_config->addFilter(new IgProfGccPoolAllocFilter());
+      m_config->addFilter(new RemoveIgProfFilter());
     }
     else if (is ("--value") && left (arg) > 1)
     {
@@ -2271,9 +2284,9 @@ IgProfAnalyzerApplication::parseArgs (const ArgsList &args)
     }
     else if (is ("--no-filter", "-nf"))
     {
-      ASSERT (false);
       // TODO: Implement the --no-filter option. (4572c80) 
       //{ @filters = (); shift (@ARGV); }     
+      m_config->disableFilters();
     }
     else if (is ("--list-filters", "-lf"))
     {
