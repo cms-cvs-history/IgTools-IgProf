@@ -139,8 +139,7 @@ public:
     ASSERT ((s_isMaxMask & (1 << id)) == 0);
     ASSERT (countersByName ().find (name) == countersByName ().end ());
     
-    static lat::Regexp isMaxRE ("_MAX");
-    if (isMaxRE.match (name))
+    if (name.find("_MAX") != std::string::npos)
     { s_isMaxMask |= 1 << id; }
     countersByName ().insert (Counter::IdCache::value_type (name, id));
     if (isTick)
