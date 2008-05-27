@@ -2262,18 +2262,25 @@ IgProfAnalyzerApplication::parseArgs (const ArgsList &args)
       else if (type == "normal") {m_config->setNormalValue (true);}
       else {
         std::cerr << "Unexpected --value argument " << type << std::endl;
+        exit(1);
       }
     }
     else if (is ("--order", "-o"))
     {
-      ASSERT (false);
-      // TODO: Implement --order option. (e201134) 
+      std:string order = *(arg++);
+      if (order == "ascending") {m_config->setOrdering(Configuration::ASCENDING);}
+      elif (order == "descending") {m_config->setOrdering(Configuration::DESCENDING);}
+      else {
+        std::cerr << "Unexpected --order / -o argument " << order << std::endl;
+        exit(1);
+      }
+      // TESTME: Implement --order option. (e201134) 
       // { $order = $ARGV[1] eq 'ascending' ? -1 : 1; shift (@ARGV); shift (@ARGV); }
     }
     else if (is ("--filter-file", "-F"))
     {
       ASSERT (false);
-      // TODO:
+      // TODO: Implement --filter-file.
       // { push (@filterfiles, $ARGV[1]); shift (@ARGV); shift (@ARGV); }
     }
     else if (is ("--filter", "-f"))
