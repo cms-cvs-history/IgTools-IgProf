@@ -2267,9 +2267,9 @@ IgProfAnalyzerApplication::parseArgs (const ArgsList &args)
     }
     else if (is ("--order", "-o"))
     {
-      std:string order = *(arg++);
+      std::string order = *(arg++);
       if (order == "ascending") {m_config->setOrdering(Configuration::ASCENDING);}
-      elif (order == "descending") {m_config->setOrdering(Configuration::DESCENDING);}
+      else if (order == "descending") {m_config->setOrdering(Configuration::DESCENDING);}
       else {
         std::cerr << "Unexpected --order / -o argument " << order << std::endl;
         exit(1);
