@@ -26,8 +26,9 @@ IgProfAtomicInc (volatile IgProfAtomic *val)
     __asm__ __volatile__
 	("   lock; xaddl %0, (%1); incl %0;"
 	 : "=r" (result)
-	 : "r" (val), "0" (1));
-    return result+1;
+	 : "r" (val), "0" (1)
+	 : "cc", "memory");
+    return result;
 # elif __ppc__
     IgProfAtomic result;
     __asm__ __volatile__
@@ -52,7 +53,8 @@ IgProfAtomicDec (volatile IgProfAtomic *val)
     __asm__ __volatile__
 	("lock; xaddl %0, (%1); decl %0;"
 	 : "=r" (result)
-	 : "r" (val), "0" (-1));
+	 : "r" (val), "0" (-1)
+	 : "cc", "memory");
     return result;
 # elif __ppc__
     IgProfAtomic result;
