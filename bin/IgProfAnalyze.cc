@@ -391,6 +391,7 @@ symlookup (FileInfo *file, int fileoff, const std::string& symname, bool useGdb)
   //   via nm, the closest matching symbol.
   // * If the useGdb option is not given and the symbol starts with @?
   // * If any of the above match, it simply 
+  ASSERT(file);
   std::string result = symname;
   if ((lat::StringOps::find (symname, "@?") == 0) && (file->NAME != "") && (fileoff > 0))
   {
@@ -479,6 +480,29 @@ public:
     } while (initialCounter != next);
   }
   virtual std::string name (void) const { return "cumulative info"; }
+  virtual enum FilterType type (void) const {return POST; }
+};
+
+class CheckTreeConsistencyFilter : public IgProfFilter
+{
+public:
+  virtual void post (NodeInfo *parent,
+                     NodeInfo *node)
+  {
+  
+    Counter *initialCounter = node->COUNTERS;
+    if (! initialCounter) return;
+    Counter *next = initialCounter;
+    int loopCount = 0;
+    do
+    {
+      ASSERT (next->counts() >= 0);
+      ASSERT (next->freqs() >= 0);
+      ASSERT (next->cumulativeCounts() >= 0);
+      ASSERT (next->cumulativeFreqs() >= 0);
+    } while (initialCounter != next);
+  }
+  virtual std::string name (void) const { return "Check consitency of tree"; }
   virtual enum FilterType type (void) const {return POST; }
 };
 
@@ -715,13 +739,24 @@ public:
     if (fileIter != m_namedFiles.end ())
     { return fileIter->second; }
     else
-    { 
-      FileInfo *file = new FileInfo (absname, m_useGdb); 
+    {
+      FileInfo *file;
+      
+      if (lat::Filename(absname).isDirectory() == true)
+      {
+        file = new FileInfo("<dynamically generated>", false);
+      }
+      else 
+      {
+        file = new FileInfo (absname, m_useGdb); 
+      }
+ 
       m_namedFiles.insert (FilesByName::value_type (absname, file));
       int oldsize = m_files.size ();
       int missingSize = fileid + 1 - oldsize; 
       if (missingSize > 0)
-      { m_files.resize (fileid + 1);
+      { 
+        m_files.resize (fileid + 1);
         for (int i = oldsize; i < oldsize + missingSize; i++)
         { ASSERT (m_files[i] == 0); }
       }
@@ -750,15 +785,18 @@ public:
       IntConverter getIntMatch (line, &match);
       fileoff = getIntMatch (2);
       symname = match.matchString (line, 3);
-      file = getFile (getIntMatch (1));
+      int fileId = getIntMatch (1);
+      file = getFile(fileId);
+      ASSERT(file);
     }
     else if (fWithFilenameRE.match (line, pos (), 0, &match))
     {
       IntConverter getIntMatch (line, &match);
       fileoff = getIntMatch (3);
       symname = match.matchString (line, 4);
-      file = createFileInfo (match.matchString (line, 2), 
-                   getIntMatch (1));
+      file = createFileInfo (match.matchString (line, 2),
+                             getIntMatch (1));
+      ASSERT(file);
     }
     else
     {
@@ -897,6 +935,7 @@ public:
       //nodeInfo->COUNTERS->addFreqs (nodeCounter->cumulativeFreqs ());
       nodeInfo->COUNTERS->accumulateCounts (nodeCounter->cumulativeCounts ());
       nodeInfo->COUNTERS->accumulateFreqs (nodeCounter->cumulativeFreqs ());
+
       nodeInfo->REFS++;
       ASSERT (recursiveNode != nodeInfo);
     }
@@ -1176,6 +1215,8 @@ private:
       ++countersCount;
       Counter *parentCounter = Counter::addCounterToRing (parent->COUNTERS, 
                                 childCounter->id ());
+      ASSERT(childCounter->freqs() >= 0);
+      ASSERT(childCounter->counts() >= 0);
       parentCounter->addFreqs (childCounter->freqs ());
       parentCounter->addCounts (childCounter->counts ());
       ASSERT (parentCounter->cumulativeCounts () == 0);
@@ -1533,7 +1574,7 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
     
       if (m_config->hasKey () && ! Counter::isKey (ctrid)) continue;
       if (! m_config->hasKey () && Counter::ringSize (counter) > 1) continue;
-      
+     
       counter->addFreqs (ctrfreq);
       counter->addCounts (ctrval);
     }
@@ -1958,11 +1999,23 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
     std::cerr << "Generating report\n" << std::endl;
   
   int keyId = m_config->keyId ();
+  std::cerr << keyId << std::endl;
+
+  FlatInfo *first = FlatInfo::first();
+  ASSERT (first);
   
-  Counter *topCounter = Counter::getCounterInRing (FlatInfo::first ()->COUNTERS, 
-                           keyId);
+  Counter *topCounter = Counter::getCounterInRing (first->COUNTERS, keyId);
+
+  ASSERT(topCounter);
   int totals = topCounter->cumulativeCounts ();
   int totfreq = topCounter->cumulativeFreqs ();
+
+  if (totals < 0) {
+    std::cerr << "There is something weird going on for " << first->name() << " in " << first->filename() << "\n";
+    std::cerr << "Cumulative counts is negative: " << totals << "!!!" << std::endl;
+    exit(1);
+  }
+  ASSERT(totfreq >= 0);
   
   typedef std::vector <MainGProfRow *> CumulativeSortedTable;
   typedef CumulativeSortedTable FinalTable;

@@ -116,12 +116,25 @@ public:
       { m_counts += value; }
   }
   
-  void accumulateFreqs (int value) { m_cumulativeFreqs += value; }
-  void accumulateCounts (int value) { 
+  void accumulateFreqs (int value) 
+  { 
+    ASSERT(m_cumulativeFreqs >= 0);
+    m_cumulativeFreqs += value; 
+    if (!m_cumulativeCounts) {
+      std::cerr << "Counter overflow. 64bit counters not implemented, yet." << std::endl;
+      exit(1);
+    }
+  }
+  void accumulateCounts (int value) {
+    ASSERT(m_cumulativeCounts >= 0);
     if (s_isMaxMask & (1 << this->m_type))
       { pickUpMax (this->m_cumulativeCounts, value); }
     else
       { this->m_cumulativeCounts += value; }
+    if (!m_cumulativeCounts) {
+      std::cerr << "Counter overflow. 64bit counters not implemented, yet." << std::endl;
+      exit(1);
+    }
   }
   // TODO: Create a "RingManipulator" rather than having all this static stuff
   //     in the Counter class????
@@ -343,12 +356,13 @@ private:
   };
 public:
   std::string NAME;
-  FileInfo (void) : NAME ("") {}
+  FileInfo (void) : NAME ("<dynamically generated>") {}
   FileInfo (const std::string &name, bool useGdb)
-  : NAME (name) 
+  : NAME (name)
   {
     if (useGdb)
     {
+      ASSERT(lat::Filename(name).isDirectory() == false);
       this->createOffsetMap();
     }
   }
@@ -389,7 +403,8 @@ private:
   {
     // FIXME: On macosx we should really use otool
     #ifndef __APPLE__
-    PipeReader objdump("objdump -p " + std::string(NAME));
+    std::string commandLine = "objdump -p " + std::string(NAME);
+    PipeReader objdump(commandLine);
     
     std::string oldname;
     std::string suffix;
@@ -433,6 +448,7 @@ private:
     {
       std::cerr << "Cannot determine VM base address for " 
                 << NAME << std::endl;
+      std::cerr << "Error while running `objdump -p " + std::string(NAME) + "`" << std::endl;
       exit(1);
     }
     
