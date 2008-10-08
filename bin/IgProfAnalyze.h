@@ -22,8 +22,9 @@
 #include <iostream>
 #include <sys/stat.h>
 #include <map>
+#include <stdint.h>
 
-void pickUpMax (int &old, int candidate)
+void pickUpMax (int64_t &old, int64_t candidate)
 {
   if (candidate > old)
     old = candidate;
@@ -52,9 +53,9 @@ public:
   :m_string (string),
    m_match (match) {}
   
-  int operator() (int position, int base=10)
+  int64_t operator() (int position, int base=10)
   {
-    return strtol (m_string + m_match->matchPos (position), 0, base);
+    return strtoll (m_string + m_match->matchPos (position), 0, base);
   }
 private:
   const char *m_string;
@@ -65,9 +66,9 @@ private:
 class Counter
 {
 public:
-  typedef int StorageType;
+  typedef int64_t StorageType;
 
-  Counter (int type, int counts=0, int freqs=0)
+  Counter (int type, StorageType counts=0,  StorageType freqs=0)
   : m_type (type),
     m_next (this),
     m_counts (counts),
@@ -77,7 +78,7 @@ public:
   { 
   }
   
-  Counter (const std::string &counterName, int counts=0, int freqs=0)
+  Counter (const std::string &counterName, StorageType counts=0, StorageType freqs=0)
   {
     Counter::Counter (getIdForCounterName (counterName), counts, freqs);
   }
@@ -108,31 +109,33 @@ public:
   StorageType counts (void) { return m_counts; }
   StorageType cumulativeFreqs (void) {return m_cumulativeFreqs; }
   StorageType cumulativeCounts (void) {return m_cumulativeCounts; }
-  void addFreqs (int value) { m_freqs += value;}
-  void addCounts (int value) {
+  void addFreqs (StorageType value) { m_freqs += value;}
+  void addCounts (StorageType  value) {
     if (s_isMaxMask & (1 << this->m_type))
       { pickUpMax (this->m_counts, value);}
     else
       { m_counts += value; }
   }
   
-  void accumulateFreqs (int value) 
+  void accumulateFreqs (StorageType value) 
   { 
     ASSERT(m_cumulativeFreqs >= 0);
     m_cumulativeFreqs += value; 
-    if (!m_cumulativeCounts) {
+    if (m_cumulativeCounts < 0) {
       std::cerr << "Counter overflow. 64bit counters not implemented, yet." << std::endl;
+      std::cerr << "Final value: " << m_cumulativeFreqs << " delta: " << value << std::endl; 
       exit(1);
     }
   }
-  void accumulateCounts (int value) {
+  void accumulateCounts (StorageType value) {
     ASSERT(m_cumulativeCounts >= 0);
     if (s_isMaxMask & (1 << this->m_type))
       { pickUpMax (this->m_cumulativeCounts, value); }
     else
       { this->m_cumulativeCounts += value; }
-    if (!m_cumulativeCounts) {
+    if (m_cumulativeCounts < 0) {
       std::cerr << "Counter overflow. 64bit counters not implemented, yet." << std::endl;
+      std::cerr << "Final value: " << m_cumulativeCounts << " delta: " << value << std::endl;
       exit(1);
     }
   }
@@ -681,13 +684,13 @@ private:
 };
 
 std::string 
-thousands (int value, int leftPadding=0)
+thousands (int64_t value, int leftPadding=0)
 {
   // Converts an integer value to a string
   // adding `'` to separate thousands and possibly
   ASSERT (value >= 0);
   ASSERT (leftPadding >= 0);
-  int n = 1; int digitCount = 0;
+  int64_t n = 1; int digitCount = 0;
   std::string result = "";
   if (!value)
     result = "0";
@@ -717,11 +720,11 @@ thousands (int value, int leftPadding=0)
 
 
 std::string
-toString (int value)
+toString (int64_t value)
 {
   // FIXME: not thread safe... Do we actually care? Probably not.
   static char buffer [1024];
-  sprintf (buffer,"%d",value);
+  sprintf (buffer,"%lld",value);
   return buffer;
 }
 
@@ -729,7 +732,7 @@ toString (int value)
 class AlignedPrinter
 {
 public:
-  AlignedPrinter (int size)
+  AlignedPrinter (size_t size)
   :m_size (size)
   {
   }
@@ -741,13 +744,13 @@ public:
     fflush (stdout);
   }
 private:
-  int m_size;
+  size_t m_size;
 };
 
 class FractionPrinter
 {
 public:
-  FractionPrinter (int sizeN, int sizeD)
+  FractionPrinter (size_t sizeN, size_t sizeD)
   :m_sizeN (sizeN), m_sizeD (sizeD) 
   {
   }
@@ -761,8 +764,8 @@ public:
   }
   
 private:
-  int m_sizeN;
-  int m_sizeD;
+  size_t m_sizeN;
+  size_t m_sizeD;
 };
 
 class PrintIf

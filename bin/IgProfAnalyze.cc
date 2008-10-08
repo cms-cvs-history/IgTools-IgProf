@@ -493,7 +493,6 @@ public:
     Counter *initialCounter = node->COUNTERS;
     if (! initialCounter) return;
     Counter *next = initialCounter;
-    int loopCount = 0;
     do
     {
       ASSERT (next->counts() >= 0);
@@ -1348,8 +1347,8 @@ parseFunctionDef(const char *lineStart, Position &pos, unsigned int &symid)
 
 static bool
 parseCounterVal (const char *lineStart, Position &pos, 
-                 int &ctrid, int &ctrfreq, 
-                 int &ctrvalNormal, int &ctrvalStrange)
+                 int &ctrid, int64_t &ctrfreq, 
+                 int64_t &ctrvalNormal, int64_t &ctrvalStrange)
 {
   // Matches "V(\\d+):\\((\\d+),(\\d+)(,(\\d+))?\\)\\s*" and then sets the arguments accordingly. 
   const char *line = lineStart + pos ();
@@ -1397,7 +1396,7 @@ parseCounterDef(const std::string &line, int pos, int flags, lat::RegexpMatch *m
 }
 
 static bool
-parseLeak (const char *lineStart, Position &pos, int &leakAddress, int &leakSize)
+parseLeak (const char *lineStart, Position &pos, int &leakAddress, int64_t &leakSize)
 {
   // ";LK=\\(0x[\\da-z]+,\\d+\\)\\s*"
   const char *line = lineStart + pos ();
@@ -1523,12 +1522,12 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
     while (true)
     {
       int ctrid;
-      int ctrval;
-      int ctrfreq;
-      int ctrvalNormal;
-      int ctrvalStrange;
+      int64_t ctrval;
+      int64_t ctrfreq;
+      int64_t ctrvalNormal;
+      int64_t ctrvalStrange;
       int leakAddress;
-      int leakSize;
+      int64_t leakSize;
       
       if (line.size () == pos())
       { break; }
@@ -1770,12 +1769,12 @@ public:
 class OtherGProfRow : public GProfRow
 {
 public:
-  int SELF_COUNTS;
-  int CHILDREN_COUNTS;
-  int SELF_CALLS;
-  int TOTAL_CALLS;
-  int SELF_PATHS;
-  int TOTAL_PATHS;
+  int64_t SELF_COUNTS;
+  int64_t CHILDREN_COUNTS;
+  int64_t SELF_CALLS;
+  int64_t TOTAL_CALLS;
+  int64_t SELF_PATHS;
+  int64_t TOTAL_PATHS;
   
   void printDebugInfo (void)
   {
@@ -1790,8 +1789,8 @@ struct CompareCallersRow
 {
   bool operator () (OtherGProfRow *a, OtherGProfRow *b)
   { 
-    int callsDiff = ORDER * (a->SELF_CALLS - b->SELF_CALLS);
-    int cumDiff = ORDER * (a->SELF_COUNTS - b->SELF_COUNTS);
+    int64_t callsDiff = ORDER * (a->SELF_CALLS - b->SELF_CALLS);
+    int64_t cumDiff = ORDER * (a->SELF_COUNTS - b->SELF_COUNTS);
     if (callsDiff) return callsDiff < 0;
     if (cumDiff) return cumDiff < 0;
     return a->NAME < b->NAME;
@@ -1803,18 +1802,18 @@ class MainGProfRow : public GProfRow
 public:
   typedef std::set <OtherGProfRow *, CompareCallersRow<1> > Callers;
   typedef std::set <OtherGProfRow *, CompareCallersRow<-1> > Calls;
-
+  
   struct CountsData
   {
-    int COUNTS;
-    int FREQS;
-    CountsData (int counts=0, int freqs=0)
+    int64_t COUNTS;
+    int64_t FREQS;
+    CountsData (int64_t counts=0, int64_t freqs=0)
     :COUNTS (counts), FREQS (freqs) {}
   };
 
-  int CUM;
-  int SELF;
-  int KIDS;
+  int64_t CUM;
+  int64_t SELF;
+  int64_t KIDS;
   CountsData SELFALL;
   CountsData CUMALL;
   
@@ -1828,15 +1827,25 @@ public:
   Calls CALLS;
 };
 
-float percent (int a, int b)
+float percent (int64_t a, int64_t b)
 {
-  return static_cast<float> (a) / static_cast<float> (b) * 100.;
+  double value = static_cast<double>(a) / static_cast<double>(b);
+  if (value < 0. || value > 1.0) 
+  {
+    std::cerr << "Something is wrong. Invalid percentage value: " << value * 100. << std::endl;
+    std::cerr << "N: " << a << " D: " << b << std::endl;
+    std::cerr << "Quitting." << std::endl;  
+    // FIXME: remove assertion and simply quit.
+    ASSERT(false);
+    exit(1);
+  }
+  return value * 100.;
 }
 
 class GProfMainRowBuilder 
 {
 public:
-  GProfMainRowBuilder (FlatInfo *info, int keyId, int totals, int totfreq)
+  GProfMainRowBuilder (FlatInfo *info, int keyId, int64_t totals, int64_t totfreq)
    : m_info (info), m_row (0), m_keyId (keyId), 
      m_callmax (0), m_totals (totals), m_totfreq (totfreq)
   {
@@ -1925,16 +1934,16 @@ private:
   FlatInfo *m_info;
   MainGProfRow *m_row;
   unsigned int m_keyId;
-  int m_callmax;
-  int m_totals;
-  int m_totfreq;
+  int64_t m_callmax;
+  int64_t m_totals;
+  int64_t m_totfreq;
   Counter *m_selfCounter;
   MainGProfRow *m_mainCallrow; 
 };
 
 void
 printHeader (const char *description, const char *kind, 
-       bool showpaths, bool showcalls, int maxval, int maxcnt)
+       bool showpaths, bool showcalls, size_t maxval, size_t maxcnt)
 {
   std::cout << "\n" << std::string (70, '-') << "\n" 
         << description << "\n\n";
@@ -1945,8 +1954,8 @@ printHeader (const char *description, const char *kind,
   std::cout << "Function\n";
 }
 
-int
-max (int a, int b)
+int64_t
+max (int64_t a, int64_t b)
 {
   return a > b ? a : b;
 }
@@ -1955,9 +1964,9 @@ class SortRowBySelf
 {
 public:
   bool operator () (MainGProfRow *a, MainGProfRow *b) {
-    int diffSelf = a->SELF - b->SELF;
+    int64_t diffSelf = a->SELF - b->SELF;
     if (diffSelf) return diffSelf > 0;
-    int diffDepth = a->DEPTH - b->DEPTH;
+    int64_t diffDepth = a->DEPTH - b->DEPTH;
     if (diffDepth) return diffDepth > 0;
     return a->NAME < b->NAME;
   }
@@ -2007,8 +2016,8 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
   Counter *topCounter = Counter::getCounterInRing (first->COUNTERS, keyId);
 
   ASSERT(topCounter);
-  int totals = topCounter->cumulativeCounts ();
-  int totfreq = topCounter->cumulativeFreqs ();
+  int64_t totals = topCounter->cumulativeCounts ();
+  int64_t totfreq = topCounter->cumulativeFreqs ();
 
   if (totals < 0) {
     std::cerr << "There is something weird going on for " << first->name() << " in " << first->filename() << "\n";
@@ -2067,7 +2076,7 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
     bool showcalls = m_config->showCalls ();
     bool showlibs = m_config->showLib ();
     std::cout << "Counter: " << m_config->key () << std::endl;
-    int maxcnt = max (8,
+    int maxcnt= max (8,
               max (thousands (totals).size (), 
                    thousands (totfreq).size ()));
     bool isPerfTicks = m_config->key () == "PERF_TICKS";
@@ -2126,7 +2135,7 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
        i != table.end ();
        i++)
     {
-      int divlen = 34+3*maxval 
+      int64_t divlen = 34+3*maxval 
              + (showcalls ? 1 : 0)*(2*maxcnt+5) 
              + (showpaths ? 1 : 0)*(2*maxcnt+5);
       
