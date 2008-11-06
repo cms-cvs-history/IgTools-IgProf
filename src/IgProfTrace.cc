@@ -9,22 +9,19 @@ static const unsigned int MEM_POOL_SIZE = 8*1024*1024;
 static const int	  MERGE_RECS    = 128;
 
 /** Initialise a trace buffer.  */
-IgProfTrace::IgProfTrace(int opts)
-  : options_(opts),
-    restable_(0),
+IgProfTrace::IgProfTrace(void)
+  : restable_(0),
     callcache_(0),
     resfree_(0),
     stack_(0)
 {
-  if (opts & OptShared)
-    pthread_mutex_init(&mutex_, 0);
+  pthread_mutex_init(&mutex_, 0);
 
-  // If we are tracking resources, allocate a separate slab of memory
-  // the resource hash table.  This has to be big for large memory
-  // applications, so it's ok to allocate it separately.  Note the
-  // memory obtained here starts out as zeroed out.
-  if (opts & OptResources)
-    restable_ = (Resource **) allocateRaw(RESOURCE_HASH*sizeof(Resource *));
+  // Allocate a separate slab of memory the resource hash table.  This
+  // has to be big for large memory applications, so it's ok to
+  // allocate it separately.  Note the memory obtained here starts out
+  // as zeroed out.
+  restable_ = (Resource **) allocateRaw(RESOURCE_HASH*sizeof(Resource *));
   
   // Allocate the call cache next.
   callcache_ = (StackCache *) allocateSpace(MAX_DEPTH*sizeof(StackCache));
@@ -222,9 +219,15 @@ IgProfTrace::acquireResource(Record &rec, Counter *ctr)
 void
 IgProfTrace::push(void **stack, int depth, Record *recs, int nrecs)
 {
-  if (options_ & OptShared)
-    pthread_mutex_lock(&mutex_);
+  pthread_mutex_lock(&mutex_);
+  dopush(stack, depth, recs, nrecs);
+  pthread_mutex_unlock(&mutex_);
+}
 
+/** Actually push a call frame and its records into the buffer. */
+void
+IgProfTrace::dopush(void **stack, int depth, Record *recs, int nrecs)
+{
   // Make sure we operate on non-negative depth.  This allows callers
   // to do strip off call tree layers without checking for sufficient
   // depth themselves.
@@ -290,18 +293,13 @@ IgProfTrace::push(void **stack, int depth, Record *recs, int nrecs)
     if (recs[i].type & RELEASE)
       releaseResource(recs[i]);
   }
-
-  if (options_ & OptShared)
-    pthread_mutex_unlock(&mutex_);
 }
 
 void
 IgProfTrace::mergeFrom(IgProfTrace &other)
 {
-  if (options_ & OptShared)
-    pthread_mutex_lock(&mutex_);
-  if (other.options_ & OptShared)
-    pthread_mutex_lock(&other.mutex_);
+  pthread_mutex_lock(&mutex_);
+  pthread_mutex_lock(&other.mutex_);
 
   // Scan stack tree and insert each call stack, including resources.
   Record recs[MERGE_RECS];
@@ -310,10 +308,8 @@ IgProfTrace::mergeFrom(IgProfTrace &other)
   callstack[MAX_DEPTH] = stack_->address; // null really
   mergeFrom(0, other.stack_, &callstack[MAX_DEPTH], recs);
 
-  if (other.options_ & OptShared)
-    pthread_mutex_unlock(&other.mutex_);
-  if (options_ & OptShared)
-    pthread_mutex_unlock(&mutex_);
+  pthread_mutex_unlock(&other.mutex_);
+  pthread_mutex_unlock(&mutex_);
 }
 
 void
@@ -327,7 +323,7 @@ IgProfTrace::mergeFrom(int depth, Stack *frame, void **callstack, Record *recs)
     {
       if (rec == MERGE_RECS)
       {
-	push(callstack, depth, recs, rec);
+	dopush(callstack, depth, recs, rec);
 	rec = 0;
       }
 
@@ -343,7 +339,7 @@ IgProfTrace::mergeFrom(int depth, Stack *frame, void **callstack, Record *recs)
       {
 	if (rec == MERGE_RECS)
 	{
-	  push(callstack, depth, recs, rec);
+	  dopush(callstack, depth, recs, rec);
 	  rec = 0;
 	}
 
@@ -361,7 +357,7 @@ IgProfTrace::mergeFrom(int depth, Stack *frame, void **callstack, Record *recs)
     {
       if (rec == MERGE_RECS)
       {
-	push(callstack, depth, recs, rec);
+	dopush(callstack, depth, recs, rec);
 	rec = 0;
       }
 
@@ -375,7 +371,7 @@ IgProfTrace::mergeFrom(int depth, Stack *frame, void **callstack, Record *recs)
   }
 
   if (rec)
-    push(callstack, depth, recs, rec);
+    dopush(callstack, depth, recs, rec);
 
   // Merge the children.
   for (frame = frame->children; frame; frame = frame->sibling)
@@ -417,7 +413,6 @@ void
 IgProfTrace::debugDump(void)
 {
   fprintf (stderr, "TRACE BUFFER %p:\n", this);
-  fprintf (stderr, " OPTIONS:   %d\n", options_);
   fprintf (stderr, " RESTABLE:  %p\n", restable_);
   fprintf (stderr, " CALLCACHE: %p\n", callcache_);
 

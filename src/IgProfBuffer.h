@@ -41,7 +41,9 @@ protected:
 #     define rot(x,k) (((x)<<(k)) | ((x)>>(32-(k))))
       uint32_t a, b, c;
       a = b = c = 0xdeadbeef + sizeof (key);
+#if __WORDSIZE > 32
       b += key >> 32; // for 64-bit systems, may warn on 32-bit systems
+#endif
       a += key & 0xffffffffU;
       c ^= b; c -= rot(b,14);
       a ^= c; a -= rot(c,11);

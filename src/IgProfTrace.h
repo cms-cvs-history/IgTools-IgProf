@@ -11,9 +11,9 @@
 /** A resizeable profiler trace buffer.
 
     Each trace buffer tracks stack traces and their linked profiling
-    counter values.  Optionally the buffer may also account resources
-    linked with the counters: tracking which call stack acquired which
-    yet-unreleased resource and the size of the resource.
+    counter values.  The buffer also counts resources linked with the
+    counters: tracking which call stack acquired which yet-unreleased
+    resource and the size of the resource.
 
     The buffer owner is responsible for arranging correct handling of
     the buffer in presence of multiple threads.  Buffers that do not
@@ -170,11 +170,7 @@ public:
     Address	resource;	//< Resource identity for #ACQUIRE and #RELEASE.
   };
 
-  // Buffer configuration options.
-  static const int OptResources = 1;	 //< Buffer stores resources.
-  static const int OptShared = 2;        //< Multiple threads share the buffer.
-
-  IgProfTrace(int opts);
+  IgProfTrace(void);
   ~IgProfTrace(void);
 
   void			push(void **stack, int depth, Record *recs, int nrecs);
@@ -191,13 +187,13 @@ private:
   void			releaseResource(Resource **rlink, Resource *res);
   void			releaseResource(Record &rec);
   void			acquireResource(Record &rec, Counter *ctr);
+  void			dopush(void **stack, int depth, Record *recs, int nrecs);
   void			mergeFrom(int depth, Stack *frame, void **callstack, Record *recs);
 
   void			debugDump(void);
   static void		debugDumpStack(Stack *s, int depth);
 
   pthread_mutex_t	mutex_;		//< Concurrency protection.
-  int			options_;	//< Buffer configuration options.
   void			**poolfirst_;	//< Pointer to first memory pool.
   void			**poolcur_;	//< Pointer to current memory pool.
   Resource		**restable_;	//< Start of the resources hash.

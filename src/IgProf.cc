@@ -78,6 +78,7 @@ static const char	*s_options	= 0;
 static char		s_masterbufdata[sizeof(IgProfTrace)];
 static char		s_symcachedata[sizeof(IgProfSymCache)];
 static pthread_t	s_mainthread;
+static pthread_t	s_dumpthread;
 static pthread_key_t	s_bufkey;
 static pthread_key_t	s_flagkey;
 static char		s_outname [MAX_FNAME];
@@ -95,12 +96,40 @@ threadinits(void)
 static void
 initBuf(IgProfTraceAlloc &info, bool perthread)
 {
-  int options = IgProfTrace::OptResources;
-  if (s_pthreads && !perthread)
-    options |= IgProfTrace::OptShared;
-
   info.perthread = perthread;
-  info.buf = new IgProfTrace(options);
+  info.buf = new IgProfTrace;
+}
+
+/** Thread generating in-flight profile data dumps.  Handles both
+    external asynchronous and in-program synchronous dump requests.
+
+    The dumps are generated from this separate, non-profiled thread,
+    so that we can guarantee we will never attempt to lock the profile
+    pool lock recursively in the same thread.  */
+static void *
+initDumpThread(void *)
+{
+  int dodump = 0;
+  struct stat st;
+  while (true)
+  {
+    // If we are done processing, quit.  Give threads max ~1s to quit.
+    if (s_quitting && ++s_quitting > 100)
+      break;
+
+    // Check every once in a while if a dump has been requested.
+    if (s_dumpflag[0] && ! (++dodump % 128) && ! stat(s_dumpflag, &st))
+    {
+      unlink(s_dumpflag);
+      IgProf::dump();
+      dodump = 0;
+    }
+
+    // Have a nap.
+    usleep (10000);
+  }
+
+  return 0;
 }
 
 // -------------------------------------------------------------------
@@ -205,6 +234,8 @@ IgProf::initialize(int *moduleid, void (*threadinit)(void), bool perthread)
 #endif
     if (s_pthreads)
     {
+      pthread_create (&s_dumpthread, 0, &initDumpThread, 0);
+
       IgHook::hook(dopthread_create_hook_main.raw);
 #if __linux
       IgHook::hook(dopthread_create_hook_pthread20.raw);
@@ -225,7 +256,7 @@ IgProf::initialize(int *moduleid, void (*threadinit)(void), bool perthread)
 
   if (! s_masterbuf)
   {
-    s_masterbuf = new (s_masterbufdata) IgProfTrace(IgProfTrace::OptResources);
+    s_masterbuf = new (s_masterbufdata) IgProfTrace;
     s_symcache = new (s_symcachedata) IgProfSymCache;
   }
 
@@ -643,11 +674,11 @@ IgProfExitDump::~IgProfExitDump (void)
   if (! s_activated) return;
   IgProf::debug("merging thread id 0x%lx profile on final exit\n",
 		(unsigned long) pthread_self());
-  IgProf::exitThread(true);
+  IgProf::disable(true);
   s_activated = false;
   s_enabled = 0;
   s_quitting = 1;
-  IgProf::disable(true);
+  IgProf::exitThread(true);
   IgProf::dump();
   IgProf::debug("igprof quitting\n");
   s_initialized = false; // signal local data is unsafe to use

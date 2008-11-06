@@ -37,19 +37,20 @@ static int			s_moduleid	= -1;
 static void
 profileSignalHandler(int /* nsig */, siginfo_t * /* info */, void * /* ctx */)
 {
-  if (! IgProf::enabled(false))
-    return;
+  void *addresses [IgProfTrace::MAX_DEPTH];
+  bool enabled = IgProf::disable(false);
+  if (enabled)
+  {
+    if (IgProfTrace *buf = IgProf::buffer(s_moduleid))
+    {
+      int depth = IgHookTrace::stacktrace(addresses, IgProfTrace::MAX_DEPTH);
+      IgProfTrace::Record entry = { IgProfTrace::COUNT, &s_ct_ticks, 1, 1, 0 };
 
-  IgProfTrace *buf = IgProf::buffer(s_moduleid);
-  if (! buf)
-    return;
-
-  void			*addresses [IgProfTrace::MAX_DEPTH];
-  int			depth = IgHookTrace::stacktrace(addresses, IgProfTrace::MAX_DEPTH);
-  IgProfTrace::Record	entry = { IgProfTrace::COUNT, &s_ct_ticks, 1, 1, 0 };
-
-  // Drop two bottom frames, three top ones (stacktrace, me, signal frame).
-  buf->push(addresses+3, depth-4, &entry, 1);
+      // Drop two bottom frames, three top ones (stacktrace, me, signal frame).
+      buf->push(addresses+3, depth-4, &entry, 1);
+    }
+  }
+  IgProf::enable(false);
 }
 
 /** Enable profiling timer.  You should have called
