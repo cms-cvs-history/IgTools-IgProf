@@ -19,9 +19,6 @@ void *
 b (void *)
 {
     std::cerr << "b() called by thread " << getpid () << std::endl;
-    sigset_t newset;
-    sigset_t oldset;
-
     for (int j  = 0; j < 10; j++)
     {
 	std::cerr << "thread " << getpid ()<< " still alive" << std::endl;

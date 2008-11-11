@@ -17,6 +17,9 @@
 #include <classlib/iotools/InputStream.h>
 #include <classlib/iotools/InputStreamBuf.h>
 #include <classlib/iobase/SubProcess.h>
+#include <algorithm>
+#include <cstring>
+#include <cstdlib>
 #include <string>
 #include <list>
 #include <iostream>
@@ -656,7 +659,7 @@ class PathCollection
 public:
   typedef lat::StringList Paths;
   typedef Paths::const_iterator Iterator;
-  PathCollection (char *variableName)
+  PathCollection (const char *variableName)
   {
     char *value = getenv (variableName);
     if (!value)

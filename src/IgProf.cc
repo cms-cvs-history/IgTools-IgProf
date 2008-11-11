@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstdarg>
+#include <cstring>
 #include <cerrno>
 #include <list>
 #include <unistd.h>

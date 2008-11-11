@@ -12,12 +12,13 @@
 #include <classlib/iotools/IOChannelOutputStream.h>
 #include <iostream>
 #include <cstdarg>
+#include <cstring>
+#include <cstdlib>
 #include <string>
 #include <vector>
 #include <list>
 #include <map>
 #include <set>
-#include <stdlib.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>

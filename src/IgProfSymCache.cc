@@ -38,7 +38,7 @@ IgProfSymCache::roundAddressToSymbol(void *address)
   void     *symaddr = address;
   SymCache **sclink = &symcache_[hash((uintptr_t) address) & (SYMBOL_HASH-1)];
   SymCache *cached;
-  while (cached = *sclink)
+  while ((cached = *sclink))
   {
     // If we found it, return the saved address.
     if (cached->calladdr == address)
@@ -68,7 +68,7 @@ IgProfSymCache::roundAddressToSymbol(void *address)
   // Look up in the symbol table.
   bool found = false;
   Symbol **slink = &symtable_[hash((uintptr_t) symaddr) & (SYMBOL_HASH-1)];
-  while (s = *slink)
+  while ((s = *slink))
   {
     if (s->address == sym.address)
     {

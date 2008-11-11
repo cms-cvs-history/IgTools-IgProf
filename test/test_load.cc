@@ -3,6 +3,7 @@
 #include <signal.h>
 #include <iostream>
 #include <cassert>
+#include <cstdlib>
 
 void a5(int i) { free(malloc(30 + i%10)); }
 void a4(int i) { a5(i); }
