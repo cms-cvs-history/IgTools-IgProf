@@ -177,6 +177,9 @@ public:
   void			mergeFrom(IgProfTrace &other);
   Stack *		stackRoot(void) const;
 
+  void			lock(void);
+  void			unlock(void);
+
 private:
   Stack *		childStackNode(Stack *parent, void *address);
   Counter *		initCounter(Counter *&link, CounterDef *def, Stack *frame);

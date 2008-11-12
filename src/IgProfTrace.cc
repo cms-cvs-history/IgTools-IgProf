@@ -215,6 +215,16 @@ IgProfTrace::acquireResource(Record &rec, Counter *ctr)
     res->nextlive->prevlive = res;
 }
 
+/** Lock the trace buffer.  This is _only_ for dumping.  */
+void
+IgProfTrace::lock(void)
+{ pthread_mutex_lock(&mutex_); }
+
+/** Unlock the trace buffer.  This is _only_ for dumping.  */
+void
+IgProfTrace::unlock(void)
+{ pthread_mutex_unlock(&mutex_); }
+
 /** Push a call frame and its records into the buffer. */
 void
 IgProfTrace::push(void **stack, int depth, Record *recs, int nrecs)

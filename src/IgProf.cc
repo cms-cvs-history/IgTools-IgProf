@@ -4,6 +4,7 @@
 #include "IgTools/IgProf/src/IgProfAtomic.h"
 #include "IgTools/IgHook/interface/IgHook.h"
 #include "IgTools/IgHook/interface/IgHookTrace.h"
+#include <algorithm>
 #include <sys/types.h>
 #include <sys/time.h>
 #include <cstdlib>
@@ -28,9 +29,12 @@
 // Used to capture real user start arguments in our custom thread wrapper
 struct IgProfWrappedArg { void *(*start_routine)(void *); void *arg; };
 struct IgProfTraceAlloc { IgProfTrace *buf; bool perthread; };
-struct IgProfDumpInfo { int depth; int nsyms; int nlibs; int nctrs; };
+struct IgProfDumpInfo { int depth; int nsyms; int nlibs; int nctrs;
+			const char *tofile; FILE *output;
+			IgProfSymCache *symcache; };
 class IgProfExitDump { public: ~IgProfExitDump(void); };
 typedef std::list<void (*) (void)> IgProfCallList;
+typedef std::list<IgProfTraceAlloc *> IgProfBufList;
 
 // -------------------------------------------------------------------
 // Traps for this profiling module
@@ -71,19 +75,19 @@ static bool		s_activated	= false;
 static bool		s_pthreads	= false;
 static volatile int	s_quitting	= 0;
 static double		s_clockres	= 0;
+static pthread_mutex_t	s_buflock	= PTHREAD_MUTEX_INITIALIZER;
+static IgProfBufList    *s_buflist	= 0;
 static IgProfTraceAlloc	*s_bufs		= 0;
 static IgProfTrace	*s_masterbuf	= 0;
-static IgProfSymCache	*s_symcache	= 0;
 static IgProfCallList	*s_threadinits  = 0;
 static const char	*s_options	= 0;
 static char		s_masterbufdata[sizeof(IgProfTrace)];
-static char		s_symcachedata[sizeof(IgProfSymCache)];
 static pthread_t	s_mainthread;
 static pthread_t	s_dumpthread;
 static pthread_key_t	s_bufkey;
 static pthread_key_t	s_flagkey;
-static char		s_outname [MAX_FNAME];
-static char		s_dumpflag [MAX_FNAME];
+static char		s_outname[MAX_FNAME];
+static char		s_dumpflag[MAX_FNAME];
 
 // Static data that needs to be constructed lazily on demand
 static IgProfCallList &
@@ -94,11 +98,153 @@ threadinits(void)
   return *s_threadinits;
 }
 
+static IgProfBufList &
+buflist(void)
+{
+  if (! s_buflist)
+    s_buflist = new IgProfBufList;
+  return *s_buflist;
+}
+
 static void
 initBuf(IgProfTraceAlloc &info, bool perthread)
 {
   info.perthread = perthread;
   info.buf = new IgProfTrace;
+}
+
+/** Dump out the profile data.  */
+static void
+dumpOneProfile(IgProfDumpInfo &info, IgProfTrace::Stack *frame)
+{
+  if (frame->address) // No address at root
+  {
+    IgProfSymCache::Symbol *sym = info.symcache->get(frame->address);
+
+    if (sym->id >= 0)
+      fprintf (info.output, "C%d FN%d+%d", info.depth, sym->id, sym->symoffset);
+    else
+    {
+      const char	*symname = sym->name;
+      char		symgen[32];
+
+      sym->id = info.nsyms++;
+
+      if (! symname || ! *symname)
+      {
+	sprintf(symgen, "@?%p", sym->address);
+	symname = symgen;
+      }
+
+      if (sym->binary->id >= 0)
+	fprintf(info.output, "C%d FN%d=(F%d+%d N=(%s))+%d",
+		info.depth, sym->id, sym->binary->id, sym->binoffset,
+		symname, sym->symoffset);
+      else
+	fprintf(info.output, "C%d FN%d=(F%d=(%s)+%d N=(%s))+%d",
+		info.depth, sym->id, (sym->binary->id = info.nlibs++),
+		sym->binary->name ? sym->binary->name : "",
+		sym->binoffset, symname, sym->symoffset);
+    }
+
+    for (IgProfTrace::Counter *ctr = frame->counters; ctr; ctr = ctr->next)
+    {
+      if (ctr->ticks || ctr->peak)
+      {
+	if (ctr->def->id >= 0)
+	  fprintf(info.output, " V%d:(%ju,%ju,%ju)",
+		  ctr->def->id, ctr->ticks, ctr->value, ctr->peak);
+	else
+	  fprintf(info.output, " V%d=(%s):(%ju,%ju,%ju)",
+		  (ctr->def->id = info.nctrs++), ctr->def->name,
+		  ctr->ticks, ctr->value, ctr->peak);
+	
+	for (IgProfTrace::Resource *res = ctr->resources; res; res = res->nextlive)
+	  fprintf(info.output, ";LK=(%p,%ju)", (void *) res->resource, res->size);
+      }
+    }
+    fputc('\n', info.output);
+  }
+
+  info.depth++;
+  for (frame = frame->children; frame; frame = frame->sibling)
+    dumpOneProfile(info, frame);
+  info.depth--;
+}
+
+/** Reset IDs used in dumping out profile data.  */
+static void
+dumpResetIDs(IgProfTrace::Stack *frame)
+{
+  for (IgProfTrace::Counter *ctr = frame->counters; ctr; ctr = ctr->next)
+    ctr->def->id = -1;
+
+  for (frame = frame->children; frame; frame = frame->sibling)
+    dumpResetIDs(frame);
+}
+
+/** Utility function to dump out the profiler data from all current
+    profile buffers: trace tree and live maps.  The strange calling
+    convention is so this can be launched as a thread.  */
+static void *
+dumpAllProfiles(void *arg)
+{
+  IgProfDumpInfo *info = (IgProfDumpInfo *) arg;
+  char outname[MAX_FNAME];
+  const char *tofile = info->tofile;
+  if (! tofile || ! tofile[0])
+  {
+    const char *progname = program_invocation_name;
+    const char *slash = strrchr(progname, '/');
+    if (slash && slash[1])
+      progname = slash+1;
+    else if (slash)
+      progname = "unnamed";
+
+    timeval tv;
+    gettimeofday(&tv, 0);
+    sprintf(outname, "|gzip -c>igprof.%.100s.%ld.%f.gz",
+	    progname, (long) getpid(), tv.tv_sec + 1e-6*tv.tv_usec);
+    tofile = outname;
+  }
+
+  IgProf::debug("dumping state to %s\n", tofile);
+  info->output = (tofile[0] == '|'
+		  ? (unsetenv("LD_PRELOAD"), popen(tofile+1, "w"))
+		  : fopen (tofile, "w+"));
+  if (! info->output)
+  {
+    IgProf::debug("can't write to output %s: %s (error %d)\n",
+		  tofile, strerror(errno), errno);
+    return 0;
+  }
+  fprintf(info->output, "P=(ID=%lu N=(%s) T=%f)\n",
+	  (unsigned long) getpid(), program_invocation_name, s_clockres);
+
+  pthread_mutex_lock(&s_buflock);
+  IgProfSymCache symcache;
+  info->symcache = &symcache;
+
+  IgProfBufList &bl = buflist();
+  for (IgProfBufList::iterator i = bl.begin(), e = bl.end(); i != e; ++i)
+    if (IgProfTraceAlloc *bufs = *i)
+      for (int ib = 0; ib < N_MODULES; ++ib)
+        if (IgProfTrace *buf = bufs[ib].buf)
+	{
+	  buf->lock();
+          dumpOneProfile(*info, buf->stackRoot());
+          dumpResetIDs(buf->stackRoot());
+	  buf->unlock();
+	}
+
+  s_masterbuf->lock();
+  dumpOneProfile(*info, s_masterbuf->stackRoot());
+  dumpResetIDs(s_masterbuf->stackRoot());
+  s_masterbuf->unlock();
+
+  fclose(info->output);
+  pthread_mutex_unlock(&s_buflock);
+  return 0;
 }
 
 /** Thread generating in-flight profile data dumps.  Handles both
@@ -108,7 +254,7 @@ initBuf(IgProfTraceAlloc &info, bool perthread)
     so that we can guarantee we will never attempt to lock the profile
     pool lock recursively in the same thread.  */
 static void *
-initDumpThread(void *)
+asyncDumpThread(void *)
 {
   int dodump = 0;
   struct stat st;
@@ -119,10 +265,11 @@ initDumpThread(void *)
       break;
 
     // Check every once in a while if a dump has been requested.
-    if (s_dumpflag[0] && ! (++dodump % 128) && ! stat(s_dumpflag, &st))
+    if (! (++dodump % 32) && ! stat(s_dumpflag, &st))
     {
       unlink(s_dumpflag);
-      IgProf::dump();
+      IgProfDumpInfo info = { 0, 0, 0, 0, s_outname, 0, 0 };
+      dumpAllProfiles(&info);
       dodump = 0;
     }
 
@@ -131,6 +278,15 @@ initDumpThread(void *)
   }
 
   return 0;
+}
+
+extern "C" void
+igprof_dump_now(const char *tofile)
+{
+  pthread_t tid;
+  IgProfDumpInfo info = { 0, 0, 0, 0, tofile, 0, 0 };
+  pthread_create(&tid, 0, &dumpAllProfiles, &info);
+  pthread_join(tid, 0);
 }
 
 // -------------------------------------------------------------------
@@ -183,11 +339,9 @@ IgProf::initialize(int *moduleid, void (*threadinit)(void), bool perthread)
 	opts++;
     }
 
-    if (! s_outname[0])
-      sprintf(s_outname, "igprof.%ld", (long) getpid());
-
     s_bufs = new IgProfTraceAlloc[N_MODULES];
     memset(s_bufs, 0, N_MODULES * sizeof(*s_bufs));
+    buflist().push_back(s_bufs);
 
     void *program = dlopen(0, RTLD_NOW);
     if (program && dlsym(program, "pthread_create"))
@@ -235,7 +389,8 @@ IgProf::initialize(int *moduleid, void (*threadinit)(void), bool perthread)
 #endif
     if (s_pthreads)
     {
-      pthread_create (&s_dumpthread, 0, &initDumpThread, 0);
+      if (s_dumpflag)
+        pthread_create (&s_dumpthread, 0, &asyncDumpThread, 0);
 
       IgHook::hook(dopthread_create_hook_main.raw);
 #if __linux
@@ -256,10 +411,7 @@ IgProf::initialize(int *moduleid, void (*threadinit)(void), bool perthread)
   IgProf::disable(true);
 
   if (! s_masterbuf)
-  {
     s_masterbuf = new (s_masterbufdata) IgProfTrace;
-    s_symcache = new (s_symcachedata) IgProfSymCache;
-  }
 
   int modid;
   for (modid = 0; modid < N_MODULES; ++modid)
@@ -305,6 +457,10 @@ IgProf::initThread(void)
   for (int i = 0; i < N_MODULES && s_bufs[i].buf; ++i)
     if (s_bufs[i].perthread)
       initBuf(bufs[i], true);
+
+  pthread_mutex_lock(&s_buflock);
+  buflist().push_back(bufs);
+  pthread_mutex_unlock(&s_buflock);
 }
 
 /** Finalise a thread.  */
@@ -318,6 +474,13 @@ IgProf::exitThread(bool final)
   IgProfTraceAlloc *bufs
     = (thread == s_mainthread ? s_bufs
        : (IgProfTraceAlloc *) pthread_getspecific(s_bufkey));
+
+  pthread_mutex_lock(&s_buflock);
+  IgProfBufList &bl = buflist();
+  IgProfBufList::iterator ibuf = std::find(bl.begin(), bl.end(), bufs);
+  if (ibuf != bl.end())
+    bl.erase(ibuf);
+  pthread_mutex_unlock(&s_buflock);
 
   for (int i = 0; i < N_MODULES && bufs; ++i)
   {
@@ -470,92 +633,6 @@ IgProf::debug(const char *format, ...)
   }
 }
 
-/** Dump out the profile data.  */
-static void
-dumpProfile(FILE *output, IgProfTrace::Stack *frame, IgProfDumpInfo &info)
-{
-  if (frame->address) // No address at root
-  {
-    IgProfSymCache::Symbol *sym = s_symcache->get(frame->address);
-
-    if (sym->id >= 0)
-      fprintf (output, "C%d FN%d+%d", info.depth, sym->id, sym->symoffset);
-    else
-    {
-      const char	*symname = sym->name;
-      char		symgen[32];
-
-      sym->id = info.nsyms++;
-
-      if (! symname || ! *symname)
-      {
-	sprintf(symgen, "@?%p", sym->address);
-	symname = symgen;
-      }
-
-      if (sym->binary->id >= 0)
-	fprintf(output, "C%d FN%d=(F%d+%d N=(%s))+%d",
-		info.depth, sym->id, sym->binary->id, sym->binoffset,
-		symname, sym->symoffset);
-      else
-	fprintf(output, "C%d FN%d=(F%d=(%s)+%d N=(%s))+%d",
-		info.depth, sym->id, (sym->binary->id = info.nlibs++),
-		sym->binary->name ? sym->binary->name : "",
-		sym->binoffset, symname, sym->symoffset);
-    }
-
-    for (IgProfTrace::Counter *ctr = frame->counters; ctr; ctr = ctr->next)
-    {
-      if (ctr->ticks || ctr->peak)
-      {
-	if (ctr->def->id >= 0)
-	  fprintf (output, " V%d:(%ju,%ju,%ju)",
-		   ctr->def->id, ctr->ticks, ctr->value, ctr->peak);
-	else
-	  fprintf (output, " V%d=(%s):(%ju,%ju,%ju)",
-		   (ctr->def->id = info.nctrs++), ctr->def->name,
-		   ctr->ticks, ctr->value, ctr->peak);
-	
-	for (IgProfTrace::Resource *res = ctr->resources; res; res = res->nextlive)
-	  fprintf (output, ";LK=(%p,%ju)", (void *) res->resource, res->size);
-      }
-    }
-    fputc ('\n', output);
-  }
-
-  info.depth++;
-  for (frame = frame->children; frame; frame = frame->sibling)
-    dumpProfile(output, frame, info);
-  info.depth--;
-}
-
-/** Dump out the profiler data: trace tree and live maps.  */
-void
-IgProf::dump(void)
-{
-  static bool dumping = false;
-  if (dumping) return;
-  dumping = true;
-
-  FILE *output = (s_outname[0] == '|'
-		  ? (unsetenv("LD_PRELOAD"), popen(s_outname+1, "w"))
-		  : fopen (s_outname, "w+"));
-  if (! output)
-  {
-    IgProf::debug("can't write to output %s: %d\n", s_outname, errno);
-    dumping = false;
-    return;
-  }
-
-  IgProfDumpInfo info = { 0, 0, 0, 0 };
-  IgProf::debug("dumping state to %s\n", s_outname);
-  fprintf(output, "P=(ID=%lu N=(%s) T=%f)\n",
-	  (unsigned long) getpid(), program_invocation_name, s_clockres);
-  dumpProfile(output, s_masterbuf->stackRoot(), info);
-  fclose(output);
-  dumping = false;
-}
-
 // -------------------------------------------------------------------
 /** A wrapper for starting user threads to enable profiling.  */
 static void *
@@ -661,7 +738,8 @@ dokill(IgHook::SafeData<igprof_dokill_t> &hook, pid_t pid, int sig)
     if (enabled)
     {
       IgProf::debug("kill(%d,%d) called, dumping state\n", (int) pid, sig);
-      IgProf::dump();
+      IgProfDumpInfo info = { 0, 0, 0, 0, s_outname, 0, 0 };
+      dumpAllProfiles(&info);
     }
     IgProf::enable(true);
   }
@@ -680,7 +758,8 @@ IgProfExitDump::~IgProfExitDump (void)
   s_enabled = 0;
   s_quitting = 1;
   IgProf::exitThread(true);
-  IgProf::dump();
+  IgProfDumpInfo info = { 0, 0, 0, 0, s_outname, 0, 0 };
+  dumpAllProfiles(&info);
   IgProf::debug("igprof quitting\n");
   s_initialized = false; // signal local data is unsafe to use
   s_pthreads = false; // make sure we no longer use threads stuff
