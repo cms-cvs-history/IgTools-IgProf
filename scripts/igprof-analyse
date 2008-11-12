@@ -1187,10 +1187,10 @@ sub analyse
     elsif ($output eq 'multihtml')
     {
         my $basefmt = ($key eq 'PERF_TICKS' ? "\%.2f" : "\%s");
-	sub rcell { return ("    <td align='right'>", @_, "</td>\n") }
-	sub lcell { return ("    <td align='left'>", @_, "</td>\n") }
-	sub hname { map { my $n = $_; $n =~ s/&/&amp;/g; $n =~ s/</&lt;/g; $n =~ s/>/&gt;/g; $n =~ s/ /&nbsp;/g; $n } @_ }
-	sub hctr { my ($v0, $v1) = @_; return (&rcell($v0), &lcell($v1 ? ("/&nbsp;", $v1) : "&nbsp;")) }
+	sub mrcell { return ("    <td align='right'>", @_, "</td>\n") }
+	sub mlcell { return ("    <td align='left'>", @_, "</td>\n") }
+	sub mhname { map { my $n = $_; $n =~ s/&/&amp;/g; $n =~ s/</&lt;/g; $n =~ s/>/&gt;/g; $n =~ s/ /&nbsp;/g; $n } @_ }
+	sub mhctr { my ($v0, $v1) = @_; return (&mrcell($v0), &mlcell($v1 ? ("/&nbsp;", $v1) : "&nbsp;")) }
 
         # Create the output directory if it doesn't exist 
         if (!-e $outputdir) {
@@ -1216,12 +1216,12 @@ sub analyse
 	    my ($rank, $name, $lib, $liboff, $pct,
 	        $cum, $self, $kids, $selfall, $cumall) = @{$$entry{SYM}};
 	    print IGFLAT1 "  <tr>\n",
-		  &rcell (sprintf("%.1f", $pct)),
-		  &rcell (&thousands(sprintf($basefmt, $cum))),
-		  ($showcalls ? &rcell(&thousands($$cumall[1])) : ()),
-		  ($showpaths ? &rcell(&thousands($$cumall[2])) : ()),
-	          &lcell("<a href='call_$rank.html'>", &hname ($name), "</a>"),
-	          ($showlibs ? &lcell(&hname($lib)) : ()),
+		  &mrcell (sprintf("%.1f", $pct)),
+		  &mrcell (&thousands(sprintf($basefmt, $cum))),
+		  ($showcalls ? &mrcell(&thousands($$cumall[1])) : ()),
+		  ($showpaths ? &mrcell(&thousands($$cumall[2])) : ()),
+	          &mlcell("<a href='call_$rank.html'>", &mhname ($name), "</a>"),
+	          ($showlibs ? &mlcell(&mhname($lib)) : ()),
 		 "  </tr>\n";
 	    last if $pct < 1;
 	}
@@ -1246,12 +1246,12 @@ sub analyse
 	        $cum, $self, $kids, $selfall, $cumall) = @{$$entry{SYM}};
 	    $pct = $self/$total*100;
 	    print IGFLAT2 "  <tr>\n",
-		  &rcell (sprintf("%.2f", $pct)),
-		  &rcell (&thousands(sprintf($basefmt, $self))),
-		  ($showcalls ? &rcell(&thousands($$selfall[1])) : ()),
-		  ($showpaths ? &rcell(&thousands($$selfall[2])) : ()),
-	          &lcell("<a href='call_$rank.html'>", &hname ($name), "</a>"),
-	          ($showlibs ? &lcell(&hname($lib)) : ()),
+		  &mrcell (sprintf("%.2f", $pct)),
+		  &mrcell (&thousands(sprintf($basefmt, $self))),
+		  ($showcalls ? &mrcell(&thousands($$selfall[1])) : ()),
+		  ($showpaths ? &mrcell(&thousands($$selfall[2])) : ()),
+	          &mlcell("<a href='call_$rank.html'>", &mhname ($name), "</a>"),
+	          ($showlibs ? &mlcell(&mhname($lib)) : ()),
 		 "  </tr>\n";
 	    last if $pct < 0.01;
 	}
@@ -1281,42 +1281,42 @@ sub analyse
 	    {
 		my ($rank, $name, $lib, $liboff, $pct, $val) = @$caller;
 		print IGCALL "  <tr valign='top' bgcolor='#e8e2e4'>\n",
-	    	      &lcell("&nbsp;"),
-	    	      &rcell(sprintf('%.1f', $pct)),
-	    	      &rcell("&nbsp;"), # should be leaders!
-	    	      &hctr (&thousands(map { sprintf($basefmt, $_) } @{$$val[0]})),
-		      ($showcalls ? &hctr(&thousands(@{$$val[1]})) : ()),
-		      ($showpaths ? &hctr(&thousands(@{$$val[2]})) : ()),
-		      &lcell ("&nbsp;&nbsp;&nbsp;&nbsp;<a href='call_$rank.html'>",
-			      &hname($name), "</a>&nbsp;[$rank]",
-			      ($showlibs ? ("&nbsp;", &hname($lib)) : ())),
+	    	      &mlcell("&nbsp;"),
+	    	      &mrcell(sprintf('%.1f', $pct)),
+	    	      &mrcell("&nbsp;"), # should be leaders!
+	    	      &mhctr (&thousands(map { sprintf($basefmt, $_) } @{$$val[0]})),
+		      ($showcalls ? &mhctr(&thousands(@{$$val[1]})) : ()),
+		      ($showpaths ? &mhctr(&thousands(@{$$val[2]})) : ()),
+		      &mlcell("&nbsp;&nbsp;&nbsp;&nbsp;<a href='call_$rank.html'>",
+			      &mhname($name), "</a>&nbsp;[$rank]",
+			      ($showlibs ? ("&nbsp;", &mhname($lib)) : ())),
 		      "  </tr>\n";
 	    }
 
 	    print IGCALL "  <tr valign='top'>\n",
-	    	  &lcell("[$rank]"),
-	    	  &rcell(sprintf('%.1f', $pct)),
-	    	  &rcell(&thousands(sprintf($basefmt, $cum))),
-	    	  &hctr (&thousands(map { sprintf($basefmt, $_) } $self, $kids)),
-		  ($showcalls ? &hctr(&thousands($$cumall[1]), "") : ()),
-		  ($showpaths ? &hctr(&thousands($$cumall[2]), "") : ()),
-		  &lcell (&hname($name),
-		          ($showlibs ? ("&nbsp;", &hname($lib)) : ())),
+	    	  &mlcell("[$rank]"),
+	    	  &mrcell(sprintf('%.1f', $pct)),
+	    	  &mrcell(&thousands(sprintf($basefmt, $cum))),
+	    	  &mhctr (&thousands(map { sprintf($basefmt, $_) } $self, $kids)),
+		  ($showcalls ? &mhctr(&thousands($$cumall[1]), "") : ()),
+		  ($showpaths ? &mhctr(&thousands($$cumall[2]), "") : ()),
+		  &mlcell(&mhname($name),
+		          ($showlibs ? ("&nbsp;", &mhname($lib)) : ())),
 		  "  </tr>\n";
 
 	    foreach my $callee (@{$$entry{CALLS}})
 	    {
 		my ($rank, $name, $lib, $liboff, $pct, $val) = @$callee;
 		print IGCALL "  <tr valign='top' bgcolor='#efeedc'>\n",
-	    	      &lcell("&nbsp;"),
-	    	      &rcell(sprintf('%.1f', $pct)),
-	    	      &rcell("&nbsp;"), # should be leaders!
-	    	      &hctr (&thousands(map { sprintf($basefmt, $_) } @{$$val[0]})),
-		      ($showcalls ? &hctr(&thousands(@{$$val[1]})) : ()),
-		      ($showpaths ? &hctr(&thousands(@{$$val[2]})) : ()),
-		      &lcell ("&nbsp;&nbsp;&nbsp;&nbsp;<a href='call_$rank.html'>",
-			      &hname($name), "</a>&nbsp;[$rank]",
-			      ($showlibs ? ("&nbsp;", &hname($lib)) : ())),
+	    	      &mlcell("&nbsp;"),
+	    	      &mrcell(sprintf('%.1f', $pct)),
+	    	      &mrcell("&nbsp;"), # should be leaders!
+	    	      &mhctr (&thousands(map { sprintf($basefmt, $_) } @{$$val[0]})),
+		      ($showcalls ? &mhctr(&thousands(@{$$val[1]})) : ()),
+		      ($showpaths ? &mhctr(&thousands(@{$$val[2]})) : ()),
+		      &mlcell("&nbsp;&nbsp;&nbsp;&nbsp;<a href='call_$rank.html'>",
+			      &mhname($name), "</a>&nbsp;[$rank]",
+			      ($showlibs ? ("&nbsp;", &mhname($lib)) : ())),
 		      "  </tr>\n";
 	    }
 	    print IGCALL "\n  <tr><td colspan='$spancol'><hr></td></tr>\n\n";
