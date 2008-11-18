@@ -961,9 +961,9 @@ sub analyse
     if ($output eq 'text')
     {
         print "Counter: $key\n";
-	my $maxcnt = &max(8, length(&thousands("$total")), length(&thousands("$totfreq")));
-	my $maxval = $maxcnt + ($key eq 'PERF_TICKS' ? 1 : 0);
         my $basefmt = ($key eq 'PERF_TICKS' ? "\%.2f" : "\%s");
+	my $maxcnt = &max(8, length(&thousands(sprintf $basefmt, $total)), length(&thousands("$totfreq")));
+	my $maxval = $maxcnt + ($key eq 'PERF_TICKS' ? 1 : 0);
 	my $valfmt = "\%${maxval}s / \%-${maxval}s";
 	my $cntfmt = "\%${maxcnt}s / \%-${maxcnt}s";
 
