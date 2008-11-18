@@ -16,6 +16,9 @@
 #include <classlib/iotools/IOChannelInputStream.h>
 #include <classlib/iotools/InputStream.h>
 #include <classlib/iotools/InputStreamBuf.h>
+#include <classlib/zip/GZIPInputStream.h>
+#include <classlib/zip/BZIPInputStream.h>
+#include <classlib/zip/ZipInputStream.h>
 #include <classlib/iobase/SubProcess.h>
 #include <algorithm>
 #include <cstring>
@@ -629,8 +632,17 @@ public:
   { 
         ASSERT (m_file);
     lat::StorageInputStream *storageInput = new lat::StorageInputStream (m_file);
+    lat::BufferInputStream *bufferStream = new lat::BufferInputStream (storageInput);
     addStream (storageInput);
-    addStream (new lat::BufferInputStream (storageInput));
+    addStream (bufferStream);
+    lat::Filename extension = lat::Filename(filename).extension();
+    if (extension == "gz" || extension == "gzip") {
+      addStream (new lat::GZIPInputStream(bufferStream));
+    } else if (extension == "zip") {
+      addStream (new lat::ZipInputStream(bufferStream));
+    } else if (extension == "bz2") {
+      addStream (new lat::BZIPInputStream(bufferStream));
+    }
   }
   ~FileReader (void)
   {
