@@ -2282,7 +2282,7 @@ IgProfAnalyzerApplication::run (void)
   }
   if (! m_config->isShowCallsDefined ())
   {
-    if (lat::StringOps::contains ("MEM", m_config->key ().c_str()))
+    if (lat::StringOps::contains (m_config->key (), "MEM_"))
       { m_config->setShowCalls (true); }
     else
       { m_config->setShowCalls (false); }
