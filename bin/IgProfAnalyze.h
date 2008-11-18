@@ -742,7 +742,7 @@ thousands (double value, int leftPadding, int decimalPositions)
   ASSERT(decimalPositions < 63);
   char buffer[64];
   double decimal = value-floor(value);
-  sprintf(buffer+1, "%f", decimal);
+  sprintf(buffer+1, "%.2f", decimal);
   buffer[decimalPositions+3] = 0;
   return result + &buffer[2];
 }

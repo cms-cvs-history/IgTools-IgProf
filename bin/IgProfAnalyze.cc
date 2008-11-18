@@ -24,7 +24,6 @@
 #include <fcntl.h>
 
 #define IGPROF_MAX_DEPTH 1000
-#define PERF_TICKS_RESOLUTION 0.01
 
 void dummy (void) {}
 
@@ -250,6 +249,9 @@ public:
 
   void setNormalValue (bool value) {m_normalValue = value; }
   bool normalValue (void) {return m_normalValue; }
+ 
+  void setTickPeriod(float value) {m_tickPeriod = value; }
+  float tickPeriod(void) {return m_tickPeriod; }
   
   void disableFilters(void) 
   { 
@@ -272,6 +274,7 @@ private:
   bool m_verbose;
   bool m_normalValue;
   bool m_filtersEnabled;
+  float m_tickPeriod;
 };
 
 Configuration::Configuration ()
@@ -286,7 +289,8 @@ Configuration::Configuration ()
   m_showCalls (-1),
   m_verbose (false),
   m_normalValue (true),
-  m_filtersEnabled (true)
+  m_filtersEnabled (true),
+  m_tickPeriod(0.01)
 {
 }
 
@@ -337,16 +341,21 @@ IgProfAnalyzerApplication::readAllDumps (ArgsList::const_iterator &begin,
   return prof;
 }
 
-void
-checkHeaders (const std::string &headerLine)
+float
+parseHeaders (const std::string &headerLine)
 {
   lat::Regexp matchHeader ("^P=\\(.*T=(.*)\\)");
-  if (!matchHeader.match (headerLine))
+  lat::RegexpMatch match;
+  
+  if (!matchHeader.match (headerLine, 0, 0, &match))
   {
-    std::cerr << "\nThis does not look like an igprof profile stats:\n  ";
-    std::cerr << headerLine << std::endl;
+    std::cerr << "\nThis does not look like an igprof profile stats:\n  "
+              << headerLine << std::endl;
     exit (1);
   }
+  ASSERT(match.numCaptures() == 1);
+  std::string result = match.matchString(headerLine.c_str(), 1);
+  return atof(result.c_str());
 }
 
 static int s_counter = 0;
@@ -1449,7 +1458,7 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
   line.reserve (FileOpener::BUFFER_SIZE);
   reader.readLine ();
   reader.assignLineToString (line);
-  checkHeaders (line);
+  m_config->setTickPeriod(parseHeaders (line));
   
   PathCollection paths ("PATH");
   
@@ -2079,10 +2088,12 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
     bool showlibs = m_config->showLib ();
     std::cout << "Counter: " << m_config->key () << std::endl;
     bool isPerfTicks = m_config->key () == "PERF_TICKS";
+    float tickPeriod = m_config->tickPeriod();
+
     int maxcnt=0;
     if (isPerfTicks && ! m_config->callgrind()) {
-      maxcnt = max (8, max (thousands (static_cast<double>(totals) * PERF_TICKS_RESOLUTION, 0, 2).size (), 
-                            thousands (static_cast<double>(totfreq) * PERF_TICKS_RESOLUTION, 0, 2).size ()));
+      maxcnt = max (8, max (thousands (static_cast<double>(totals) * tickPeriod, 0, 2).size (), 
+                            thousands (static_cast<double>(totfreq) * tickPeriod, 0, 2).size ()));
     }
     else {
       maxcnt = max (8, max (thousands (totals).size (), 
@@ -2104,7 +2115,7 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
       MainGProfRow &row = **i; 
       printf ("%7.1f  ", row.PCT);
       if (isPerfTicks && ! m_config->callgrind()) {
-        printf ("%*s  ", maxval, thousands (static_cast<double>(row.CUM) * PERF_TICKS_RESOLUTION, 0, 2).c_str());
+        printf ("%*s  ", maxval, thousands (static_cast<double>(row.CUM) * tickPeriod, 0, 2).c_str());
       } else {
         printf ("%*s  ", maxval, thousands (row.CUM).c_str ());
       }
@@ -2134,7 +2145,7 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
       printf ("%7.2f  ", pct);
        
       if (isPerfTicks && ! m_config->callgrind()) {
-        printf ("%*s  ", maxval, thousands (static_cast<double>(row.SELF) * PERF_TICKS_RESOLUTION, 0, 2).c_str());
+        printf ("%*s  ", maxval, thousands (static_cast<double>(row.SELF) * tickPeriod, 0, 2).c_str());
       }
       else {
         printf ("%*s  ", maxval, thousands (row.SELF).c_str ());
@@ -2189,8 +2200,8 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
         ASSERT (maxval);
         std::cout << std::string (maxval, '.') << "  ";
         if (isPerfTicks && ! m_config->callgrind()) {
-          valfmt (thousands (static_cast<double>(row.SELF_COUNTS) * PERF_TICKS_RESOLUTION, 0, 2), 
-                  thousands (static_cast<double>(row.CHILDREN_COUNTS) * PERF_TICKS_RESOLUTION, 0, 2));
+          valfmt (thousands (static_cast<double>(row.SELF_COUNTS) * tickPeriod, 0, 2), 
+                  thousands (static_cast<double>(row.CHILDREN_COUNTS) * tickPeriod, 0, 2));
         } else {
           valfmt (thousands (row.SELF_COUNTS), thousands (row.CHILDREN_COUNTS));
         }
@@ -2216,9 +2227,9 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
       printf ("%-8s", rankBuffer);
       printf ("%7.1f  ", mainRow.PCT);
       if (isPerfTicks && ! m_config->callgrind()) {
-        (AlignedPrinter (maxval)) (thousands (static_cast<double>(mainRow.CUM) * PERF_TICKS_RESOLUTION, 0, 2));
-        valfmt (thousands (static_cast<double>(mainRow.SELF) * PERF_TICKS_RESOLUTION, 0, 2),
-                thousands (static_cast<double>(mainRow.KIDS) * PERF_TICKS_RESOLUTION, 0, 2));
+        (AlignedPrinter (maxval)) (thousands (static_cast<double>(mainRow.CUM) * tickPeriod, 0, 2));
+        valfmt (thousands (static_cast<double>(mainRow.SELF) * tickPeriod, 0, 2),
+                thousands (static_cast<double>(mainRow.KIDS) * tickPeriod, 0, 2));
       }
       else {
         (AlignedPrinter (maxval)) (thousands (mainRow.CUM));
@@ -2247,8 +2258,8 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
         std::cout << std::string (maxval, '.') << "  ";
         
         if (isPerfTicks && ! m_config->callgrind()) {
-          valfmt (thousands (static_cast<double>(row.SELF_COUNTS) * PERF_TICKS_RESOLUTION, 0, 2),
-                  thousands (static_cast<double>(row.CHILDREN_COUNTS) * PERF_TICKS_RESOLUTION, 0, 2));
+          valfmt (thousands (static_cast<double>(row.SELF_COUNTS) * tickPeriod, 0, 2),
+                  thousands (static_cast<double>(row.CHILDREN_COUNTS) * tickPeriod, 0, 2));
         } else {
           valfmt (thousands (row.SELF_COUNTS), thousands (row.CHILDREN_COUNTS));
         }
