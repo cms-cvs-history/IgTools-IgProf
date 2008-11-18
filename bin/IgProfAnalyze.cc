@@ -24,6 +24,7 @@
 #include <fcntl.h>
 
 #define IGPROF_MAX_DEPTH 1000
+#define PERF_TICKS_RESOLUTION 0.01
 
 void dummy (void) {}
 
@@ -2077,11 +2078,18 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
     bool showcalls = m_config->showCalls ();
     bool showlibs = m_config->showLib ();
     std::cout << "Counter: " << m_config->key () << std::endl;
-    int maxcnt= max (8,
-              max (thousands (totals).size (), 
-                   thousands (totfreq).size ()));
     bool isPerfTicks = m_config->key () == "PERF_TICKS";
+    int maxcnt=0;
+    if (isPerfTicks && ! m_config->callgrind()) {
+      maxcnt = max (8, max (thousands (static_cast<double>(totals) * PERF_TICKS_RESOLUTION, 0, 2).size (), 
+                            thousands (static_cast<double>(totfreq) * PERF_TICKS_RESOLUTION, 0, 2).size ()));
+    }
+    else {
+      maxcnt = max (8, max (thousands (totals).size (), 
+                       thousands (totfreq).size ()));
+    }
     int maxval = maxcnt + (isPerfTicks ? 1 : 0);
+
     std::string basefmt = isPerfTicks ? "%.2f" : "%s";
     FractionPrinter valfmt (maxval, maxval);
     FractionPrinter cntfmt (maxcnt, maxcnt);
@@ -2095,10 +2103,15 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
     {
       MainGProfRow &row = **i; 
       printf ("%7.1f  ", row.PCT);
-      printf ("%*s  ", maxval, thousands (row.CUM).c_str ());
+      if (isPerfTicks && ! m_config->callgrind()) {
+        printf ("%*s  ", maxval, thousands (static_cast<double>(row.CUM) * PERF_TICKS_RESOLUTION, 0, 2).c_str());
+      } else {
+        printf ("%*s  ", maxval, thousands (row.CUM).c_str ());
+      }
       PrintIf p (maxcnt);
       p (showpaths, thousands (row.CUMALL.COUNTS));
       p (showcalls, thousands (row.CUMALL.FREQS));
+      
       printf ("%s [%d]", row.NAME.c_str (), row.RANK);
       if (showlibs) { std::cerr << row.FILENAME; }
       std::cout << "\n";
@@ -2119,7 +2132,13 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
       float pct = percent (row.SELF, totals);
         
       printf ("%7.2f  ", pct);
-      printf ("%*s  ", maxval, thousands (row.SELF).c_str ());
+       
+      if (isPerfTicks && ! m_config->callgrind()) {
+        printf ("%*s  ", maxval, thousands (static_cast<double>(row.SELF) * PERF_TICKS_RESOLUTION, 0, 2).c_str());
+      }
+      else {
+        printf ("%*s  ", maxval, thousands (row.SELF).c_str ());
+      }
       PrintIf p (maxcnt);
       p (showcalls, thousands (row.SELFALL.FREQS));
       p (showpaths, thousands (row.SELFALL.FREQS));
@@ -2150,7 +2169,7 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
       { 
         printf ("%-8s", "Rank");
         printf ("%% total  ");
-        (AlignedPrinter (maxcnt)) ("Self");
+        (AlignedPrinter (maxval)) ("Self");
         valfmt ("Self", "Children");
         printf ("  ");
         if (showcalls) {cntfmt ("Calls", "Total"); printf ("  ");}
@@ -2169,7 +2188,13 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
         printf ("%7.1f  ", row.PCT);
         ASSERT (maxval);
         std::cout << std::string (maxval, '.') << "  ";
-        valfmt (thousands (row.SELF_COUNTS), thousands (row.CHILDREN_COUNTS));
+        if (isPerfTicks && ! m_config->callgrind()) {
+          valfmt (thousands (static_cast<double>(row.SELF_COUNTS) * PERF_TICKS_RESOLUTION, 0, 2), 
+                  thousands (static_cast<double>(row.CHILDREN_COUNTS) * PERF_TICKS_RESOLUTION, 0, 2));
+        } else {
+          valfmt (thousands (row.SELF_COUNTS), thousands (row.CHILDREN_COUNTS));
+        }
+        
         printf ("  ");
         if (showcalls) 
         { 
@@ -2190,8 +2215,15 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
       sprintf (rankBuffer, "[%d]", mainRow.RANK);
       printf ("%-8s", rankBuffer);
       printf ("%7.1f  ", mainRow.PCT);
-      (AlignedPrinter (maxval)) (thousands (mainRow.CUM));
-      valfmt (thousands (mainRow.SELF), thousands (mainRow.KIDS));
+      if (isPerfTicks && ! m_config->callgrind()) {
+        (AlignedPrinter (maxval)) (thousands (static_cast<double>(mainRow.CUM) * PERF_TICKS_RESOLUTION, 0, 2));
+        valfmt (thousands (static_cast<double>(mainRow.SELF) * PERF_TICKS_RESOLUTION, 0, 2),
+                thousands (static_cast<double>(mainRow.KIDS) * PERF_TICKS_RESOLUTION, 0, 2));
+      }
+      else {
+        (AlignedPrinter (maxval)) (thousands (mainRow.CUM));
+        valfmt (thousands (mainRow.SELF), thousands (mainRow.KIDS));
+      }
       printf ("  ");
       if (showcalls) 
       { (AlignedPrinter (maxcnt)) (thousands (mainRow.CUMALL.FREQS));
@@ -2213,7 +2245,14 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
         std::cout << std::string (8, ' ');
         printf ("%7.1f  ", row.PCT);
         std::cout << std::string (maxval, '.') << "  ";
-        valfmt (thousands (row.SELF_COUNTS), thousands (row.CHILDREN_COUNTS));
+        
+        if (isPerfTicks && ! m_config->callgrind()) {
+          valfmt (thousands (static_cast<double>(row.SELF_COUNTS) * PERF_TICKS_RESOLUTION, 0, 2),
+                  thousands (static_cast<double>(row.CHILDREN_COUNTS) * PERF_TICKS_RESOLUTION, 0, 2));
+        } else {
+          valfmt (thousands (row.SELF_COUNTS), thousands (row.CHILDREN_COUNTS));
+        }
+        
         printf ("  ");
         
         if (showcalls) 

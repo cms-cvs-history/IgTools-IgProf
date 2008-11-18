@@ -26,6 +26,7 @@
 #include <string>
 #include <list>
 #include <iostream>
+#include <cmath>
 #include <sys/stat.h>
 #include <map>
 #include <stdint.h>
@@ -731,6 +732,19 @@ thousands (int64_t value, int leftPadding=0)
     result = std::string ("", leftPadding-digitCount) + result;
   }
   return result;
+}
+
+std::string
+thousands (double value, int leftPadding, int decimalPositions)
+{
+  int padding = leftPadding-decimalPositions;
+  std::string result = thousands(static_cast<int>(floor(value)), padding > 0 ? padding : 0);
+  ASSERT(decimalPositions < 63);
+  char buffer[64];
+  double decimal = value-floor(value);
+  sprintf(buffer+1, "%f", decimal);
+  buffer[decimalPositions+3] = 0;
+  return result + &buffer[2];
 }
 
 
