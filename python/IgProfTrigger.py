@@ -1,6 +1,6 @@
 import FWCore.ParameterSet.Config as cms
 
-igprof = cms.EDAnalyzer("IgProfTrigger",
+igprof = cms.EDAnalyzer("IgProfModule",
   reportEventInterval     = cms.untracked.int32(0),
   reportToFileAtBeginJob  = cms.untracked.string(''), #"|gzip -c>igprof.begin-job.gz"
   reportToFileAtEndJob    = cms.untracked.string(''), #"|gzip -c>igprof.end-job.gz"
