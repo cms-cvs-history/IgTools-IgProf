@@ -11,10 +11,10 @@
 #include <string>
 #include <dlfcn.h>
 
-class IgProfTrigger : public edm::EDAnalyzer
+class IgProfModule : public edm::EDAnalyzer
 {
 public:
-  IgProfTrigger(const edm::ParameterSet &ps)
+  IgProfModule(const edm::ParameterSet &ps)
     : dump_(0),
       prescale_(0),
       nrecord_(0),
@@ -26,8 +26,8 @@ public:
       if (void *sym = dlsym(0, "igprof_dump_now"))
         dump_ = (void(*)(const char *)) sym;
       else
-	edm::LogWarning("IgProfTrigger")
-	  << "IgProfTrigger requested but application is not"
+	edm::LogWarning("IgProfModule")
+	  << "IgProfModule requested but application is not"
 	  << " currently being profiled with igprof\n";
 
       prescale_    = ps.getUntrackedParameter<int>("reportEventInterval", prescale_);
@@ -115,4 +115,4 @@ private:
   int nfile_;
 };
 
-DEFINE_ANOTHER_FWK_MODULE(IgProfTrigger);
+DEFINE_FWK_MODULE(IgProfModule);
