@@ -498,6 +498,7 @@ public:
 
       counter->cfreq() = counter->freq();
       counter->ccnt() = counter->cnt();
+      counter = counter->next();
     } while (initialCounter != counter);
   }
 
@@ -508,15 +509,10 @@ public:
     Counter *initialCounter = node->COUNTERS;
     if (!parent) 
     {
-      if (initialCounter->ccnt() == 0) {
-        std::cerr << "There are no counts for the requested counter,"
-                     " maybe you are using the wrong -r option? Exiting." << std::endl;
-        exit(1);
-      }
       return;
     }
     if (!initialCounter) return;
-    Counter *counter= initialCounter;
+    Counter *counter = initialCounter;
     int loopCount = 0;
     do
     {
@@ -535,6 +531,7 @@ public:
       else {
         parentCounter->ccnt() += counter->ccnt();
       }
+      counter = counter->next ();
     } while (initialCounter != counter);
   }
   virtual std::string name (void) const { return "cumulative info"; }
@@ -565,12 +562,47 @@ public:
       ASSERT (counter->freq() >= 0);
       ASSERT (counter->ccnt() >= 0);
       ASSERT (counter->cfreq() >= 0);
+      counter = counter->next();
     } while (initialCounter != counter);
   }
   virtual std::string name (void) const { return "Check consitency of tree"; }
   virtual enum FilterType type (void) const {return POST; }
 private:
   int m_noParentCount;
+};
+
+
+class PrintTreeFilter : public IgProfFilter
+{
+public:
+  PrintTreeFilter(void)
+  {}
+
+  virtual void pre (NodeInfo *parent,
+                     NodeInfo *node)
+  {
+    m_parentStack.erase(std::find(m_parentStack.begin(), m_parentStack.end(), parent), m_parentStack.end());
+    m_parentStack.push_back(parent);  
+    
+    std::cerr << std::string (2*(m_parentStack.size()-1),' ') << node->symbol()->NAME; 
+    Counter *initialCounter = node->COUNTERS;
+    if (! initialCounter) {std::cerr << std::endl; return;}
+    Counter *counter= initialCounter;
+    ASSERT(counter);
+    do
+    {
+      std::cerr << " C" << counter->id() << "[" << counter->cnt() << ", "
+                << counter->freq() << ", "
+                << counter->ccnt() << ", "
+                << counter->cfreq() << "]";
+      counter = counter->next();
+    } while (initialCounter != counter);
+    std::cerr << std::endl;
+  }
+  virtual std::string name (void) const { return "Printing tree structure"; }
+  virtual enum FilterType type (void) const {return PRE; }
+private:
+  std::vector<NodeInfo *> m_parentStack; 
 };
 
 void mergeToNode (NodeInfo *parent, NodeInfo *node)
@@ -1507,7 +1539,7 @@ parseFunctionDef(const char *lineStart, Position &pos, unsigned int &symid)
 static bool
 parseCounterVal (const char *lineStart, Position &pos, 
                  int &ctrid, int64_t &ctrfreq, 
-                 int64_t &ctrvalNormal, int64_t &ctrvalStrange)
+                 int64_t &ctrvalNormal, int64_t &ctrvalPeak)
 {
   // Matches "V(\\d+):\\((\\d+),(\\d+)(,(\\d+))?\\)\\s*" and then sets the arguments accordingly. 
   const char *line = lineStart + pos ();
@@ -1541,7 +1573,7 @@ parseCounterVal (const char *lineStart, Position &pos,
   ctrid = cntRef;
   ctrfreq = count1;
   ctrvalNormal = count2;
-  ctrvalStrange = count3;
+  ctrvalPeak= count3;
   while (*endptr4 == ' ' || *endptr4 == '\t')
   { endptr4++; }
   pos (endptr4 - lineStart);
@@ -1691,19 +1723,19 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
       int64_t ctrval;
       int64_t ctrfreq;
       int64_t ctrvalNormal;
-      int64_t ctrvalStrange;
+      int64_t ctrvalPeak;
       int leakAddress;
       int64_t leakSize;
       
       if (line.size () == pos())
       { break; }
       else if (line.size() >= pos()+2
-           && parseCounterVal (line.c_str (), pos, ctrid, ctrfreq, ctrvalNormal, ctrvalStrange))
+           && parseCounterVal (line.c_str (), pos, ctrid, ctrfreq, ctrvalNormal, ctrvalPeak))
       {
         // FIXME: should really do:
         // $ctrname = $ctrbyid{$1} || die;
 
-        ctrval = m_config->normalValue () ? ctrvalNormal : ctrvalStrange;
+        ctrval = m_config->normalValue () ? ctrvalNormal : ctrvalPeak;
       }
       else if (line.size() >= pos()+2
            && parseCounterDef (line, pos (), 0, &match))
@@ -1735,11 +1767,12 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
       }
 
       Counter *counter = Counter::addCounterToRing (child->COUNTERS, ctrid);
+      ASSERT(counter->id() == ctrid);
+      ASSERT (counter == Counter::getCounterInRing(child->COUNTERS, ctrid));
       ASSERT (counter);
     
       if (m_config->hasKey () && ! Counter::isKey (ctrid)) continue;
-      if (! m_config->hasKey () && Counter::ringSize (counter) > 1) continue;
-     
+      
       counter->freq() += ctrfreq;
       counter->cnt() += ctrval;
     }
@@ -2524,7 +2557,7 @@ IgProfAnalyzerApplication::parseArgs (const ArgsList &args)
     }
     else if (is ("--value") && left (arg) > 1)
     {
-      std::string type = *(arg++);
+      std::string type = *(++arg);
       if (type == "peak") {m_config->setNormalValue (false);}
       else if (type == "normal") {m_config->setNormalValue (true);}
       else {
