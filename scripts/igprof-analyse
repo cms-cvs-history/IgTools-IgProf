@@ -897,14 +897,16 @@ sub analyse
 	my @parents = sort { ($$flat{$a}{CALLS}{$sym}[0]
 			      <=> $$flat{$b}{CALLS}{$sym}[0])
 			     || ($$flat{$a}{CUM_KEY}[0]
-			         <=> $$flat{$b}{CUM_KEY}[0]) }
-	    sort keys %{$$flat{$sym}{CALLERS}};
+			         <=> $$flat{$b}{CUM_KEY}[0])
+                             || ($$prof{SYMS}{$a}{NAME} cmp $$prof{SYMS}{$b}{NAME}) }
+	    keys %{$$flat{$sym}{CALLERS}};
 
 	my @children = sort { ($$flat{$sym}{CALLS}{$b}[0]
 			       <=> $$flat{$sym}{CALLS}{$a}[0])
 			      || ($$flat{$b}{CUM_KEY}[0]
-			          <=> $$flat{$a}{CUM_KEY}[0]) }
-	    sort keys %{$$flat{$sym}{CALLS}};
+			          <=> $$flat{$a}{CUM_KEY}[0])
+                              || ($$prof{SYMS}{$a}{NAME} cmp $$prof{SYMS}{$b}{NAME}) }
+	    keys %{$$flat{$sym}{CALLS}};
 
 	# Build calling function information.
 	my $callmax = 0;
@@ -1423,7 +1425,7 @@ while (scalar @ARGV)
 	$key = shift(@ARGV);
 	@filters = @deffilters if @filters;
 	push(@filters, 'malloc') if @filters && substr($key, 0, 4) eq 'MEM_';
-	push(@filters, 'gcc_pool_alloc') if @filters && $key eq 'MEM_LIVE';
+        push(@filters, 'gcc_pool_alloc') if @filters && $key eq 'MEM_LIVE';
     }
     elsif ($ARGV[0] eq '--value' && scalar @ARGV > 1)
     { $normal_value = ($ARGV[1] eq 'peak' ? 0

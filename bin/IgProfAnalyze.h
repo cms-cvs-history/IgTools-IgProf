@@ -31,12 +31,6 @@
 #include <map>
 #include <stdint.h>
 
-void pickUpMax (int64_t &old, int64_t candidate)
-{
-  if (candidate > old)
-    old = candidate;
-}
-
 bool isWhitespace(char c)
 {
   //^ \t\n\r\f\v
@@ -112,40 +106,6 @@ public:
     this->setNext (counter);
   }
 
-  StorageType freqs (void) { return m_freqs; }
-  StorageType counts (void) { return m_counts; }
-  StorageType cumulativeFreqs (void) {return m_cumulativeFreqs; }
-  StorageType cumulativeCounts (void) {return m_cumulativeCounts; }
-  void addFreqs (StorageType value) { m_freqs += value;}
-  void addCounts (StorageType  value) {
-    if (s_isMaxMask & (1 << this->m_type))
-      { pickUpMax (this->m_counts, value);}
-    else
-      { m_counts += value; }
-  }
-  
-  void accumulateFreqs (StorageType value) 
-  { 
-    ASSERT(m_cumulativeFreqs >= 0);
-    m_cumulativeFreqs += value; 
-    if (m_cumulativeCounts < 0) {
-      std::cerr << "Counter overflow. 64bit counters not implemented, yet." << std::endl;
-      std::cerr << "Final value: " << m_cumulativeFreqs << " delta: " << value << std::endl; 
-      exit(1);
-    }
-  }
-  void accumulateCounts (StorageType value) {
-    ASSERT(m_cumulativeCounts >= 0);
-    if (s_isMaxMask & (1 << this->m_type))
-      { pickUpMax (this->m_cumulativeCounts, value); }
-    else
-      { this->m_cumulativeCounts += value; }
-    if (m_cumulativeCounts < 0) {
-      std::cerr << "Counter overflow. 64bit counters not implemented, yet." << std::endl;
-      std::cerr << "Final value: " << m_cumulativeCounts << " delta: " << value << std::endl;
-      exit(1);
-    }
-  }
   // TODO: Create a "RingManipulator" rather than having all this static stuff
   //     in the Counter class????
   static int getIdForCounterName (const std::string &name) 
@@ -262,6 +222,10 @@ public:
     return s_countersByName;
   }
 
+  StorageType &cnt() { return m_counts; }
+  StorageType &freq() { return m_freqs; }
+  StorageType &ccnt() { return m_cumulativeCounts; }
+  StorageType &cfreq() { return m_cumulativeFreqs; }
 private:
   static IdCache s_countersByName;
   static int s_lastAdded;
@@ -288,24 +252,32 @@ public:
   PipeReader (const std::string &args, lat::IOChannel *source=0)
     : m_argz(args),
       m_is(0),
-      m_isbuf(0)
+      m_isbuf(0),
+      m_cmd(0)
   {
-    lat::SubProcess *cmd = 0;
     if (!source)
     {   
-      cmd = new lat::SubProcess(m_argz.argz(), 
+      m_cmd = new lat::SubProcess(m_argz.argz(), 
                                 lat::SubProcess::One | lat::SubProcess::Read,
                                 &m_pipe);
     }
     else
     { 
-      cmd = new lat::SubProcess(m_argz.argz(), 
+      m_cmd = new lat::SubProcess(m_argz.argz(), 
                                 lat::SubProcess::One | lat::SubProcess::Read,
                                 source, m_pipe.sink ());
     }
     m_is = new lat::IOChannelInputStream(m_pipe.source ());
     m_isbuf = new lat::InputStreamBuf(m_is);
     m_istd  = new std::istream (m_isbuf);    
+  }
+  
+  ~PipeReader (void)
+  {
+    delete m_cmd;
+    delete m_isbuf;
+    delete m_is;
+    delete m_istd;
   }
   
   std::istream &output (void)
@@ -318,6 +290,7 @@ private:
   std::istream *m_istd;
   lat::IOChannelInputStream *m_is;
   lat::InputStreamBuf *m_isbuf;
+  lat::SubProcess *m_cmd;
 };
 
 bool skipWhitespaces(const char *srcbuffer, const char **destbuffer)
@@ -552,11 +525,11 @@ public:
   
   virtual ~FileOpener (void)
   {
-    for (StreamsIterator i = m_streams.begin ();
-       i != m_streams.end ();
+    for (Streams::reverse_iterator i = m_streams.rbegin ();
+       i != m_streams.rend ();
        i++)
     {
-    //  delete *i;
+      delete *i;
     }
     delete[] m_buffer;
   }
@@ -614,7 +587,6 @@ public:
   bool eof (void) {return m_eof;}
 private:
   typedef std::list<lat::InputStream *> Streams; 
-  typedef Streams::iterator StreamsIterator;
   Streams m_streams;
   char *m_buffer;
   int m_posInBuffer;
@@ -631,7 +603,7 @@ public:
   : FileOpener (),
     m_file (openFile (filename))
   { 
-        ASSERT (m_file);
+    ASSERT (m_file);
     lat::StorageInputStream *storageInput = new lat::StorageInputStream (m_file);
     lat::BufferInputStream *bufferStream = new lat::BufferInputStream (storageInput);
     addStream (storageInput);
@@ -827,8 +799,10 @@ public:
     m_symbols.push_back (symbolName); return *this; }
   
   bool contains (const std::string &name)
-  { 
-    return std::find (m_symbols.begin (), m_symbols.end (), name) != m_symbols.end (); }
+  {
+    bool result = std::find (m_symbols.begin (), m_symbols.end (), name) != m_symbols.end ();
+    return result; 
+  }
   
 private:
   typedef std::list<std::string> SymbolNames; 

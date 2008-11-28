@@ -22,6 +22,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <signal.h>
 
 #define IGPROF_MAX_DEPTH 1000
 
@@ -59,7 +60,8 @@ class NodeInfo
 {
 public:
   typedef std::list <NodeInfo *> Nodes;
-  
+  typedef Nodes::iterator Iterator;
+    
   Nodes CHILDREN;
   Counter *COUNTERS;
   
@@ -67,16 +69,20 @@ public:
   : COUNTERS (0), SYMBOL (symbol), m_reportSymbol (0) {};
   NodeInfo *getChildrenBySymbol (SymbolInfo *symbol)
   {
+    ASSERT(symbol);
     for (Nodes::const_iterator i = CHILDREN.begin ();
        i != CHILDREN.end ();
        i++)
     {
+      ASSERT(SYMBOL);
       if ((*i)->SYMBOL->NAME == symbol->NAME)
         return *i;
     }
     return 0;
   }
-  
+ 
+  Nodes::iterator begin(void) { return CHILDREN.begin(); }
+  Nodes::iterator end(void) { return CHILDREN.end(); }
   
   void printDebugInfo (int level=0)
   {
@@ -151,6 +157,7 @@ public:
   typedef std::map<std::string, std::string> LeaksMap;
   typedef std::map<std::string, SymbolInfo*> SymCacheByFile;
   typedef std::map<std::string, SymbolInfo*> SymCacheByName;
+  typedef std::set<SymbolInfo*> SymCache;
 
   ProfileInfo (void)
   {
@@ -169,7 +176,7 @@ public:
   Freqs  & freqs(void) { return m_freqs; }
   NodeInfo *spontaneous(void) { return m_spontaneous; }
   SymCacheByFile &symcacheByFile(void) { return m_symcacheFile; }
-  SymCacheByName &symcacheByName(void) { return m_symcacheSymbol; }
+  SymCache &symcache(void) { return m_symcache; }
 private:
   Files m_files;
   Syms m_syms;
@@ -178,7 +185,7 @@ private:
   Freqs m_freqs;
   LeaksMap m_leaks;
   SymCacheByFile m_symcacheFile;
-  SymCacheByName m_symcacheSymbol;
+  SymCache m_symcache;
   NodeInfo  *m_spontaneous;
 };
 
@@ -433,30 +440,37 @@ printSyntaxError (const std::string &text,
     << std::endl;
 }
 
-class IgProfFilter 
+class FilterBase
 {
 public:
-  enum FilterType 
-  {
-    PRE = 1,
-    POST = 2,
-    BOTH = 3
-  };
-  
+  enum FilterType
+  {     
+    PRE = 1,  
+    POST = 2,     
+    BOTH = 3          
+  };                      
+    
+  virtual ~FilterBase (void) {}
+  virtual std::string name (void) const = 0;
+  virtual enum FilterType type (void) const = 0;
+};
+
+template <class T>
+class Filter : public FilterBase
+{
+public:
+  virtual void pre (T *parent, T *node) {};
+  virtual void post (T *parent, T *node) {};
+};
+
+class IgProfFilter : public Filter<NodeInfo> 
+{
+public:
   IgProfFilter (void)
    : m_prof (0) {}
   
-  virtual ~IgProfFilter (void) {}
-  
   virtual void init (ProfileInfo *prof)
   { m_prof = prof; }
-  
-  virtual void pre (NodeInfo *parent,
-               NodeInfo *node) {};
-  virtual void post (NodeInfo *parent,
-               NodeInfo *node) {};
-  virtual std::string name (void) const = 0;
-  virtual enum FilterType type (void) const = 0;
 protected:
   ProfileInfo::Syms &syms (void) { return m_prof->syms (); }
   ProfileInfo::Nodes &nodes (void) { return m_prof->nodes (); } 
@@ -467,53 +481,96 @@ private:
 class AddCumulativeInfoFilter : public IgProfFilter 
 {
 public:
+  virtual void pre (NodeInfo *parent, NodeInfo *node)
+  {
+    ASSERT(node);
+    Counter *initialCounter = node->COUNTERS;
+    if (! initialCounter) return;
+    
+    Counter *counter= initialCounter;
+    int loopCount = 0;
+    do
+    { 
+      ASSERT (loopCount++ < 32);
+      ASSERT (counter);
+      ASSERT (counter->cfreq() == 0);
+      ASSERT (counter->ccnt() == 0);
+
+      counter->cfreq() = counter->freq();
+      counter->ccnt() = counter->cnt();
+    } while (initialCounter != counter);
+  }
+
   virtual void post (NodeInfo *parent,
                  NodeInfo *node)
   {
     ASSERT (node);
-    if (!parent) return;
     Counter *initialCounter = node->COUNTERS;
-    if (! initialCounter) return;
-    Counter *next = initialCounter;
+    if (!parent) 
+    {
+      if (initialCounter->ccnt() == 0) {
+        std::cerr << "There are no counts for the requested counter,"
+                     " maybe you are using the wrong -r option? Exiting." << std::endl;
+        exit(1);
+      }
+      return;
+    }
+    if (!initialCounter) return;
+    Counter *counter= initialCounter;
     int loopCount = 0;
     do
     {
       ASSERT (loopCount++ < 32);
-      int id = next->id ();
       ASSERT (parent);
-      Counter *parentCounter = Counter::addCounterToRing (parent->COUNTERS, 
-                                id);
-      next->accumulateCounts (next->counts ());
-      next->accumulateFreqs (next->freqs ());
-      parentCounter->accumulateCounts (next->cumulativeCounts ());
-      parentCounter->accumulateFreqs (next->cumulativeFreqs ());
-      next = next->next ();
-    } while (initialCounter != next);
+      ASSERT (counter);
+      Counter *parentCounter = Counter::addCounterToRing (parent->COUNTERS, counter->id());
+      ASSERT (parentCounter);
+      parentCounter->cfreq() += counter->cfreq();
+      
+      if (counter->isMax()) {
+        if (parentCounter->ccnt() < counter->ccnt()) {
+          parentCounter->ccnt() = counter->ccnt();
+        }
+      }
+      else {
+        parentCounter->ccnt() += counter->ccnt();
+      }
+    } while (initialCounter != counter);
   }
   virtual std::string name (void) const { return "cumulative info"; }
-  virtual enum FilterType type (void) const {return POST; }
+  virtual enum FilterType type (void) const { return BOTH; }
 };
 
 class CheckTreeConsistencyFilter : public IgProfFilter
 {
 public:
+  CheckTreeConsistencyFilter()
+  :m_noParentCount(0)
+  {}
   virtual void post (NodeInfo *parent,
                      NodeInfo *node)
   {
-  
+    if (!parent) {
+      m_noParentCount++;
+      std::cerr << "Done checking consistency." << std::endl;
+      ASSERT (m_noParentCount == 1);
+    }
     Counter *initialCounter = node->COUNTERS;
     if (! initialCounter) return;
-    Counter *next = initialCounter;
+    Counter *counter= initialCounter;
+    ASSERT(counter);
     do
     {
-      ASSERT (next->counts() >= 0);
-      ASSERT (next->freqs() >= 0);
-      ASSERT (next->cumulativeCounts() >= 0);
-      ASSERT (next->cumulativeFreqs() >= 0);
-    } while (initialCounter != next);
+      ASSERT (counter->cnt() >= 0);
+      ASSERT (counter->freq() >= 0);
+      ASSERT (counter->ccnt() >= 0);
+      ASSERT (counter->cfreq() >= 0);
+    } while (initialCounter != counter);
   }
   virtual std::string name (void) const { return "Check consitency of tree"; }
   virtual enum FilterType type (void) const {return POST; }
+private:
+  int m_noParentCount;
 };
 
 void mergeToNode (NodeInfo *parent, NodeInfo *node)
@@ -537,10 +594,18 @@ void mergeToNode (NodeInfo *parent, NodeInfo *node)
     // and recursively merge it.
     while (Counter *nodeChildCounter = Counter::popCounterFromRing(nodeChild->COUNTERS))
     {
+      ASSERT(nodeChildCounter);
       Counter *parentChildCounter = Counter::addCounterToRing(parentChild->COUNTERS,
                                                               nodeChildCounter->id());
-      parentChildCounter->addFreqs(nodeChildCounter->freqs());
-      parentChildCounter->addCounts(nodeChildCounter->counts());
+      parentChildCounter->freq() += nodeChildCounter->freq();
+      if (nodeChildCounter->isMax()) {
+        if (parentChildCounter->cnt() < nodeChildCounter->cnt()) {
+          parentChildCounter->cnt() = nodeChildCounter->cnt();
+        }
+      }
+      else {
+        parentChildCounter->cnt() += nodeChildCounter->cnt();
+      }
     }
     mergeToNode(parentChild, nodeChild);
     ++i;
@@ -611,41 +676,56 @@ public:
 };
 
 
+class CallInfo
+{ 
+public:
+  int64_t VALUES[3];
+  SymbolInfo *SYMBOL;
+
+  CallInfo(SymbolInfo *symbol)
+  :SYMBOL(symbol)
+  {
+    memset(VALUES, 0, 3*sizeof(int64_t));
+  }
+};  
+
+template<class T>
+struct CompareBySymbol
+{
+  bool operator () (T *a, T *b) const
+  {
+    return a->SYMBOL < b->SYMBOL;
+  }
+};
+
 class FlatInfo
 {
 public:
-  struct CompareBySymbol
-  {
-    bool operator () (FlatInfo *a, FlatInfo *b) const
-    {
-      return a->SYMBOL < b->SYMBOL;
-    }
-  };
-  
-  typedef std::set<FlatInfo *, CompareBySymbol> ReferenceList;
+  typedef std::set<CallInfo*, CompareBySymbol<CallInfo> > Calls;
+  typedef std::set<SymbolInfo *> Callers;
   typedef std::map<SymbolInfo *, FlatInfo *> FlatMap;
 
-  static FlatInfo *findBySymbol (ReferenceList &list, 
-                   SymbolInfo *symbol)
+  CallInfo *getCallee (SymbolInfo *symbol, bool create=false)
   {
-    static FlatInfo dummy (0, 0xdeadbeef);
+    static CallInfo dummy (0);
     ASSERT (symbol);
         dummy.SYMBOL = symbol;
-    ReferenceList::const_iterator i = list.find (&dummy);
-    if (i != list.end ())
+    Calls::const_iterator i = CALLS.find (&dummy);
+    if (i != CALLS.end ())
     { return *i; }
-    return 0;
+    if (!create) {
+      std::cerr << symbol->NAME << std::endl;
+    }
+    ASSERT(create);
+    CallInfo *callInfo = new CallInfo(symbol);
+    this->CALLS.insert(callInfo);
+    return callInfo;
   }
   
   static FlatMap &flatMap (void)
   {
     static FlatMap s_flatMap;
     return s_flatMap;
-  }
-
-  static void setKeyId (int id)
-  {
-    s_keyId = id;
   }
   
   static FlatInfo *first (void)
@@ -663,44 +743,45 @@ public:
     if (!create)
       return 0;
 
-    FlatInfo *result = new FlatInfo (sym, s_keyId);
+    FlatInfo *result = new FlatInfo (sym);
     flatMap ().insert (FlatMap::value_type (sym, result));
     if (! s_first) s_first = result;
     return result;
   }
   
-  static FlatInfo *clone (FlatInfo *info)
-  {
-    FlatInfo *result = new FlatInfo (info->SYMBOL, s_keyId);
-    result->DEPTH = info->DEPTH;
-    result->REFS = info->REFS;
-    return result;
-  }
-  
   std::string filename (void)
   {
+    ASSERT(SYMBOL);
+    ASSERT(SYMBOL->FILE);
     return SYMBOL->FILE->NAME;
   }
   
   const char *name (void)
   {
+    ASSERT(SYMBOL);
     return SYMBOL->NAME.c_str ();
   }
   
-  ReferenceList CALLERS;
-  ReferenceList CALLS;
+  Callers CALLERS;
+  Calls CALLS;
   SymbolInfo *SYMBOL;
-  Counter *COUNTERS;
-  int DEPTH;
-  int REFS;
-  int rank (void) {return SYMBOL->rank (); }
-  void setRank (int rank) {SYMBOL->setRank (rank); }
+  unsigned int DEPTH;
+  int rank (void) {
+    ASSERT (SYMBOL);
+    return SYMBOL->rank (); 
+  }
+  void setRank (int rank) {
+    ASSERT (SYMBOL);
+    SYMBOL->setRank (rank); 
+  }
 
+  int64_t SELF_KEY[3];
+  int64_t CUM_KEY[3];
 protected:
-  FlatInfo (SymbolInfo *symbol, int id)
-  : SYMBOL (symbol), COUNTERS (0), DEPTH (0), REFS (0) {
-    ASSERT (id != -1);
-    Counter::addCounterToRing (COUNTERS, id);
+  FlatInfo (SymbolInfo *symbol)
+  : SYMBOL (symbol), DEPTH (0) {
+    memset(SELF_KEY, 0, 3*sizeof(int64_t));
+    memset(CUM_KEY, 0, 3*sizeof(int64_t));
   }
 private:
   static int s_keyId;
@@ -713,6 +794,8 @@ FlatInfo *FlatInfo::s_first = 0;
 class SymbolInfoFactory 
 {
 public:
+  typedef std::map<std::string, SymbolInfo *> SymbolsByName;
+
   SymbolInfoFactory (ProfileInfo *prof, bool useGdb)
    :m_prof (prof), m_useGdb (useGdb)
   {}
@@ -819,19 +902,27 @@ public:
     
     symname = symlookup(file, fileoff, symname, m_useGdb);
     
-    SymbolInfo *sym = namedSymbols()[symname];
-    if (! sym)
+    SymbolInfoFactory::SymbolsByName::iterator symiter = namedSymbols().find(symname);
+    
+    if (symiter != namedSymbols().end())
     {
-      sym = new SymbolInfo (symname.c_str (), file, fileoff);
-      namedSymbols ().insert (SymbolsByName::value_type (symname, sym));
-      ASSERT (symid >= m_symbols.size ()); 
-      m_symbols.resize (symid + 1);
-      m_symbols[symid] = sym;
+      ASSERT(symiter->second);
+      if (m_symbols.size() < symid+1) {
+        m_symbols.resize(symid+1);
+      }
+      m_symbols[symid] = symiter->second;
+      ASSERT(getSymbol(symid) == symiter->second);
+      return symiter->second;
     }
+   
+    SymbolInfo *sym = new SymbolInfo (symname.c_str (), file, fileoff);
+    namedSymbols ().insert (SymbolInfoFactory::SymbolsByName::value_type (symname, sym));
+    ASSERT (symid >= m_symbols.size ()); 
+    m_symbols.resize (symid + 1);
+    m_symbols[symid] = sym;
     return sym;
   }
 
-  typedef std::map<std::string, SymbolInfo *> SymbolsByName;
   
   static SymbolsByName &namedSymbols (void)
   {
@@ -865,7 +956,7 @@ struct SuffixOps
     }
     ASSERT (tickPos < fullSymbol.size ());
     oldSymbol.assign (fullSymbol.c_str (), tickPos - 1);
-    suffix.assign (fullSymbol.c_str () + tickPos + 1);
+    suffix.assign (fullSymbol.c_str () + tickPos);
   }
 
   static std::string removeSuffix (const std::string &fullSymbol)
@@ -886,77 +977,88 @@ public:
     int id = Counter::getIdForCounterName (config->key ());
     ASSERT (id != -1);
     m_keyId = id;
-    FlatInfo::setKeyId (id);
-    ASSERT (m_zeroCounter.cumulativeCounts () == 0);
-    ASSERT (m_zeroCounter.cumulativeFreqs () == 0);
-    ASSERT (m_zeroCounter.counts () == 0);
-    ASSERT (m_zeroCounter.freqs () == 0);   
+    ASSERT (m_zeroCounter.ccnt() == 0);
+    ASSERT (m_zeroCounter.cfreq () == 0);
+    ASSERT (m_zeroCounter.cnt () == 0);
+    ASSERT (m_zeroCounter.freq () == 0);   
   }
-  
-  virtual void pre (NodeInfo *parent,
-            NodeInfo *node)
+ 
+  /** Creates the GPROF like output. 
+    
+    * Gets invoked with a node and it's parent.
+    * Finds a unique name for the node, keeping into account recursion.
+    * Gets the unique FlatInfo associated to the symbols. Recursive calls result in same symbol.
+    * Calculates the depths in the tree of the node.
+    * Gets the relevant counter associated to the node.
+    * For the case in which there is a parent.
+      * Get the counter for the parent.
+      * Find the parent unique symbol.
+      * Find the parent unique FlatInfo.
+      * Find the FlatInfo associated to the node, when it was called by the parent.
+      * If the above does not exist, create it and insert it among those which can be reached from the parent.
+    * Accumulate counts.
+   */
+  virtual void pre (NodeInfo *parent, NodeInfo *node)
   {
     ASSERT (node);
-    //std::cerr << "\nNow parsing at depth " << seen ().size() << std::endl;
     SymbolInfo *sym = symfor (node);
     ASSERT (sym);
-    //std::cerr << "Actual symbol name " << sym->NAME << std::endl;
-    FlatInfo *recursiveNode = FlatInfo::get (sym);
-    ASSERT (recursiveNode);
-    //std::cerr << "FlatInfo associated: " << recursiveNode << std::endl;
-    recursiveNode->DEPTH = seen ().size ();
+    FlatInfo *symnode = FlatInfo::get (sym);
+    ASSERT (symnode);
+    if (seen().size() > symnode->DEPTH)
+      symnode->DEPTH = seen ().size ();
 
-    Counter *nodeCounter = Counter::getCounterInRing (node->COUNTERS, 
-                              m_keyId);
+    Counter *nodeCounter = Counter::getCounterInRing (node->COUNTERS, m_keyId);
     
     ASSERT (nodeCounter);
-    
+    bool isMax = nodeCounter->isMax();
+
     if (parent)
     {
-      //std::cerr << "Parent : ";
-      Counter *parentCounter = Counter::getCounterInRing (parent->COUNTERS, 
-                                  m_keyId);
-      ASSERT (parentCounter);
-  
       SymbolInfo *parsym = parent->symbol ();
-      //std::cerr << parsym->NAME << std::endl;
-      
       FlatInfo *parentInfo = FlatInfo::get (parsym, false);
       ASSERT (parentInfo);
 
-      if (! FlatInfo::findBySymbol (recursiveNode->CALLERS, parsym))
-        recursiveNode->CALLERS.insert (parentInfo);
+      symnode->CALLERS.insert (parsym);
 
-      FlatInfo *nodeInfo = FlatInfo::findBySymbol (parentInfo->CALLS, 
-                               sym);
-      if (!nodeInfo)
+      CallInfo *callInfo = parentInfo->getCallee(sym, true);
+      
+      if (isMax) 
       {
-        //std::cerr << "   Creating instance of symbol " << sym->NAME
-        //      << " to add to parent" << std::endl;
-        nodeInfo = FlatInfo::clone (recursiveNode);
-        parentInfo->CALLS.insert (nodeInfo);
-        ASSERT (nodeInfo->rank () == recursiveNode->rank ());
-        ASSERT (FlatInfo::flatMap ()[sym] != nodeInfo);
+        if (callInfo->VALUES[0] < nodeCounter->ccnt()) {
+          callInfo->VALUES[0] = nodeCounter->ccnt();
+        }
       }
-      ASSERT (nodeInfo->SYMBOL->NAME == sym->NAME);
-      ASSERT (parentInfo->SYMBOL->NAME == parsym->NAME);
-
-      //nodeInfo->COUNTERS->addCounts (nodeCounter->cumulativeCounts ());
-      //nodeInfo->COUNTERS->addFreqs (nodeCounter->cumulativeFreqs ());
-      nodeInfo->COUNTERS->accumulateCounts (nodeCounter->cumulativeCounts ());
-      nodeInfo->COUNTERS->accumulateFreqs (nodeCounter->cumulativeFreqs ());
-
-      nodeInfo->REFS++;
-      ASSERT (recursiveNode != nodeInfo);
+      else {
+        callInfo->VALUES[0] += nodeCounter->ccnt();
+      }
+      callInfo->VALUES[1] += nodeCounter->cfreq(); 
+      callInfo->VALUES[2]++;
     }
     
-    Counter *flatCounter = Counter::getCounterInRing (recursiveNode->COUNTERS, m_keyId);
-    recursiveNode->REFS++;
-    flatCounter->addCounts (nodeCounter->counts ());
-    flatCounter->addFreqs (nodeCounter->freqs ());
-    flatCounter->accumulateCounts (nodeCounter->cumulativeCounts ());
-    flatCounter->accumulateFreqs (nodeCounter->cumulativeFreqs ());
-    ASSERT (flatCounter->freqs () <= flatCounter->cumulativeFreqs ());
+    // Do SELF_KEY
+    if (isMax) {
+      if (symnode->SELF_KEY[0] < nodeCounter->cnt()) {
+        symnode->SELF_KEY[0] = nodeCounter->cnt();
+      }
+    }
+    else {
+      symnode->SELF_KEY[0] += nodeCounter->cnt();
+    }
+    symnode->SELF_KEY[1] += nodeCounter->freq();
+    symnode->SELF_KEY[2]++;
+    
+    // Do CUM_KEY
+    if (isMax) {
+      if (symnode->CUM_KEY[0] < nodeCounter->ccnt()) {
+        symnode->CUM_KEY[0] = nodeCounter->ccnt();
+      }
+    }
+    else {
+      symnode->CUM_KEY[0] += nodeCounter->ccnt();
+    }
+    symnode->CUM_KEY[1] += nodeCounter->cfreq();
+    symnode->CUM_KEY[2]++;
   }
 
   virtual void post (NodeInfo *parent,
@@ -964,7 +1066,6 @@ public:
   {
     ASSERT (node);
     ASSERT (node->symbol ());
-    //std::cerr << "Removing: " << node->symbol ()->NAME << std::endl;
     ASSERT (seen ().count(node->symbol()->NAME) > 0);
     seen ().erase (node->symbol ()->NAME);
     ASSERT (seen ().count(node->symbol()->NAME) == 0);
@@ -980,13 +1081,11 @@ private:
   SymbolInfo *symfor (NodeInfo *node) 
   {
     ASSERT (node);
-    //std::cerr << "symfor " << origsym << " " << origsym->NAME << std::endl;
     SymbolInfo *reportSymbol = node->reportSymbol ();
     if (reportSymbol)
     {
       seen ().insert (SeenSymbols::value_type (reportSymbol->NAME, 
                                              reportSymbol));
-      //std::cerr << " -> returning " << reportSymbol << " " << reportSymbol->NAME << std::endl;
       return reportSymbol;
     }
     
@@ -999,7 +1098,6 @@ private:
     if (i != seen ().end ())
     {
       std::string newName = getUniqueName (symbolName);
-      //std::cerr << " -> using unique name " << newName << std::endl;
       SymbolInfoFactory::SymbolsByName &namedSymbols = SymbolInfoFactory::namedSymbols ();
       SymbolInfoFactory::SymbolsByName::iterator s = namedSymbols.find (newName);
       if (s == namedSymbols.end ())
@@ -1019,7 +1117,6 @@ private:
     ASSERT (node->symbol ());
     seen ().insert (SeenSymbols::value_type (node->symbol ()->NAME, 
                          node->symbol ()));
-    //std::cerr << " -> returning " << node->symbol() << " " << node->symbol()->NAME << std::endl;
     return node->symbol ();
   }
   
@@ -1073,9 +1170,9 @@ private:
   lat::File *m_file;
 };
 
-static lat::Regexp SYMCHECK_RE ("IGPROF_SYMCHECK<(.*)>");
-static lat::Regexp STARTS_AT_RE ("starts at .* <([A-Za-z0-9_]+)(\\+\\d+)?>");
-static lat::Regexp NO_LINE_NUMBER ("^No line number .* <([A-Za-z0-9_]+)(\\+\\d+)?>");
+static lat::Regexp SYMCHECK_RE ("IGPROF_SYMCHECK <(.*)>");
+static lat::Regexp STARTS_AT_RE (".*starts at .* <([A-Za-z0-9_]+)(\\+\\d+)?>");
+static lat::Regexp NO_LINE_NUMBER ("^No line number .*? <([A-Za-z0-9_]+)(\\+\\d+)?>");
 
 
 void symremap (ProfileInfo &prof, std::vector<FlatInfo *> infos, bool usegdb, bool demangle)
@@ -1086,10 +1183,11 @@ void symremap (ProfileInfo &prof, std::vector<FlatInfo *> infos, bool usegdb, bo
   {
     lat::Filename tmpFilename ("/tmp/igprof-analyse.gdb.XXXXXXXX");
     lat::File *file = lat::TempFile::file (tmpFilename);
-    lat::Filename prevfile ("");
     TextStreamer out (file);
     out << "set width 10000\n";
 
+    std::multimap<FileInfo *, SymbolInfo *> fileAndSymbols;
+    
     for (FlatInfos::const_iterator i = infos.begin ();
          i != infos.end ();
          i++)
@@ -1097,16 +1195,42 @@ void symremap (ProfileInfo &prof, std::vector<FlatInfo *> infos, bool usegdb, bo
       SymbolInfo *sym = (*i)->SYMBOL;
       if (!sym)
         continue;
-      //ASSERT (sym);
-      if ((! sym->FILE) || (! sym->FILEOFF) || (sym->FILE->NAME != ""))
+      if ((! sym->FILE) || (! sym->FILEOFF) || (!sym->FILE->NAME.size()))
+      {
         continue;
-      if (sym->FILE->NAME != prevfile)
-        out << "file " << sym->FILE->NAME << "\n";
-        out << "echo IGPROF_SYMCHECK <" << toString (int(sym)) << ">\\n\n";
-        out << "info line *" << toString (sym->FILEOFF)<< "\n";
-        prevfile = sym->FILE->NAME; 
+      }
+      if (sym->FILE->symbolByOffset(sym->FILEOFF)) {
+        continue;
+      }
+      fileAndSymbols.insert(std::pair<FileInfo *, SymbolInfo *>(sym->FILE, sym));
+    }
+
+    FileInfo *prevfile = 0;
+    
+    for (std::multimap<FileInfo *, SymbolInfo *>::iterator i = fileAndSymbols.begin();
+         i != fileAndSymbols.end();
+         i++) 
+    {
+      SymbolInfo *sym = i->second;
+      FileInfo *fileInfo =i->first;
+
+      ASSERT(sym);
+      ASSERT(file);
+      prof.symcache ().insert(sym);
+      
+      if (!lat::StringOps::contains(fileInfo->NAME, "<dynamically")) 
+      {
+        if (fileInfo != prevfile)
+        {
+          out << "file " << fileInfo->NAME << "\n";
+          prevfile = fileInfo; 
+        }
+        out << "echo IGPROF_SYMCHECK <" << (int) sym << ">\\n\n"
+               "info line *" << toString (sym->FILEOFF)<< "\n";
+      }
     }
     file->close ();
+    delete file;
     
     PipeReader gdb ("gdb --batch --command=" + std::string (tmpFilename));
     
@@ -1126,20 +1250,22 @@ void symremap (ProfileInfo &prof, std::vector<FlatInfo *> infos, bool usegdb, bo
 
       lat::RegexpMatch match;
 
-      if (SYMCHECK_RE.match (line, 0, 0, &match))
+      
+      if (SYMCHECK_RE.match(line, 0, 0, &match))
       {
-        sym = prof.symcacheByName ()[match.matchString (line, 1)];
+        ProfileInfo::SymCache::iterator symitr = prof.symcache ().find((SymbolInfo *)(atoi(match.matchString (line, 1).c_str())));
+        ASSERT(symitr !=prof.symcache().end());
+        sym = *symitr;
         SuffixOps::splitSuffix (sym->NAME, oldname, suffix);
       }
-      else if (STARTS_AT_RE.match (line, 0, 0, &match))
+      else if (STARTS_AT_RE.match(line, 0, 0, &match))
       {
         ASSERT (sym);
-        sym->NAME = match.matchString (line, 1) + "'" + suffix;
+        sym->NAME = match.matchString (line, 1) + suffix;
         sym = 0; suffix = ""; 
       }
-      else if (NO_LINE_NUMBER.match (line, 0, 0, &match))
+      else if (NO_LINE_NUMBER.match(line, 0, 0, &match))
       {
-        //TODO: Implement here...
         ASSERT (sym);
         sym->NAME = match.matchString (line, 1) + suffix;
         sym = 0; suffix = "";
@@ -1160,9 +1286,9 @@ void symremap (ProfileInfo &prof, std::vector<FlatInfo *> infos, bool usegdb, bo
       ASSERT (symbol);
       out << (int) (symbol) << ": " << symbol->NAME << "\n";
     }
-    std::cerr << std::endl;
     file->close ();
-    
+    delete file;
+
     lat::File symbolFile (tmpFilename);
     PipeReader cppfilt ("c++filt", &symbolFile);
     
@@ -1201,7 +1327,12 @@ public:
     ASSERT (node);
     ASSERT (node->symbol ());
     ASSERT (m_filter.contains (std::string ("_Znaj")));
-    
+    if (!parent) {
+     return;
+    }
+    if (!node->COUNTERS) {
+      return;
+    }
     if (! m_filter.contains (node->symbol ()->NAME)) 
     {
       return;
@@ -1220,20 +1351,37 @@ private:
     ASSERT (m_filter.contains (node->originalSymbol ()->NAME));
     int countersCount = 0;
     ASSERT (node->COUNTERS);
-    while (Counter *childCounter = Counter::popCounterFromRing (node->COUNTERS))
+    Counter *initialCounter = node->COUNTERS;
+    ASSERT(initialCounter);
+    Counter *childCounter = initialCounter;
+    do
     {
       ++countersCount;
       Counter *parentCounter = Counter::addCounterToRing (parent->COUNTERS, 
                                 childCounter->id ());
-      ASSERT(childCounter->freqs() >= 0);
-      ASSERT(childCounter->counts() >= 0);
-      parentCounter->addFreqs (childCounter->freqs ());
-      parentCounter->addCounts (childCounter->counts ());
-      ASSERT (parentCounter->cumulativeCounts () == 0);
-      ASSERT (parentCounter->cumulativeFreqs () == 0);
-    }
-    ASSERT (countersCount);
-    parent->removeChild (node);
+      ASSERT(countersCount < 32);
+      ASSERT(parentCounter);
+      ASSERT(childCounter->freq() >= 0);
+      ASSERT(childCounter->cnt() >= 0);
+      parentCounter->freq() += childCounter->freq ();
+      if (parentCounter->isMax()) {
+        if (parentCounter->cnt() < childCounter->cnt()) {
+          parentCounter->cnt() = childCounter->cnt();
+        }
+      }
+      else {
+        parentCounter->cnt() += childCounter->cnt ();
+      }
+      ASSERT (parentCounter->cnt() >= childCounter->cnt());
+      ASSERT (parentCounter->freq() >= childCounter->freq());
+      ASSERT (childCounter->ccnt() == 0);
+      ASSERT (childCounter->cfreq() == 0);
+      ASSERT (parentCounter->ccnt() == 0);
+      ASSERT (parentCounter->cfreq() == 0);
+      childCounter = childCounter->next();
+    } while (childCounter != initialCounter);
+
+   parent->removeChild (node);
   }
   SymbolFilter m_filter;
 };
@@ -1502,6 +1650,12 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
           && parseFunctionRef (line.c_str (), pos, symid, fileoff))
     {
       sym = symbolsFactory.getSymbol (symid);
+      if (!sym) {
+        std::cerr << "Error at line " << lineCount << ": symbol with id " 
+                  << symid << " was referred before being defined in input file.\n" 
+                  << "> " << line << std::endl; 
+        exit(1);
+      }
     }
     else if (line.size() > pos()+2
          && parseFunctionDef (line.c_str (), pos, symid))
@@ -1515,6 +1669,7 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
     }
     
     NodeInfo* parent = nodestack.empty () ? prof.spontaneous () : nodestack.back ();
+    
     NodeInfo* child = parent ? parent->getChildrenBySymbol (sym) : 0;
     
     if (! child)
@@ -1585,8 +1740,8 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
       if (m_config->hasKey () && ! Counter::isKey (ctrid)) continue;
       if (! m_config->hasKey () && Counter::ringSize (counter) > 1) continue;
      
-      counter->addFreqs (ctrfreq);
-      counter->addCounts (ctrval);
+      counter->freq() += ctrfreq;
+      counter->cnt() += ctrval;
     }
     lineCount++;
   }
@@ -1604,10 +1759,11 @@ printAvailableCounters (const Counter::IdCache &cache)
   exit (1);
 }
 
+template <class T>
 class StackItem
 {
 public:
-  typedef NodeInfo Node;
+  typedef T Node;
   StackItem (Node *parent, Node *pre, Node *post)
   : m_parent (parent),
     m_pre (pre),
@@ -1622,53 +1778,62 @@ private:
   Node *m_post;
 };
 
+template <class T>
 class StackManipulator
 {
 public:
-  StackManipulator (std::list<StackItem> *stack)
-  : m_stack (stack) {}
+  typedef StackItem<T> Item;
+  typedef typename Item::Node Node;
+  typedef typename Node::Iterator NodesIterator;
+  typedef typename std::list<Item> Container;
   
-  typedef StackItem::Node::Nodes::iterator NodesIterator;
-  
-  void addChildrenToStack (StackItem::Node *node)
-  {
-    for (NodesIterator i = node->CHILDREN.begin (); 
-       i != node->CHILDREN.end (); i++)
-    { m_stack->push_back (StackItem (node, *i, 0)); }
+  StackManipulator (Container *stack, T *first)
+  : m_stack (stack) {
+    m_stack->push_back (Item (0, first, 0));
   }
   
-  void addToStack (StackItem::Node *parent,
-           StackItem::Node *prev)
-  { m_stack->push_back (StackItem (parent, 0, prev)); }
+  void addChildrenToStack (Node *node)
+  {
+    ASSERT (node);
+    for (NodesIterator i = node->begin (); 
+       i != node->end (); i++)
+    { m_stack->push_back (Item (node, *i, 0)); }
+  }
+  
+  void addToStack (Node *parent, Node *prev)
+  { m_stack->push_back (Item (parent, 0, prev)); }
 
-  void initStack (ProfileInfo &prof)
-  { m_stack->push_back (StackItem (0, prof.spontaneous (), 0)); }
 private:
-  std::list<StackItem> *m_stack;
+  Container *m_stack;
 };
 
-void
-walk (ProfileInfo &prof, IgProfFilter *filter=0)
+template <class T>
+void walk (T *first, Filter<T> *filter=0)
 {
   // TODO: Apply more than one filter at the time.
   //     This method applies one filter at the time. Is it worth to do
   //     the walk only once for all the filters? Should increase locality
   //     as well...
   ASSERT (filter);
-  std::list<StackItem> stack;
-  StackManipulator manipulator (&stack);
-  manipulator.initStack (prof);
-  
+  ASSERT (first);
+  typedef StackManipulator<T> Manipulator;
+  typedef typename Manipulator::Container Stack;
+  typedef typename Manipulator::Item Item;
+  typedef typename Manipulator::Node Node;
+
+  Stack stack; 
+  Manipulator manipulator (&stack, first);
+
   while (!stack.empty ())
   {
-    StackItem item = stack.back (); stack.pop_back ();
-    StackItem::Node *node = item.prev ();
-    StackItem::Node *parent = item.parent ();
+    Item item = stack.back (); stack.pop_back ();
+    Node *node = item.prev ();
+    Node *parent = item.parent ();
     if (node)
     {
-      if ( filter->type () & IgProfFilter::PRE)
+      if ( filter->type () & FilterBase::PRE)
         { filter->pre (parent, node); }
-      if ( filter->type () & IgProfFilter::POST)
+      if ( filter->type () & FilterBase::POST)
         { manipulator.addToStack (parent, node); }
       manipulator.addChildrenToStack (node);
     }
@@ -1687,12 +1852,12 @@ IgProfAnalyzerApplication::prepdata (ProfileInfo& prof/*, // FIXME: is all this 
   for (Configuration::Filters::const_iterator i = m_config->filters ().begin ();
      i != m_config->filters ().end ();
      i++)
-    {
-      (*i)->init (&prof);
-      if (m_config->verbose ())
-        { std::cerr << "Applying filter " << (*i)->name () 
+  {
+    (*i)->init (&prof);
+    if (m_config->verbose ())
+    { std::cerr << "Applying filter " << (*i)->name () 
                     << "." << std::endl; }
-      walk (prof, *i);
+      walk<NodeInfo>(prof.spontaneous(), *i);
   }
 
   
@@ -1701,7 +1866,8 @@ IgProfAnalyzerApplication::prepdata (ProfileInfo& prof/*, // FIXME: is all this 
     std::cerr << "Summing counters" << std::endl;
   }
   IgProfFilter *sumFilter = new AddCumulativeInfoFilter ();
-  walk (prof, sumFilter);
+  walk<NodeInfo> (prof.spontaneous(), sumFilter);
+  walk(prof.spontaneous(), new CheckTreeConsistencyFilter());
 }
 
 class FlatInfoComparator 
@@ -1714,7 +1880,7 @@ public:
   {}
   bool operator() (FlatInfo *a, FlatInfo *b)
   {
-    int cmp;
+    int64_t cmp;
     cmp = cmpnodekey (a, b);
     if (cmp > 0) return true;
     else if (cmp < 0) return false;
@@ -1724,27 +1890,11 @@ public:
     return strcmp (a->name (), b->name ()) < 0;
   }
 private:
-  int cmpnodekey (FlatInfo *a, FlatInfo *b)
+  int64_t cmpnodekey (FlatInfo *a, FlatInfo *b)
   {
-    Counter *aCounter = Counter::getCounterInRing (a->COUNTERS, m_counterId);
-    Counter *bCounter = Counter::getCounterInRing (b->COUNTERS, m_counterId);
-    if (!aCounter) return -1;
-    if (!bCounter) return 1;
-    int aVal;
-    int bVal;
-    if (m_cumulative)
-    {
-      aVal = aCounter->cumulativeCounts ();
-      bVal = bCounter->cumulativeCounts ();
-    }
-    else
-    {
-      aVal = aCounter->counts ();
-      bVal = bCounter->counts ();
-    }
-    int result = -1 * m_ordering * (bVal - aVal);
-    //std::cerr << bVal << " " << aVal << " "<< result << std::endl;
-    return result;
+    int64_t aVal = a->CUM_KEY[0];
+    int64_t bVal = b->CUM_KEY[0];
+    return  -1 * m_ordering * (bVal - aVal);
   }
 
   int cmpcallers (FlatInfo *a, FlatInfo *b)
@@ -1766,10 +1916,11 @@ public:
   int RANK;
   int FILEOFF;
   float PCT;
-  int DEPTH;
+  unsigned int DEPTH;
   
   void initFromInfo (FlatInfo *info)
   {
+    ASSERT(info);
     RANK = info->rank ();
     NAME = info->name ();
     FILENAME = info->filename ();
@@ -1786,27 +1937,46 @@ public:
   int64_t TOTAL_CALLS;
   int64_t SELF_PATHS;
   int64_t TOTAL_PATHS;
-  
-  void printDebugInfo (void)
-  {
-    std::cerr << SELF_COUNTS << " " << CHILDREN_COUNTS << " ";
-    std::cerr << SELF_CALLS << " " << SELF_CALLS << " ";
-    std::cerr << SELF_PATHS << " " << TOTAL_PATHS << std::endl;
-  }
+ 
+  OtherGProfRow(void)
+  :SELF_COUNTS(0), CHILDREN_COUNTS(0), SELF_CALLS(0),
+   TOTAL_CALLS(0), SELF_PATHS(0), TOTAL_PATHS(0)
+  {}
 };
+
+std::ostream & operator<<(std::ostream &stream, OtherGProfRow& row)
+{
+  stream << "[" << row.SELF_COUNTS << " " << row.CHILDREN_COUNTS << " "
+         << row.SELF_CALLS << " " << row.SELF_CALLS << " "
+         << row.SELF_PATHS << " " << row.TOTAL_PATHS << "]" << std::endl;
+  return stream;
+}
+    
 
 template <int ORDER>
 struct CompareCallersRow
 {
   bool operator () (OtherGProfRow *a, OtherGProfRow *b)
   { 
-    int64_t callsDiff = ORDER * (a->SELF_CALLS - b->SELF_CALLS);
-    int64_t cumDiff = ORDER * (a->SELF_COUNTS - b->SELF_COUNTS);
+    int64_t callsDiff = ORDER * (a->SELF_COUNTS - b->SELF_COUNTS);
+    int64_t cumDiff = ORDER * (a->CHILDREN_COUNTS - b->CHILDREN_COUNTS);
     if (callsDiff) return callsDiff < 0;
     if (cumDiff) return cumDiff < 0;
     return a->NAME < b->NAME;
   }
 };
+
+/* This is the class which represent an entry in the gprof style flat output.
+ *
+ * CUM is the accumulated counts for that entry, including the count for the children.
+ * SELF is the accumulated counts for only that entry, excluding the counts coming from children.
+ * KIDS is the accumulated counts for the entries that are called by that entry.
+ *
+ * NOTE: one should have CUM = SELF+KIDS,  so I don't quite understand why I actually need one of the three.
+ *
+ * SELF_ALL I don't remember what it is.
+ * CUM_ALL I don't remember what it is.
+ */
 
 class MainGProfRow : public GProfRow 
 {
@@ -1814,25 +1984,11 @@ public:
   typedef std::set <OtherGProfRow *, CompareCallersRow<1> > Callers;
   typedef std::set <OtherGProfRow *, CompareCallersRow<-1> > Calls;
   
-  struct CountsData
-  {
-    int64_t COUNTS;
-    int64_t FREQS;
-    CountsData (int64_t counts=0, int64_t freqs=0)
-    :COUNTS (counts), FREQS (freqs) {}
-  };
-
   int64_t CUM;
   int64_t SELF;
   int64_t KIDS;
-  CountsData SELFALL;
-  CountsData CUMALL;
-  
-  void printDebugInfo (void)
-  {
-    std::cerr << "SELFALL.COUNTS:" << SELFALL.COUNTS <<  " SELFALL.FREQS:" << SELFALL.FREQS << " ";
-    std::cerr << "CUMFALL.COUNTS:" << CUMALL.COUNTS <<  " CUMALL.FREQS:" << CUMALL.FREQS << std::endl;
-  }
+  int64_t SELF_ALL[3];
+  int64_t CUM_ALL[3];
   
   Callers CALLERS;
   Calls CALLS;
@@ -1856,99 +2012,94 @@ float percent (int64_t a, int64_t b)
 class GProfMainRowBuilder 
 {
 public:
-  GProfMainRowBuilder (FlatInfo *info, int keyId, int64_t totals, int64_t totfreq)
-   : m_info (info), m_row (0), m_keyId (keyId), 
-     m_callmax (0), m_totals (totals), m_totfreq (totfreq)
+  GProfMainRowBuilder (FlatInfo *info, int64_t totals)
+   : m_info (info), m_row (0), m_callmax (0), m_totals(totals)
   {
-    m_selfCounter = getKeyCounter (m_info->COUNTERS);
     init ();
   }
-  
-  void addCallee (FlatInfo *calleeInfo)
-  {
-    ASSERT (m_row);
-    FlatInfo *origin = FlatInfo::flatMap ()[m_info->SYMBOL];
-    FlatInfo *thisCall = origin->findBySymbol (origin->CALLS, calleeInfo->SYMBOL);
 
-    if (m_callmax < m_selfCounter->counts ())
-      m_callmax = m_selfCounter->counts ();
-
-    Counter *thisCounter = getKeyCounter (thisCall->COUNTERS);
-    Counter *otherCounter = getKeyCounter (calleeInfo->COUNTERS);
-    
-    if (!otherCounter->cumulativeCounts ())
-      { return; }
-    OtherGProfRow *callrow = new OtherGProfRow ();
-    callrow->initFromInfo (calleeInfo);
-    callrow->PCT = percent (thisCounter->cumulativeCounts (), m_totals);
-    callrow->SELF_COUNTS = thisCounter->cumulativeCounts ();
-    callrow->CHILDREN_COUNTS = otherCounter->cumulativeCounts ();
-    callrow->SELF_CALLS = thisCounter->cumulativeFreqs ();
-    callrow->TOTAL_CALLS = otherCounter->cumulativeFreqs ();
-    callrow->SELF_PATHS = thisCall->REFS; 
-    callrow->TOTAL_PATHS = calleeInfo->REFS;
-    m_row->CALLS.insert (callrow);
-    ASSERT (callrow->SELF_CALLS <= callrow->TOTAL_CALLS);
-    
-  }
-  
-  void addCaller (FlatInfo *callerInfo)
+  void addCaller (SymbolInfo *callerSymbol)
   { 
     ASSERT (m_row);
-    FlatInfo *origin = FlatInfo::flatMap ()[callerInfo->SYMBOL];
-    FlatInfo *thisCall = origin->findBySymbol (callerInfo->CALLS, m_info->SYMBOL);
-    
-    Counter *thisCounter = getKeyCounter (thisCall->COUNTERS);
-    Counter *otherCounter = getKeyCounter (callerInfo->COUNTERS);
-    if (!otherCounter->cumulativeCounts ())
+    FlatInfo *origin = FlatInfo::flatMap ()[callerSymbol];
+    CallInfo *thisCall = origin->getCallee(m_info->SYMBOL);
+   
+    ASSERT(thisCall);
+    if (!thisCall->VALUES[0])
       { return; }
     OtherGProfRow *callrow = new OtherGProfRow ();
-    callrow->initFromInfo (callerInfo);
-    callrow->PCT = percent (thisCounter->cumulativeCounts (), m_totals);
-    callrow->SELF_COUNTS = thisCounter->cumulativeCounts ();
-    callrow->CHILDREN_COUNTS = otherCounter->cumulativeCounts ();
-    callrow->SELF_CALLS = thisCounter->cumulativeFreqs ();
-    callrow->TOTAL_CALLS = otherCounter->cumulativeFreqs ();
-    callrow->SELF_PATHS = thisCall->REFS; 
-    callrow->TOTAL_PATHS = callerInfo->REFS;
-    m_row->CALLERS.insert (callrow);
-    // ASSERT ((callrow->SELF_CALLS <= callrow->TOTAL_CALLS) || (! isChild));
-  }
+    callrow->initFromInfo (origin);
+    callrow->PCT = percent (thisCall->VALUES[0], m_totals);
+    
+    callrow->SELF_COUNTS = thisCall->VALUES[0];
+    callrow->CHILDREN_COUNTS = origin->CUM_KEY[0];
+    
+    callrow->SELF_CALLS = thisCall->VALUES[1];
+    callrow->TOTAL_CALLS = origin->CUM_KEY[1]; 
 
+    callrow->SELF_PATHS = thisCall->VALUES[2]; 
+    callrow->TOTAL_PATHS = origin->CUM_KEY[2];
+    m_row->CALLERS.insert (callrow);
+  }  
+  
+  void addCallee (CallInfo *thisCall)
+  {
+    // calleeInfo is the global information about this symbol
+    // thisCall contains the information when this symbol is called by m_info
+    ASSERT (m_row);
+    FlatInfo *calleeInfo = FlatInfo::flatMap()[thisCall->SYMBOL];
+
+    if (!thisCall->VALUES[0])
+      { return; }
+
+    if (m_callmax < thisCall->VALUES[0])
+      m_callmax = thisCall->VALUES[0];
+
+    OtherGProfRow *callrow = new OtherGProfRow ();
+    ASSERT (calleeInfo);
+    callrow->initFromInfo (calleeInfo);
+    callrow->PCT = percent (thisCall->VALUES[0], m_totals);
+
+    callrow->SELF_COUNTS = thisCall->VALUES[0];
+    callrow->CHILDREN_COUNTS = calleeInfo->CUM_KEY[0];
+    
+    callrow->SELF_CALLS = thisCall->VALUES[1];
+    callrow->TOTAL_CALLS = calleeInfo->CUM_KEY[1];
+    
+    callrow->SELF_PATHS = thisCall->VALUES[2]; 
+    callrow->TOTAL_PATHS = calleeInfo->CUM_KEY[2];
+    
+    m_row->CALLS.insert (callrow);
+    //ASSERT (callrow->SELF_CALLS <= callrow->TOTAL_CALLS);
+  }
   
   void init (void)
   {
     m_row = new MainGProfRow ();
     m_row->initFromInfo (m_info);
-    m_row->PCT = percent (m_selfCounter->cumulativeCounts (), m_totals);
-    m_row->CUM = m_selfCounter->cumulativeCounts ();
-    m_row->SELF = m_selfCounter->counts ();   
-    m_row->SELFALL = MainGProfRow::CountsData (m_selfCounter->counts (), 
-                           m_selfCounter->freqs ());
-    m_row->CUMALL = MainGProfRow::CountsData (m_selfCounter->cumulativeCounts (), 
-                          m_selfCounter->cumulativeFreqs ());
+    m_row->PCT = percent (m_info->CUM_KEY[0], m_totals);
+    m_row->CUM = m_info->CUM_KEY[0];
+    m_row->SELF = m_info->SELF_KEY[0];   
   }
 
-  MainGProfRow *build (void)
+  MainGProfRow *build (bool isMax)
   {
     ASSERT (m_row);
-    m_row->KIDS = m_selfCounter->isMax () ? m_callmax : m_selfCounter->cumulativeCounts () - m_selfCounter->counts ();
+    if (isMax) {
+      m_row->KIDS = m_callmax;
+    }
+    else {
+      m_row->KIDS = m_info->CUM_KEY[0] - m_info->SELF_KEY[0];
+    }
+    memcpy (m_row->CUM_ALL, m_info->CUM_KEY, 3*sizeof(int64_t));
+    memcpy (m_row->SELF_ALL, m_info->SELF_KEY, 3*sizeof(int64_t));
     return m_row;
   }
 private:
-
-  Counter *getKeyCounter (Counter *counter)
-  {
-    return Counter::getCounterInRing (counter, m_keyId);
-  }
-
   FlatInfo *m_info;
   MainGProfRow *m_row;
-  unsigned int m_keyId;
   int64_t m_callmax;
   int64_t m_totals;
-  int64_t m_totfreq;
-  Counter *m_selfCounter;
   MainGProfRow *m_mainCallrow; 
 };
 
@@ -1975,28 +2126,31 @@ class SortRowBySelf
 {
 public:
   bool operator () (MainGProfRow *a, MainGProfRow *b) {
-    int64_t diffSelf = a->SELF - b->SELF;
-    if (diffSelf) return diffSelf > 0;
-    int64_t diffDepth = a->DEPTH - b->DEPTH;
-    if (diffDepth) return diffDepth > 0;
+    if (a->SELF != b->SELF) return a->SELF > b->SELF;
+    if (a->DEPTH != b->DEPTH) return a->DEPTH < b->DEPTH;
     return a->NAME < b->NAME;
   }
 };
 
 void
-IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
+IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
 {
-  prepdata (prof);
-  if (m_config->verbose ())
+  prepdata(prof);
+  if (m_config->verbose())
     { std::cerr << "Building call tree map" << std::endl; }
-  IgProfFilter *callTreeBuilder = new TreeMapBuilderFilter (&prof, m_config);
-  walk (prof, callTreeBuilder);
+  IgProfFilter *callTreeBuilder = new TreeMapBuilderFilter(&prof, m_config);
+  walk(prof.spontaneous(), callTreeBuilder);
   // Sorting flat entries
   if (m_config->verbose ())
     { std::cerr << "Sorting" << std::endl; }
   int rank = 1;
   typedef std::vector <FlatInfo *> FlatVector;
-  FlatVector sorted;  
+  FlatVector sorted; 
+  if (FlatInfo::flatMap().empty()) {
+    std::cerr << "Could not find any information to print." << std::endl; 
+    exit(1);
+  }
+
   for (FlatInfo::FlatMap::const_iterator i = FlatInfo::flatMap ().begin ();
      i != FlatInfo::flatMap ().end ();
        i++)
@@ -2014,25 +2168,28 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
       std::cerr << "Resolving symbols" << std::endl;
     symremap (prof, sorted, m_config->useGdb (), m_config->doDemangle ());
   }
-  
+ 
+  if (sorted.empty()) {
+    std::cerr << "Could not find any sorted information to print." << std::endl;
+    exit(1);
+  }
+
   if (m_config->verbose ())
-    std::cerr << "Generating report\n" << std::endl;
+    std::cerr << "Generating report" << std::endl;
   
   int keyId = m_config->keyId ();
-  std::cerr << keyId << std::endl;
 
+  bool isMax = Counter::isMax(keyId);
+  
   FlatInfo *first = FlatInfo::first();
   ASSERT (first);
-  
-  Counter *topCounter = Counter::getCounterInRing (first->COUNTERS, keyId);
 
-  ASSERT(topCounter);
-  int64_t totals = topCounter->cumulativeCounts ();
-  int64_t totfreq = topCounter->cumulativeFreqs ();
+  int64_t totals = first->CUM_KEY[0];
+  int64_t totfreq = first->CUM_KEY[1];
 
   if (totals < 0) {
-    std::cerr << "There is something weird going on for " << first->name() << " in " << first->filename() << "\n";
-    std::cerr << "Cumulative counts is negative: " << totals << "!!!" << std::endl;
+    std::cerr << "There is something weird going on for " << first->name() << " in " << first->filename() << "\n"
+              << "Cumulative counts is negative: " << totals << "!!!\n" << std::endl;
     exit(1);
   }
   ASSERT(totfreq >= 0);
@@ -2042,32 +2199,29 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
   typedef std::vector <MainGProfRow *> SelfSortedTable;
   
   FinalTable table;
-  
+ 
   for (FlatVector::const_iterator i = sorted.begin ();
      i != sorted.end ();
      i++)
   {
     FlatInfo *info = *i;
-    // FIXME: Can we assume we have only the counters on the nodes 
-    //      which have cumulativeCounts () > 0?
-    Counter *counter = Counter::getCounterInRing ((*i)->COUNTERS, keyId);
-    ASSERT (counter);
-    if (!counter->cumulativeCounts ())
+    if (!info->CUM_KEY[0])
       continue;
+
     // Sort calling and called functions.
     // FIXME: should sort callee and callers
-    GProfMainRowBuilder builder (info, keyId, totals, totfreq);
-    
-    for (FlatInfo::ReferenceList::const_iterator j = info->CALLERS.begin ();
+    GProfMainRowBuilder builder (info, totals);
+   
+    for (FlatInfo::Callers::const_iterator j = info->CALLERS.begin ();
        j != info->CALLERS.end ();
        j++)
     { builder.addCaller (*j); }
 
-    for (FlatInfo::ReferenceList::const_iterator j = info->CALLS.begin ();
+    for (FlatInfo::Calls::const_iterator j = info->CALLS.begin ();
        j != info->CALLS.end ();
        j++)
     { builder.addCallee (*j); }
-    table.push_back (builder.build ()); 
+    table.push_back (builder.build (isMax)); 
   }
 
   SelfSortedTable selfSortedTable;
@@ -2120,11 +2274,11 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
         printf ("%*s  ", maxval, thousands (row.CUM).c_str ());
       }
       PrintIf p (maxcnt);
-      p (showpaths, thousands (row.CUMALL.COUNTS));
-      p (showcalls, thousands (row.CUMALL.FREQS));
+      p (showpaths, thousands (row.SELF_ALL[2]));
+      p (showcalls, thousands (row.CUM_ALL[1]));
       
       printf ("%s [%d]", row.NAME.c_str (), row.RANK);
-      if (showlibs) { std::cerr << row.FILENAME; }
+      if (showlibs) { std::cout << row.FILENAME; }
       std::cout << "\n";
       if (row.PCT < 1.)
         break;
@@ -2151,8 +2305,8 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
         printf ("%*s  ", maxval, thousands (row.SELF).c_str ());
       }
       PrintIf p (maxcnt);
-      p (showcalls, thousands (row.SELFALL.FREQS));
-      p (showpaths, thousands (row.SELFALL.FREQS));
+      p (showcalls, thousands (row.SELF_ALL[1]));
+      p (showpaths, thousands (row.SELF_ALL[2]));
       printf ("%s [%d]", row.NAME.c_str (), row.RANK);
       if (showlibs) { std::cout << row.FILENAME; }
       std::cout << "\n";
@@ -2237,10 +2391,10 @@ IgProfAnalyzerApplication::analyse (ProfileInfo &prof)
       }
       printf ("  ");
       if (showcalls) 
-      { (AlignedPrinter (maxcnt)) (thousands (mainRow.CUMALL.FREQS));
+      { (AlignedPrinter (maxcnt)) (thousands (mainRow.CUM_ALL[1]));
           (AlignedPrinter (maxcnt)) (""); printf (" "); }
       if (showpaths)
-        { (AlignedPrinter (maxcnt)) (thousands (mainRow.CUMALL.COUNTS));
+        { (AlignedPrinter (maxcnt)) (thousands (mainRow.SELF_ALL[2]));
           (AlignedPrinter (maxcnt)) (""); printf (" "); }
       
       std::cout << mainRow.NAME;
@@ -2473,10 +2627,42 @@ IgProfAnalyzerApplication::parseArgs (const ArgsList &args)
   exit (1);
 }
 
+void 
+userAborted(int)
+{
+  std::cerr << "\nUser interrupted." << std::endl;
+  exit(1);
+}
+
 int 
 main (int argc, const char **argv)
 {
   lat::Signal::handleFatal (argv [0]);
-  IgProfAnalyzerApplication *app = new IgProfAnalyzerApplication (argc, argv);
-  app->run ();
+  signal (SIGINT, userAborted);
+  try 
+  {
+    IgProfAnalyzerApplication *app = new IgProfAnalyzerApplication (argc, argv);
+    app->run ();
+  } 
+  catch (lat::Error &e) {
+
+    std::cerr << "Internal error \"" << e.explain() << "\".\n"
+                 "Oh my, you have found a bug in igprof-analyse!\n"
+                 "Please file a bug report and some mean to reproduce it to:\n\n"
+                 "  https://savannah.cern.ch/bugs/?group=cmssw\n\n" << std::endl;
+  }
+  catch (std::exception &e) {
+    std::cerr << "Internal error: \""
+              << e.what() << "\".\n" 
+                 "\nOh my, you have found a bug in igprof-analyse!\n"
+                 "Please file a bug report and some mean to reproduce it to:\n\n"
+                 "  https://savannah.cern.ch/bugs/?group=cmssw\n\n" << std::endl;
+  }
+  catch (...) 
+  {
+    std::cerr << "Internal error.\n"
+                 "Oh my, you have found a bug in igprof-analyse!\n"
+                 "Please file a bug report and some mean to reproduce it to:\n\n"
+                 "  https://savannah.cern.ch/bugs/?group=cmssw\n\n" << std::endl;
+  }
 }
