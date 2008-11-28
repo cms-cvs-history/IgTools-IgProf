@@ -1041,8 +1041,9 @@ public:
       symnode->DEPTH = seen ().size ();
 
     Counter *nodeCounter = Counter::getCounterInRing (node->COUNTERS, m_keyId);
-    
-    ASSERT (nodeCounter);
+    if (!nodeCounter) 
+      { return; }
+
     bool isMax = nodeCounter->isMax();
 
     if (parent)
