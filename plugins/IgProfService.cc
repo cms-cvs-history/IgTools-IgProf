@@ -6,7 +6,7 @@
 //  Peter Elmer, Princeton University                        18 Nov, 2008
 //
 
-#include "IgTools/IgProf/plugins/IgProfService.hh"
+#include "IgTools/IgProf/plugins/IgProfService.h"
 #include "FWCore/Framework/interface/MakerMacros.h"
 #include "FWCore/ServiceRegistry/interface/ServiceMaker.h"
 #include "FWCore/MessageLogger/interface/MessageLogger.h"
