@@ -274,11 +274,14 @@ public:
   
   ~PipeReader (void)
   {
-    delete m_cmd;
+    if (m_pipe.source()) {
+      m_pipe.source()->close();
+    }
     delete m_isbuf;
-    delete m_is;
     delete m_istd;
-  }
+    delete m_is;
+    delete m_cmd;
+ }
   
   std::istream &output (void)
   {
