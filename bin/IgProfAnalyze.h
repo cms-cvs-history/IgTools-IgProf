@@ -517,7 +517,7 @@ private:
 class FileOpener 
 {
 public:
-  static const int BUFFER_SIZE=10000000; 
+  static const int BUFFER_SIZE=20000000; 
   FileOpener (void)
     : m_buffer (new char[BUFFER_SIZE]),
       m_posInBuffer (BUFFER_SIZE),
