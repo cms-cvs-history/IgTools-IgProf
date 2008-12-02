@@ -857,6 +857,7 @@ public:
     if (index (origname, '/') == -1)
     { absname = paths.which (origname); }
 
+    absname = lat::Filename(absname).truename();
     // TODO:
     // $absname = (abs_path($origname) || $origname)
     //     if length($origname);
