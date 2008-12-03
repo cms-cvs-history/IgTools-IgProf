@@ -36,7 +36,7 @@ usage ()
                "  [-p/--paths] [-c/--calls] [--value peak|normal]\n"
                "  [-F/--filter-module FILE] [ -f FILTER[,FILTER...] ]\n"
                "  [-nf/--no-filter] [-lf/--list-filters]\n"
-               "  { [-x/--xml] | [-h/--html] | [-t/--text] }\n"
+               "  { [-t/--text] }\n"
                "  [--libs] [--demangle] [--gdb] [-v/--verbose]\n"
                "  [--] [FILE]...\n" << std::endl;
 }
@@ -2618,18 +2618,6 @@ IgProfAnalyzerApplication::parseArgs (const ArgsList &args)
       ASSERT (false);
       // TODO: implement callgrind output (7e2618e)
       // { $callgrind = 1; shift (@ARGV); }
-    }
-    else if (is ("--xml", "-x"))
-    {
-      ASSERT (false);
-      // TODO: Implement XML output. (88bed9e) 
-      // { $output = "xml"; shift (@ARGV); }
-    }
-    else if (is ("--html", "-h"))
-    {
-      ASSERT (false);
-      // TODO: Implement html output. (a5120da) 
-      // { $output = "html"; shift (@ARGV); }
     }
     else if (is ("--text", "-t"))
     { m_config->setOutputType (Configuration::TEXT); }
