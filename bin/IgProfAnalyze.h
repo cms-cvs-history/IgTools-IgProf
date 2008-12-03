@@ -322,11 +322,10 @@ public:
   typedef int Offset;
 private:
   struct CacheItem {
-    CacheItem (Offset offset, const std::string &name, Offset size)
-    :OFFSET(offset), NAME(name), SIZE(size) {};
+    CacheItem (Offset offset, const std::string &name)
+    :OFFSET(offset), NAME(name) {};
     Offset OFFSET;
     std::string NAME;
-    Offset SIZE;
   };
 
   typedef std::vector<CacheItem> SymbolCache;
@@ -369,10 +368,7 @@ public:
 
     --i;
 
-    if (offset - i->OFFSET <= i->SIZE)
-    { return i->NAME.c_str(); }
-
-    return 0;
+    return i->NAME.c_str(); 
   }
 
   Offset next(Offset offset)
@@ -438,7 +434,7 @@ private:
       exit(1);
     }
     
-    PipeReader nm("nm -t d -n -S " + std::string(NAME));
+    PipeReader nm("nm -t d -n " + std::string(NAME));
     while (nm.output())
     {
       std::string line;
@@ -446,22 +442,14 @@ private:
     
       if (!nm.output()) break;
       if (line.empty()) continue;
-      // If line does not match "^(\\d+) ([0-9]+ )\\S (\S+)$", exit.
+      // If line does not match "^(\\d+) \\S (\S+)$", exit.
       const char *begin = line.c_str();
       char *endptr = 0;
       int address = strtol(begin, &endptr, 10);
       if (endptr == begin) { continue; }
 
       if (*endptr++ != ' ') { continue; }
-      // TODO: for the time being we ignore sizeless symbols, because they are
-      //       most likely not function. In the future we should try to
-      //       keep them in a separate (multi) map so that we can refer to 
-      //       symbols that are somehow out of 
-      char *endptr2;
-      int size = strtol(endptr, &endptr2, 10);
-      if (endptr == endptr2) { continue; }
-      if (*endptr2++ != ' ') { continue; }
-        endptr = endptr2;
+
       if (isWhitespace(*endptr++)) { continue; }
       if (*endptr++ != ' ') { continue; }
       char *symbolName = endptr;
@@ -477,7 +465,17 @@ private:
         { continue; }
       // Create a new symbol with the given fileoffset.
       // The symbol is automatically saved in the FileInfo cache by offset.
-      m_symbolCache.push_back(CacheItem(address-vmbase, symbolName, size));
+      // If a symbol with the same offset is already there, the new one 
+      // replaces the old one.
+      int offset = address-vmbase;
+      if (m_symbolCache.size() && (m_symbolCache.back().OFFSET == offset))
+      {
+        m_symbolCache.back().NAME = symbolName;
+      }
+      else
+      {
+        m_symbolCache.push_back(CacheItem(address-vmbase, symbolName));
+      }
     }
     #endif /* __APPLE__ */
   }
