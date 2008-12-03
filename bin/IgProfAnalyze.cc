@@ -2581,13 +2581,15 @@ IgProfAnalyzerApplication::parseArgs (const ArgsList &args)
     }
     else if (is ("--filter-file", "-F"))
     {
-      ASSERT (false);
+      std::cerr << "Option " << *arg << " is not supported for the moment." << std::endl;
+      exit(1);
       // TODO: Implement --filter-file.
       // { push (@filterfiles, $ARGV[1]); shift (@ARGV); shift (@ARGV); }
     }
     else if (is ("--filter", "-f"))
     {
-      ASSERT (false);
+      std::cerr << "Option " << *arg << " is not supported for the moment." << std::endl;
+      exit(1); 
       // TODO: Implement user filters. (84dd354) 
       // push (@userfilters, split(/,/, $ARGV[1])); shift (@ARGV); shift (@ARGV); }
     }
