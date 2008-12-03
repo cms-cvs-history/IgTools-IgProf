@@ -2406,7 +2406,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
           cntfmt (thousands (row.SELF_PATHS), 
                     thousands (row.TOTAL_PATHS));
         }
-        printf ("    %s [%d]", row.NAME.c_str (), row.RANK);
+        printf ("  %s [%d]", row.NAME.c_str (), row.RANK);
         if (showlibs) {std::cout << "  " << row.FILENAME; }
         std::cout << "\n";
       }
@@ -2463,7 +2463,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
           cntfmt (thousands (row.SELF_PATHS), 
                     thousands (row.TOTAL_PATHS));
         }
-        printf ("    %s [%d]", row.NAME.c_str (), row.RANK);
+        printf ("  %s [%d]", row.NAME.c_str (), row.RANK);
     
         if (showlibs) {std::cout << "  " << row.FILENAME; }
         std::cout << "\n";
