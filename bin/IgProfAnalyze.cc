@@ -2281,8 +2281,8 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
     
   if (m_config->outputType () == Configuration::TEXT)
   {
-    bool showpaths = m_config->showPaths ();
     bool showcalls = m_config->showCalls ();
+    bool showpaths = m_config->showPaths ();
     bool showlibs = m_config->showLib ();
     std::cout << "Counter: " << m_config->key () << std::endl;
     bool isPerfTicks = m_config->key () == "PERF_TICKS";
@@ -2318,9 +2318,8 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
         printf ("%*s  ", maxval, thousands (row.CUM).c_str ());
       }
       PrintIf p (maxcnt);
-      p (showpaths, thousands (row.SELF_ALL[2]));
       p (showcalls, thousands (row.CUM_ALL[1]));
-      
+      p (showpaths, thousands (row.SELF_ALL[2]));
       printf ("%s [%d]", row.NAME.c_str (), row.RANK);
       if (showlibs) { std::cout << row.FILENAME; }
       std::cout << "\n";
@@ -2409,11 +2408,13 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
         { 
           cntfmt (thousands (row.SELF_CALLS), 
               thousands (row.TOTAL_CALLS));
+          printf ("  ");
         }
         if (showpaths)
         {
           cntfmt (thousands (row.SELF_PATHS), 
                     thousands (row.TOTAL_PATHS));
+          printf ("  ");
         }
         printf ("  %s [%d]", row.NAME.c_str (), row.RANK);
         if (showlibs) {std::cout << "  " << row.FILENAME; }
@@ -2465,12 +2466,16 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
         printf ("  ");
         
         if (showcalls) 
-        { cntfmt (thousands (row.SELF_CALLS), 
-              thousands (row.TOTAL_CALLS)); }
+        { 
+          cntfmt (thousands (row.SELF_CALLS), 
+                  thousands (row.TOTAL_CALLS)); 
+          printf ("  ");
+        }
         if (showpaths)
         {
           cntfmt (thousands (row.SELF_PATHS), 
                     thousands (row.TOTAL_PATHS));
+          printf ("  ");
         }
         printf ("  %s [%d]", row.NAME.c_str (), row.RANK);
     
