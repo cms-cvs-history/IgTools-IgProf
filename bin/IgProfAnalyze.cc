@@ -662,7 +662,7 @@ public:
     ASSERT (node);
     ASSERT (node->originalSymbol ());
     ASSERT (node->originalSymbol ()->FILE);
-    
+ 
     if (strstr (node->originalSymbol ()->FILE->NAME.c_str (), "IgProf.")
       || strstr (node->originalSymbol ()->FILE->NAME.c_str (), "IgHook."))
     {
@@ -797,7 +797,7 @@ public:
   Callers CALLERS;
   Calls CALLS;
   SymbolInfo *SYMBOL;
-  unsigned int DEPTH;
+  int DEPTH;
   int rank (void) {
     ASSERT (SYMBOL);
     return SYMBOL->rank (); 
@@ -811,7 +811,7 @@ public:
   int64_t CUM_KEY[3];
 protected:
   FlatInfo (SymbolInfo *symbol)
-  : SYMBOL (symbol), DEPTH (0) {
+  : SYMBOL (symbol), DEPTH (-1) {
     memset(SELF_KEY, 0, 3*sizeof(int64_t));
     memset(CUM_KEY, 0, 3*sizeof(int64_t));
   }
@@ -1038,8 +1038,8 @@ public:
     ASSERT (sym);
     FlatInfo *symnode = FlatInfo::get (sym);
     ASSERT (symnode);
-    if (seen().size() > symnode->DEPTH)
-      symnode->DEPTH = seen ().size ();
+    if (symnode->DEPTH < 0 || int(seen().size()) < symnode->DEPTH)
+      symnode->DEPTH = int(seen().size());
 
     Counter *nodeCounter = Counter::getCounterInRing (node->COUNTERS, m_keyId);
     if (!nodeCounter) 
@@ -1951,7 +1951,7 @@ public:
   int RANK;
   int FILEOFF;
   float PCT;
-  unsigned int DEPTH;
+  int DEPTH;
   
   void initFromInfo (FlatInfo *info)
   {
@@ -2161,9 +2161,10 @@ class SortRowBySelf
 {
 public:
   bool operator () (MainGProfRow *a, MainGProfRow *b) {
-    if (a->SELF != b->SELF) return a->SELF > b->SELF;
-    if (a->DEPTH != b->DEPTH) return a->DEPTH < b->DEPTH;
-    return a->NAME < b->NAME;
+    return a->SELF > b->SELF;
+    //if (a->SELF != b->SELF) return a->SELF > b->SELF;
+    //if (a->DEPTH != b->DEPTH) return a->DEPTH < b->DEPTH;
+    //return a->NAME < b->NAME;
   }
 };
 
@@ -2268,7 +2269,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
     selfSortedTable.push_back (*i);
   }
   
-  sort (selfSortedTable.begin (), selfSortedTable.end (), SortRowBySelf ());
+  stable_sort (selfSortedTable.begin (), selfSortedTable.end (), SortRowBySelf ());
     
   if (m_config->outputType () == Configuration::TEXT)
   {
