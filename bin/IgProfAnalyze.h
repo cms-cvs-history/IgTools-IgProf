@@ -710,11 +710,12 @@ thousands (int64_t value, int leftPadding=0)
 std::string
 thousands (double value, int leftPadding, int decimalPositions)
 {
+  value = round (value * 100.) / 100.;
   int padding = leftPadding-decimalPositions;
-  std::string result = thousands(static_cast<int>(floor(value)), padding > 0 ? padding : 0);
+  std::string result = thousands(int64_t(value), padding > 0 ? padding : 0);
   ASSERT(decimalPositions < 63);
   char buffer[64];
-  double decimal = value-floor(value);
+  double decimal = value-int64_t(value);
   sprintf(buffer+1, "%.2f", decimal);
   buffer[decimalPositions+3] = 0;
   return result + &buffer[2];
