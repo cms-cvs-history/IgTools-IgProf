@@ -413,11 +413,19 @@ symlookup (FileInfo *file, int fileoff, const std::string& symname, bool useGdb)
   std::string result = symname;
   if ((lat::StringOps::find (symname, "@?") == 0) && (file->NAME != "") && (fileoff > 0))
   {
-    char buffer[32];
-    sprintf (buffer, "+%d}",fileoff);
-    result = std::string ("@{") 
-             + lat::Filename (file->NAME).asFile().nondirectory().name() 
-             + buffer;
+    char buffer[1024];
+    if (file->NAME == "<dynamically generated>" )
+    {
+      sprintf(buffer, "@?0x%x{<dynamically-generated>}", fileoff);
+      result = std::string() + buffer;
+    }
+    else
+    {
+      sprintf (buffer, "+%d}",fileoff);
+      result = std::string ("@{")
+               + lat::Filename (file->NAME).asFile().nondirectory().name()
+               + buffer;
+    }
   }
   
   if (useGdb && lat::Filename(file->NAME).isRegular ())
