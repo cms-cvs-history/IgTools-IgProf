@@ -2497,6 +2497,7 @@ IgProfAnalyzerApplication::run (void)
     args.push_back (m_argv[i]);
   }
   ArgsList::const_iterator firstFile = this->parseArgs (args);
+  m_config->addFilter(new RemoveIgProfFilter());
   ASSERT (firstFile != args.end ());
   ArgsLeftCounter left (args.end ());
   ASSERT (left (firstFile));
@@ -2556,7 +2557,6 @@ IgProfAnalyzerApplication::parseArgs (const ArgsList &args)
         m_config->addFilter(new MallocFilter());
       if (key == "MEM_LIVE")
         m_config->addFilter(new IgProfGccPoolAllocFilter());
-      m_config->addFilter(new RemoveIgProfFilter());
     }
     else if (is ("--value") && left (arg) > 1)
     {
