@@ -3,6 +3,7 @@
 BEGIN { use strict; use warnings; $^W = 1; }
 use File::Temp;
 use Cwd 'abs_path';
+use sort 'stable';
 
 my $output = "text";
 my $outputdir = "igout";
@@ -19,6 +20,16 @@ my $showcalls = undef;
 my $showpaths = 0;
 my @deffilters = qw(igprof);
 my @filters;
+
+sub fltdiff
+{
+   my ($a, $b) = @_;
+   my $diff = $a - $b;
+   return 0 if abs($diff) < 0.00001;
+
+   return 1 if $diff > 0;
+   return -1;
+}
 
 ######################################################################
 # Support routine for walking node trees.
@@ -824,7 +835,10 @@ sub analyse
     &walk(sub { my ($prof, $parent, $node) = @_;
 	        my ($realsym, $sym) = &symfor($prof, $seen, $node);
 		my $symnode = ($$flat{$sym} ||= {});
-		$$symnode{DEPTH} = scalar keys %$seen;
+                if (! defined $$symnode{DEPTH} || scalar keys %$seen < $$symnode{DEPTH})
+                {
+                  $$symnode{DEPTH} = scalar keys %$seen;
+                }
 
 		if ($parent)
 		{
@@ -870,7 +884,7 @@ sub analyse
     # Sort the symbols by selected criteria
     do { local $|=1; print STDERR "Sorting\n" } if $verbose;
     my $rank = 1;
-    my @sorted = sort { &cmpnodes($flat, $a, $b); } keys %$flat;
+    my @sorted = sort { &cmpnodes($prof, $flat, $a, $b); } keys %$flat;
     $$flat{$_}{RANK} = $rank++ for @sorted;
 
     # Resolve symbols using GDB and/or demangler
@@ -894,17 +908,13 @@ sub analyse
 	my $row = { CALLERS => [], SYM => [], CALLS => [] };
 	push (@table, $row);
 
-	my @parents = sort { ($$flat{$a}{CALLS}{$sym}[0]
-			      <=> $$flat{$b}{CALLS}{$sym}[0])
-			     || ($$flat{$a}{CUM_KEY}[0]
-			         <=> $$flat{$b}{CUM_KEY}[0])
+	my @parents = sort { fltdiff($$flat{$a}{CALLS}{$sym}[0], $$flat{$b}{CALLS}{$sym}[0])
+			     || fltdiff($$flat{$a}{CUM_KEY}[0], $$flat{$b}{CUM_KEY}[0])
                              || ($$prof{SYMS}{$a}{NAME} cmp $$prof{SYMS}{$b}{NAME}) }
 	    keys %{$$flat{$sym}{CALLERS}};
 
-	my @children = sort { ($$flat{$sym}{CALLS}{$b}[0]
-			       <=> $$flat{$sym}{CALLS}{$a}[0])
-			      || ($$flat{$b}{CUM_KEY}[0]
-			          <=> $$flat{$a}{CUM_KEY}[0])
+	my @children = sort { fltdiff($$flat{$sym}{CALLS}{$b}[0], $$flat{$sym}{CALLS}{$a}[0])
+			      || fltdiff($$flat{$b}{CUM_KEY}[0], $$flat{$a}{CUM_KEY}[0])
                               || ($$prof{SYMS}{$a}{NAME} cmp $$prof{SYMS}{$b}{NAME}) }
 	    keys %{$$flat{$sym}{CALLS}};
 
@@ -994,7 +1004,7 @@ sub analyse
 	      ($showcalls ? sprintf("\%${maxcnt}s  ", "Calls") : ()),
 	      ($showpaths ? sprintf("\%${maxcnt}s  ", "Paths") : ()),
 	      "Function\n";
-        foreach my $entry (sort { $$b{SYM}[6] <=> $$a{SYM}[6] } @table)
+        foreach my $entry (sort { fltdiff($$b{SYM}[6], $$a{SYM}[6]) } @table)
         {
 	    my ($rank, $name, $lib, $liboff, $pct,
 	        $cum, $self, $kids, $selfall, $cumall) = @{$$entry{SYM}};
@@ -1105,7 +1115,7 @@ sub analyse
 	print "    <th>Library</th>\n" if $showlibs;
 	print "  </tr>\n";
 
-        foreach my $entry (sort { $$b{SYM}[6] <=> $$a{SYM}[6] } @table)
+        foreach my $entry (sort { fltdiff($$b{SYM}[6], $$a{SYM}[6]) } @table)
         {
 	    my ($rank, $name, $lib, $liboff, $pct,
 	        $cum, $self, $kids, $selfall, $cumall) = @{$$entry{SYM}};
@@ -1242,7 +1252,7 @@ sub analyse
 	print IGFLAT2 "    <th>Library</th>\n" if $showlibs;
 	print IGFLAT2 "  </tr>\n";
 
-        foreach my $entry (sort { $$b{SYM}[6] <=> $$a{SYM}[6] } @table)
+        foreach my $entry (sort { fltdiff($$b{SYM}[6], $$a{SYM}[6]) } @table)
         {
 	    my ($rank, $name, $lib, $liboff, $pct,
 	        $cum, $self, $kids, $selfall, $cumall) = @{$$entry{SYM}};
@@ -1374,7 +1384,7 @@ sub cmpnodekey
     my $bval = $$flat{$b}{CUM_KEY}[0];
     $aval = -1 if ! defined ($aval);
     $bval = -1 if ! defined ($bval);
-    my $diff = -1 * $order * ($aval <=> $bval);
+    my $diff = -1 * $order * fltdiff($aval, $bval);
     return $diff;
 }
 
@@ -1389,13 +1399,13 @@ sub cmpcallers
 
 sub cmpnodes
 {
-    my ($flat, $a, $b) = @_;
+    my ($prof, $flat, $a, $b) = @_;
     my $cmp = &cmpnodekey($flat, $a, $b);
     return $cmp if $cmp;
 
     $cmp = &cmpcallers($flat, $a, $b);
     return $cmp if $cmp;
-    return $a cmp $b;
+    return $$prof{SYMS}{$a}{NAME} cmp $$prof{SYMS}{$b}{NAME};
 }
 
 ######################################################################
