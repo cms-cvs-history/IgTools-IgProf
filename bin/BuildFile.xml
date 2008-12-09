@@ -1,2 +1,2 @@
 <use name="Iguana/Utilities"/>
-<bin file="IgProfAnalyze.cc" name="igprof-analyze2"/>
+<bin file="IgProfAnalyze.cc" name="igprof-analyse"/>
