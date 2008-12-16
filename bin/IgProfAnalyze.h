@@ -255,17 +255,20 @@ public:
       m_isbuf(0),
       m_cmd(0)
   {
+    static lat::File s_stderr(lat::Filename::null(), lat::IOFlags::OpenRead | lat::IOFlags::OpenWrite);
+    lat::IOChannel *nil = 0;
+
     if (!source)
     {   
       m_cmd = new lat::SubProcess(m_argz.argz(), 
-                                lat::SubProcess::One | lat::SubProcess::Read,
-                                &m_pipe);
+                                lat::SubProcess::One | lat::SubProcess::Read | lat::SubProcess::NoCloseError,
+                                &m_pipe, nil, &s_stderr);
     }
     else
     { 
       m_cmd = new lat::SubProcess(m_argz.argz(), 
-                                lat::SubProcess::One | lat::SubProcess::Read,
-                                source, m_pipe.sink ());
+                                lat::SubProcess::One | lat::SubProcess::Read | lat::SubProcess::NoCloseError,
+                                source, m_pipe.sink (), &s_stderr);
     }
     m_is = new lat::IOChannelInputStream(m_pipe.source ());
     m_isbuf = new lat::InputStreamBuf(m_is);
