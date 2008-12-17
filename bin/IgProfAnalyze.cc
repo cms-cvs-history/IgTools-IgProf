@@ -1641,7 +1641,7 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
   nodestack.reserve (IGPROF_MAX_DEPTH);
   
   if (m_config->verbose ())
-    std::cerr << " X" << filename << std::endl;
+    std::cerr << "Parsing igprof output file: " << filename << std::endl;
   FileReader reader (filename);
   
   std::string line;
