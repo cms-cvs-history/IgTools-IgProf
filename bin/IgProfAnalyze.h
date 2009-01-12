@@ -612,14 +612,23 @@ public:
     lat::BufferInputStream *bufferStream = new lat::BufferInputStream (storageInput);
     addStream (storageInput);
     addStream (bufferStream);
-    lat::Filename extension = lat::Filename(filename).extension();
-    if (extension == "gz" || extension == "gzip") {
-      addStream (new lat::GZIPInputStream(bufferStream));
-    } else if (extension == "zip") {
-      addStream (new lat::ZipInputStream(bufferStream));
-    } else if (extension == "bz2") {
-      addStream (new lat::BZIPInputStream(bufferStream));
-    }
+
+    FILE *f = fopen(filename.c_str(), "r"); 
+    fread(m_fileHeader, 4, 1, f);
+    fclose(f);
+    
+    if (m_fileHeader[0] == 0x1f 
+        && m_fileHeader[1] == 0x8b) 
+    { addStream (new lat::GZIPInputStream(bufferStream)); } 
+    else if (m_fileHeader[3] == 0x04 
+             && m_fileHeader[2] == 0x03
+             && m_fileHeader[1] == 0x4b
+             && m_fileHeader[0] == 0x50) 
+    { addStream (new lat::ZipInputStream(bufferStream)); } 
+    else if (m_fileHeader[0] == 'B' 
+             && m_fileHeader[1] == 'Z' 
+             && m_fileHeader[2] == 'h') 
+    { addStream (new lat::BZIPInputStream(bufferStream)); }
   }
   ~FileReader (void)
   {
@@ -641,6 +650,7 @@ private:
         }
     }
   lat::File *m_file;
+  unsigned char m_fileHeader[4];
 };
 
 class PathCollection
