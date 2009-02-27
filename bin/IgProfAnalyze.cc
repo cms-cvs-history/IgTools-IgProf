@@ -1954,21 +1954,46 @@ private:
 class GProfRow
 {
 public:
-  std::string NAME;
-  std::string FILENAME;
-  int RANK;
   int FILEOFF;
   float PCT;
-  int DEPTH;
   
   void initFromInfo (FlatInfo *info)
   {
     ASSERT(info);
-    RANK = info->rank ();
-    NAME = info->name ();
-    FILENAME = info->filename ();
-    DEPTH = info->DEPTH;
+    m_info = info;
   }
+
+  const char *name()
+  {
+    return m_info->name ();
+  }
+
+  const char *filename()
+  {
+    return m_info->filename ().c_str();
+  }
+  
+  const unsigned int depth()
+  {
+    return m_info->DEPTH;
+  }
+
+  const unsigned int rank() 
+  {
+    return m_info->rank();
+  }
+  
+  unsigned int symbolId()
+  {
+    return (unsigned int) (m_info->SYMBOL);
+  }
+  
+  unsigned int fileId()
+  {
+    return (unsigned int) (m_info->SYMBOL->FILE);
+  } 
+private:
+  FlatInfo *m_info;
 };
 
 class OtherGProfRow : public GProfRow
@@ -2005,7 +2030,7 @@ struct CompareCallersRow
     int64_t cumDiff = ORDER * (a->CHILDREN_COUNTS - b->CHILDREN_COUNTS);
     if (callsDiff) return callsDiff < 0;
     if (cumDiff) return cumDiff < 0;
-    return a->NAME < b->NAME;
+    return strcmp(a->name(), b->name()) < 0;
   }
 };
 
@@ -2320,8 +2345,8 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
       PrintIf p (maxcnt);
       p (showcalls, thousands (row.CUM_ALL[1]));
       p (showpaths, thousands (row.SELF_ALL[2]));
-      printf ("%s [%d]", row.NAME.c_str (), row.RANK);
-      if (showlibs) { std::cout << row.FILENAME; }
+      printf ("%s [%d]", row.name(), row.rank());
+      if (showlibs) { std::cout << row.filename(); }
       std::cout << "\n";
       if (row.PCT < 1.)
         break;
@@ -2350,8 +2375,8 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
       PrintIf p (maxcnt);
       p (showcalls, thousands (row.SELF_ALL[1]));
       p (showpaths, thousands (row.SELF_ALL[2]));
-      printf ("%s [%d]", row.NAME.c_str (), row.RANK);
-      if (showlibs) { std::cout << row.FILENAME; }
+      printf ("%s [%d]", row.name(), row.rank());
+      if (showlibs) { std::cout << row.filename(); }
       std::cout << "\n";
       if (pct < 0.01)
         break;
@@ -2373,7 +2398,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
 
       MainGProfRow &mainRow = **i;
 
-      if ((mainRow.RANK % 10) == 1)
+      if ((mainRow.rank() % 10) == 1)
       { 
         printf ("%-8s", "Rank");
         printf ("%% total  ");
@@ -2416,13 +2441,13 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
                     thousands (row.TOTAL_PATHS));
           printf ("  ");
         }
-        printf ("  %s [%d]", row.NAME.c_str (), row.RANK);
-        if (showlibs) {std::cout << "  " << row.FILENAME; }
+        printf ("  %s [%d]", row.name(), row.rank());
+        if (showlibs) {std::cout << "  " << row.filename(); }
         std::cout << "\n";
       }
       
       char rankBuffer[256];
-      sprintf (rankBuffer, "[%d]", mainRow.RANK);
+      sprintf (rankBuffer, "[%d]", mainRow.rank());
       printf ("%-8s", rankBuffer);
       printf ("%7.1f  ", mainRow.PCT);
       if (isPerfTicks && ! m_config->callgrind()) {
@@ -2442,9 +2467,9 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
         { (AlignedPrinter (maxcnt)) (thousands (mainRow.SELF_ALL[2]));
           (AlignedPrinter (maxcnt)) (""); printf (" "); }
       
-      std::cout << mainRow.NAME;
+      std::cout << mainRow.name();
       
-      if (showlibs) { std::cout << mainRow.FILENAME; }
+      if (showlibs) { std::cout << mainRow.filename(); }
       std::cout << "\n";
       
       for (MainGProfRow::Calls::const_iterator c = mainRow.CALLS.begin ();
@@ -2477,9 +2502,9 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
                     thousands (row.TOTAL_PATHS));
           printf ("  ");
         }
-        printf ("  %s [%d]", row.NAME.c_str (), row.RANK);
+        printf ("  %s [%d]", row.name(), row.rank());
     
-        if (showlibs) {std::cout << "  " << row.FILENAME; }
+        if (showlibs) {std::cout << "  " << row.filename(); }
         std::cout << "\n";
       }
     }
