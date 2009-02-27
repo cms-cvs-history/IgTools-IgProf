@@ -36,11 +36,10 @@ usage ()
                "  [-p/--paths] [-c/--calls] [--value peak|normal]\n"
                "  [-F/--filter-module FILE] [ -f FILTER[,FILTER...] ]\n"
                "  [-nf/--no-filter] [-lf/--list-filters]\n"
-               "  { [-t/--text] }\n"
+               "  { [-t/--text], [-s/--sqlite] }\n"
                "  [--libs] [--demangle] [--gdb] [-v/--verbose]\n"
                "  [--] [FILE]...\n" << std::endl;
 }
-
 
 class SymbolInfo
 {
@@ -199,7 +198,8 @@ public:
   enum OutputType {
     TEXT=0,
     XML=1,
-    HTML=2
+    HTML=2,
+    SQLITE=3
   };
   enum Ordering {
     DESCENDING=-1,
@@ -249,7 +249,7 @@ public:
   bool verbose (void) { return m_verbose; }
 
   void setOutputType (enum OutputType value) { m_outputType = value; }
-  bool outputType (void) { return m_outputType; }
+  OutputType outputType (void) { return m_outputType; }
 
   void setOrdering (enum Ordering value) {m_ordering = value; }
   Ordering ordering (void) { return m_ordering; }
@@ -557,7 +557,6 @@ public:
   {
     if (!parent) {
       m_noParentCount++;
-      std::cerr << "Done checking consistency." << std::endl;
       ASSERT (m_noParentCount == 1);
     }
     Counter *initialCounter = node->COUNTERS;
@@ -2303,7 +2302,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
   }
   
   stable_sort (selfSortedTable.begin (), selfSortedTable.end (), SortRowBySelf ());
-    
+   
   if (m_config->outputType () == Configuration::TEXT)
   {
     bool showcalls = m_config->showCalls ();
@@ -2509,6 +2508,96 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
       }
     }
   }
+  else if (m_config->outputType () == Configuration::SQLITE)
+  {
+    std::cout << "DROP TABLE IF EXISTS files;\n"
+                 "DROP TABLE IF EXISTS symbols;\n"
+                 "DROP TABLE IF EXISTS mainrows;\n"
+                 "DROP TABLE IF EXISTS children;\n"
+                 "DROP TABLE IF EXISTS parents;\n"
+                 "DROP TABLE IF EXISTS summary;\n\n"
+                 "CREATE TABLE summary (\n"
+                 "counter TEXT,\n"
+                 "total_count INTEGER,\n"
+                 "total_freq INTEGER,\n"
+                 "tick_period REAL\n"
+                 ");\n\n"
+                 "CREATE TABLE files (\n"
+                 "id INTEGER PRIMARY KEY,\n"
+                 "name TEXT\n"
+                 ");\n\n"
+                 "CREATE TABLE symbols (\n" 
+                 "id INTEGER PRIMARY KEY,\n"
+                 "name TEXT,\n"
+                 "filename_id INT CONSTRAINT file_id_exists REFERENCES files(id)\n"
+                 ");\n\n"
+                 "CREATE TABLE mainrows (\n"
+                 "id INTEGER PRIMARY KEY,\n"
+                 "symbol_id INT CONSTRAINT symbol_id_exists REFERENCES symbol(id),\n"
+                 "self_count INTEGER,\n"
+                 "cumulative_count INTEGER,\n"
+                 "kids INTEGER,\n"
+                 "self_calls INTEGER,\n"
+                 "total_calls INTEGER,\n"
+                 "self_paths INTEGER,\n"
+                 "total_paths INTEGER\n"
+                 ");\n\n"
+                 "CREATE TABLE children (\n"
+                 "self_id INT CONSTRAINT self_exist REFERENCES mainrows(id),\n"
+                 "parent_id INT CONSTRAINT parent_exists REFERENCES mainrows(id),\n"
+                 "from_parent_count INTEGER,\n" 
+                 "from_parent_calls INTEGER,\n"
+                 "from_parent_paths INTEGER\n"
+                 ");\n\n"
+                 "CREATE TABLE parents (\n"
+                 "self_id INT CONSTRAINT self_exists REFERENCES mainrows(id),\n"
+                 "child_id INT CONSTRAINT child_exists REFERENCES mainrows(id),\n"
+                 "to_child_count INTEGER,\n"
+                 "to_child_calls INTEGER,\n"
+                 "to_child_paths INTEGER\n"
+                 ");\n\n\nBEGIN EXCLUSIVE TRANSACTION;\n"
+                 "INSERT INTO summary (counter, total_count, total_freq, tick_period) VALUES(\""
+                 << m_config->key () << "\", " << totals << ", " << totfreq << ", " << m_config->tickPeriod() << ");\n\n";
+                 
+    for (FinalTable::const_iterator i = table.begin ();
+       i != table.end ();
+       i++)
+    {
+      MainGProfRow &mainRow = **i;
+      std::cout << "INSERT OR IGNORE INTO files (id, name) VALUES (" 
+                << mainRow.fileId() << ", \"" << mainRow.filename() << "\");\n"
+                "INSERT OR IGNORE INTO symbols (id, name, filename_id) VALUES (" 
+                << mainRow.symbolId() << ", \"" << mainRow.name() << "\", " 
+                << mainRow.fileId() << ");\n"
+                "INSERT INTO mainrows (id, symbol_id, self_count, cumulative_count, kids, self_calls, total_calls, self_paths, total_paths) VALUES ("
+                << mainRow.rank() << ", " << mainRow.symbolId() << ", " 
+                << mainRow.SELF << ", " << mainRow.CUM << ", " << mainRow.KIDS << ", " 
+                << mainRow.SELF_ALL[1] << ", " << mainRow.CUM_ALL[1] << ", " 
+                << mainRow.SELF_ALL[2] << ", " << mainRow.CUM_ALL[2] << ");\n";
+
+      for (MainGProfRow::Callers::const_iterator c = mainRow.CALLERS.begin ();
+           c != mainRow.CALLERS.end ();
+          c++)
+      {
+        OtherGProfRow &row = **c;
+        std::cout << "INSERT INTO parents (self_id, child_id, to_child_count, to_child_calls, to_child_paths) VALUES ("
+                  << row.rank() << ", " << mainRow.rank() << ", "
+                  << row.SELF_COUNTS << ", " << row.SELF_CALLS << ", " << row.SELF_PATHS << ");\n";
+      }
+
+      for (MainGProfRow::Calls::const_iterator c = mainRow.CALLS.begin ();
+           c != mainRow.CALLS.end ();
+           c++)
+      {
+        OtherGProfRow &row = **c;
+        std::cout << "INSERT INTO children (self_id, parent_id, from_parent_count, from_parent_calls, from_parent_paths) VALUES ("
+                  << row.rank() << ", " << mainRow.rank() << ", "
+                  << row.SELF_COUNTS << ", "<< row.SELF_CALLS << ", " << row.SELF_PATHS << ");\n";
+
+      }
+    }
+    std::cout << "END TRANSACTION;\n" << std::endl;
+  }
   else
   {
     ASSERT (false);
@@ -2660,6 +2749,8 @@ IgProfAnalyzerApplication::parseArgs (const ArgsList &args)
     }
     else if (is ("--text", "-t"))
     { m_config->setOutputType (Configuration::TEXT); }
+    else if (is ("--sqlite", "-s"))
+    { m_config->setOutputType (Configuration::SQLITE); }
     else if (is ("--demangle", "-d"))
     { m_config->setDoDemangle (true); }
     else if (is ("--gdb", "-g"))
