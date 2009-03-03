@@ -36,6 +36,7 @@ usage ()
                "  [-r/--report KEY[,KEY]...] [-o/--order ORDER]\n"
                "  [-p/--paths] [-c/--calls] [--value peak|normal]\n"
                "  [-F/--filter-module FILE] [ -f FILTER[,FILTER...] ]\n"
+               "  [-mr/--merge-regexp REGEXP]\n"
                "  [-nf/--no-filter] [-lf/--list-filters]\n"
                "  { [-t/--text], [-s/--sqlite] }\n"
                "  [--libs] [--demangle] [--gdb] [-v/--verbose]\n"
@@ -195,6 +196,7 @@ private:
 };
 
 class IgProfFilter;
+class RegexpFilter;
 
 class Configuration 
 {
@@ -269,6 +271,16 @@ public:
   void setMergeLibraries (bool value) {m_mergeLibraries = value; }
   bool mergeLibraries (void) { return m_mergeLibraries; }
 
+  void setRegexpFilter (RegexpFilter *filter)
+  {
+    m_regexpFilter = filter;
+  }
+
+  RegexpFilter *regexpFilter (void)
+  {
+    return m_regexpFilter;
+  }
+
   void disableFilters(void) 
   { 
     m_filtersEnabled = false; 
@@ -292,6 +304,7 @@ private:
   bool m_filtersEnabled;
   float m_tickPeriod;
   bool m_mergeLibraries;
+  RegexpFilter *m_regexpFilter;
 };
 
 Configuration::Configuration ()
@@ -307,7 +320,8 @@ Configuration::Configuration ()
   m_verbose (false),
   m_normalValue (true),
   m_filtersEnabled (true),
-  m_tickPeriod(0.01)
+  m_tickPeriod(0.01),
+  m_regexpFilter(0)
 {
 }
 
@@ -792,6 +806,56 @@ protected:
   }
 private:
   FilenameSymbols m_filesAsSymbols;
+};
+
+class RegexpFilter : public CollapsingFilter
+{
+  typedef std::map<std::string, SymbolInfo *> CollapsedSymbols;
+  typedef std::list<std::pair<lat::Regexp *, std::string> > RegexpList; 
+public:
+  virtual std::string name(void) const { return "collapsing nodes using regular expression."; }
+  virtual enum FilterType type (void) const { return PRE; }
+
+  void addSubstitution(lat::Regexp *re, const std::string &with)
+  {
+    m_regexp.push_back (RegexpList::value_type (re, with));
+  }
+protected:
+  void convertSymbol(NodeInfo *node)
+  {
+    if (m_symbols.find (node->symbol()->NAME) != m_symbols.end())
+      return;
+
+    for (RegexpList::iterator i = m_regexp.begin();
+         i != m_regexp.end();
+         i++)
+    {
+      if (! i->first->match(node->symbol()->NAME))
+      {
+        continue;
+      }
+
+      std::string translatedName = lat::StringOps::replace(node->symbol()->NAME, 
+                                                           *(i->first),
+                                                           i->second);
+
+      CollapsedSymbols::iterator i = m_symbols.find(translatedName);
+      if (i == m_symbols.end())
+      {
+        SymbolInfo *newInfo = new SymbolInfo(translatedName.c_str(),
+                                             node->symbol()->FILE, 0);
+        m_symbols.insert(CollapsedSymbols::value_type(translatedName,
+                                                      newInfo));
+        node->setSymbol(newInfo);
+      }
+      else
+        node->setSymbol(i->second);
+
+      break;
+    }
+  }
+  CollapsedSymbols m_symbols;
+  RegexpList m_regexp;
 };
 
 class RemoveIgProfFilter : public IgProfFilter
@@ -2056,6 +2120,14 @@ IgProfAnalyzerApplication::prepdata (ProfileInfo& prof/*, // FIXME: is all this 
 //    walk<NodeInfo> (prof.spontaneous(), new PrintTreeFilter);
   }
 
+  if (m_config->regexpFilter())
+  {
+    if (m_config->verbose ())
+    {
+      std::cerr << "Merge nodes using user-provided regular expression." << std::endl;
+    }
+    walk<NodeInfo> (prof.spontaneous(), m_config->regexpFilter());
+  }
 
   if (m_config->verbose ())
   {
@@ -2920,6 +2992,47 @@ IgProfAnalyzerApplication::parseArgs (const ArgsList &args)
     else if (is ("--calls", "-c"))
     {
       m_config->setShowCalls (true);
+    }
+    else if (is ("--merge-regexp", "-mr") && left (arg))
+    {
+      std::string re = *(++arg);
+      const char *regexpOption = re.c_str();
+      RegexpFilter *filter = new RegexpFilter;
+
+      while (*regexpOption)
+      {
+        if (*regexpOption++ != 's')
+        {
+          std::cerr << "Error in regular expression: " << regexpOption << std::endl;
+          exit (1);
+        }
+        char separator[] = {0, 0};
+        separator[0] = *regexpOption++;
+        int reSize = strcspn (regexpOption, separator);
+        std::string re (regexpOption, reSize);
+        regexpOption += reSize;
+        if (*regexpOption++ != separator[0])
+        {
+          std::cerr << "Error in regular expression: " << regexpOption << std::endl;
+          exit (1);
+        }
+        int withSize = strcspn (regexpOption, separator);
+        std::string with (regexpOption, withSize);
+        regexpOption += withSize;
+
+        if (*regexpOption++ != separator[0])
+        {
+          std::cerr << "Error in regular expression: " << regexpOption << std::endl;
+          exit (1);
+        }
+        if (*regexpOption && *regexpOption++ != ';')
+        {
+          std::cerr << "Error in regular expression: " << regexpOption << std::endl;
+        }
+        filter->addSubstitution(new lat::Regexp (re), with);
+      }
+
+      m_config->setRegexpFilter (filter);
     }
     else if (is ("--"))
     {
