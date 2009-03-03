@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <string>
 #include <vector>
+#include <deque>
 #include <list>
 #include <map>
 #include <set>
@@ -128,6 +129,11 @@ public:
   SymbolInfo *originalSymbol (void) const
   {
     return SYMBOL;
+  }
+  void setSymbol (SymbolInfo *symbol)
+  {
+    SYMBOL = symbol;
+    m_reportSymbol = 0;
   }
 private:
   SymbolInfo *SYMBOL; 
@@ -260,6 +266,9 @@ public:
   void setTickPeriod(float value) {m_tickPeriod = value; }
   float tickPeriod(void) {return m_tickPeriod; }
   
+  void setMergeLibraries (bool value) {m_mergeLibraries = value; }
+  bool mergeLibraries (void) { return m_mergeLibraries; }
+
   void disableFilters(void) 
   { 
     m_filtersEnabled = false; 
@@ -282,6 +291,7 @@ private:
   bool m_normalValue;
   bool m_filtersEnabled;
   float m_tickPeriod;
+  bool m_mergeLibraries;
 };
 
 Configuration::Configuration ()
@@ -578,7 +588,6 @@ private:
   int m_noParentCount;
 };
 
-
 class PrintTreeFilter : public IgProfFilter
 {
 public:
@@ -649,6 +658,14 @@ void mergeToNode (NodeInfo *parent, NodeInfo *node)
     mergeToNode(parentChild, nodeChild);
     ++i;
   }
+  if (node != parent->getChildrenBySymbol(node->symbol()))
+  {
+    ASSERT (node->symbol());
+    std::cerr << node->symbol()->NAME << std::endl;
+    ASSERT (parent->getChildrenBySymbol(node->symbol()));
+    ASSERT (parent->getChildrenBySymbol(node->symbol())->symbol());
+    std::cerr << parent->getChildrenBySymbol(node->symbol())->symbol()->NAME << std::endl;
+  }
   ASSERT(node == parent->getChildrenBySymbol(node->symbol()));
   unsigned int numOfChildren = parent->CHILDREN.size();
   parent->removeChild(node);
@@ -656,6 +673,126 @@ void mergeToNode (NodeInfo *parent, NodeInfo *node)
   ASSERT(!parent->getChildrenBySymbol(node->symbol()));
 }
 
+void mergeCountersToNode (NodeInfo *source, NodeInfo *dest)
+{
+  ASSERT (source);
+  ASSERT (dest);
+  int countersCount = 0;
+  if (! source->COUNTERS)
+  {
+    return;
+  }
+
+  Counter *initialCounter = source->COUNTERS;
+  ASSERT(initialCounter);
+  Counter *sourceCounter = initialCounter;
+  do
+  {
+    ++countersCount;
+    Counter *destCounter = Counter::addCounterToRing (dest->COUNTERS,
+                            sourceCounter->id ());
+    ASSERT(countersCount < 32);
+    ASSERT(sourceCounter);
+    ASSERT(sourceCounter->freq() >= 0);
+    ASSERT(sourceCounter->cnt() >= 0);
+    destCounter->freq() += sourceCounter->freq ();
+    if (destCounter->isMax()) {
+      if (destCounter->cnt() < sourceCounter->cnt()) {
+        destCounter->cnt() = sourceCounter->cnt();
+      }
+    }
+    else {
+      destCounter->cnt() += sourceCounter->cnt ();
+    }
+    ASSERT (destCounter->cnt() >= sourceCounter->cnt());
+    ASSERT (destCounter->freq() >= sourceCounter->freq());
+    ASSERT (destCounter->ccnt() == 0);
+    ASSERT (destCounter->cfreq() == 0);
+    ASSERT (sourceCounter->ccnt() == 0);
+    ASSERT (sourceCounter->cfreq() == 0);
+    sourceCounter = sourceCounter->next();
+  } while (sourceCounter != initialCounter);
+}
+
+
+
+class CollapsingFilter : public IgProfFilter
+{
+public:
+  // On the way down add extra nodes for libraries.
+  virtual void pre (NodeInfo *parent, NodeInfo *node)
+  {
+    if (!parent)
+      return;
+    ASSERT(parent);
+    ASSERT(node);
+    ASSERT(node->symbol());
+    ASSERT(node->symbol()->FILE);
+
+    std::deque<NodeInfo *> todos;
+    todos.insert (todos.begin(), node->begin(), node->end());
+    node->CHILDREN.clear();  
+    convertSymbol(node);
+
+    while (!todos.empty()) 
+    {
+      NodeInfo *todo = todos.front();
+      todos.pop_front();
+
+      // Obtain a SymbolInfo with the filename, rather than the actual symbol name.
+      convertSymbol(todo);
+
+      // * If the parent has the same SymbolInfo, we merge the node to the parent
+      // and add its children to the todo list.
+      // * If there is already a child of the parent with the same symbol info,
+      //   we merge with it.
+      // * Otherwise we simply re-add the node.
+      if (todo->symbol() == node->symbol())
+      {
+        todos.insert(todos.end(), todo->begin(), todo->end());
+        mergeCountersToNode(todo, node);
+      }
+      else if (NodeInfo *same = node->getChildrenBySymbol(todo->symbol()))
+      {
+        same->CHILDREN.insert(same->end(), todo->begin(), todo->end());
+        mergeCountersToNode(todo, same);
+      }
+      else
+      {
+        node->CHILDREN.push_back(todo);  
+      }
+    }
+  }
+  virtual enum FilterType type(void) const {return PRE; }
+protected:
+  virtual void convertSymbol(NodeInfo *node) = 0;
+};
+
+class UseFileNamesFilter : public CollapsingFilter 
+{
+  typedef std::map<std::string, SymbolInfo *> FilenameSymbols;
+public:
+  virtual std::string name(void) const { return "unify nodes by library."; }
+  virtual enum FilterType type(void) const {return PRE; }
+protected:
+  void convertSymbol(NodeInfo *node)
+  {
+    FilenameSymbols::iterator i = m_filesAsSymbols.find (node->symbol()->FILE->NAME);
+    SymbolInfo *fileInfo;
+    if (i == m_filesAsSymbols.end())
+    {
+      fileInfo = new SymbolInfo(node->symbol()->FILE->NAME.c_str(),
+                                node->symbol()->FILE, 0);
+      m_filesAsSymbols.insert(FilenameSymbols::value_type(node->symbol()->FILE->NAME,
+                                                          fileInfo));
+    }
+    else
+      fileInfo = i->second;
+    node->setSymbol(fileInfo);
+  }
+private:
+  FilenameSymbols m_filesAsSymbols;
+};
 
 class RemoveIgProfFilter : public IgProfFilter
 {
@@ -1107,6 +1244,10 @@ public:
   {
     ASSERT (node);
     ASSERT (node->symbol ());
+    if (seen ().count(node->symbol()->NAME) <= 0)
+    {
+      std::cerr << "Error: " << node->symbol()->NAME << std::endl;
+    }
     ASSERT (seen ().count(node->symbol()->NAME) > 0);
     seen ().erase (node->symbol ()->NAME);
     ASSERT (seen ().count(node->symbol()->NAME) == 0);
@@ -1902,7 +2043,20 @@ IgProfAnalyzerApplication::prepdata (ProfileInfo& prof/*, // FIXME: is all this 
       walk<NodeInfo>(prof.spontaneous(), *i);
   }
 
-  
+  if (m_config->mergeLibraries())
+  {
+//    walk<NodeInfo> (prof.spontaneous(), new PrintTreeFilter);
+
+    if (m_config->verbose ())
+    {
+      std::cerr << "Merge nodes belonging to the same library." << std::endl;
+    }
+    UseFileNamesFilter *filter = new UseFileNamesFilter;
+    walk<NodeInfo> (prof.spontaneous(), filter);
+//    walk<NodeInfo> (prof.spontaneous(), new PrintTreeFilter);
+  }
+
+
   if (m_config->verbose ())
   {
     std::cerr << "Summing counters" << std::endl;
@@ -2694,6 +2848,10 @@ IgProfAnalyzerApplication::parseArgs (const ArgsList &args)
         std::cerr << "Unexpected --value argument " << type << std::endl;
         exit(1);
       }
+    }
+    else if (is ("--merge-libraries", "-ml"))
+    {
+      m_config->setMergeLibraries (true);
     }
     else if (is ("--order", "-o"))
     {
