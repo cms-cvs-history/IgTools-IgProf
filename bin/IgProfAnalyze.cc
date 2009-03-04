@@ -830,12 +830,22 @@ protected:
          i != m_regexp.end();
          i++)
     {
-      if (! i->first->match(node->symbol()->NAME))
+      std::string mutantString;
+
+      if (i->first->match(node->symbol()->NAME))
+      {
+        mutantString = node->symbol()->NAME;
+      }
+      else if (node->symbol()->FILE && i->first->match(node->symbol()->FILE->NAME))
+      {
+        mutantString = node->symbol()->FILE->NAME;
+      }
+      else
       {
         continue;
       }
 
-      std::string translatedName = lat::StringOps::replace(node->symbol()->NAME, 
+      std::string translatedName = lat::StringOps::replace(mutantString, 
                                                            *(i->first),
                                                            i->second);
 
