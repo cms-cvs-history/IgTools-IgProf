@@ -117,7 +117,7 @@ initBuf(IgProfTraceAlloc &info, bool perthread)
 static void
 dumpOneProfile(IgProfDumpInfo &info, IgProfTrace::Stack *frame)
 {
-  if (frame->address) // No address at root
+  if (info.depth) // No address at root
   {
     IgProfSymCache::Symbol *sym = info.symcache->get(frame->address);
 

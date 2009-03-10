@@ -1,3 +1,8 @@
+2008-03-10  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* IgProf.cc (dumpOneProfile): Handles the case a (non-root) 
+	frame pointer has zero address.
+
 2008-08-22  Lassi A. Tuura  <lat@iki.fi>
 
 	* IgProfAtomic.h (IgProfAtomicInc, IgProfAtomicDec): Fix return
