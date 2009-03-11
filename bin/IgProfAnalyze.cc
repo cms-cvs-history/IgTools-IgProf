@@ -641,6 +641,7 @@ void mergeToNode (NodeInfo *parent, NodeInfo *node)
   while (i != node->CHILDREN.end())
   {
     NodeInfo *nodeChild = *i;
+    ASSERT (nodeChild);
     ASSERT (nodeChild->symbol());
     NodeInfo *parentChild = parent->getChildrenBySymbol(nodeChild->symbol());
     
