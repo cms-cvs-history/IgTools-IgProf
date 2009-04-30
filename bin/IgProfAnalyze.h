@@ -518,12 +518,13 @@ private:
 class FileOpener 
 {
 public:
-  static const int BUFFER_SIZE=40000000; 
+  static const int INITIAL_BUFFER_SIZE=40000000;
   FileOpener (void)
-    : m_buffer (new char[BUFFER_SIZE]),
-      m_posInBuffer (BUFFER_SIZE),
-      m_lastInBuffer (BUFFER_SIZE),
-      m_eof (false)
+    : m_buffer (new char[INITIAL_BUFFER_SIZE]),
+      m_posInBuffer (INITIAL_BUFFER_SIZE),
+      m_lastInBuffer (INITIAL_BUFFER_SIZE),
+      m_eof (false),
+      m_bufferSize (INITIAL_BUFFER_SIZE)
   {
   }
   
@@ -535,7 +536,7 @@ public:
     {
       delete *i;
     }
-    delete[] m_buffer;
+    free(m_buffer);
   }
   
   lat::InputStream &stream (void)
@@ -547,10 +548,20 @@ public:
   {
     m_streams.push_back (stream);
   }
-  
-  void readLine (void)
+
+  void resizeBuffer (int size)
+  {
+    char * buffer = new char[size];
+    memmove (buffer, m_buffer, m_bufferSize);
+    delete[] m_buffer;
+    m_buffer = buffer;
+    m_bufferSize = size;
+  } 
+ 
+  void readLine ()
   {
     int beginInBuffer = m_posInBuffer;
+
     while (m_posInBuffer < m_lastInBuffer)
     {
       if (m_buffer[m_posInBuffer++] == '\n')
@@ -561,16 +572,20 @@ public:
       }
     }
     int remainingsSize = m_lastInBuffer-beginInBuffer;
-    ASSERT (remainingsSize <= BUFFER_SIZE);
-    if (remainingsSize == BUFFER_SIZE)
+    ASSERT (remainingsSize <= m_bufferSize);
+
+    if (remainingsSize == m_bufferSize)
     {
-      // TODO: handle the case in which the line is longer than BUFFER_SIZE.
-      std::cerr << "Line too long!!" << std::endl;
-      exit (1);
+      resizeBuffer (remainingsSize * 2);
     }
+
     if (remainingsSize)
+    {
       memmove (m_buffer, m_buffer + beginInBuffer, remainingsSize);
-    int readSize = this->stream ().read (m_buffer + remainingsSize, BUFFER_SIZE-remainingsSize);
+    }
+ 
+    int readSize = this->stream ().read (m_buffer + remainingsSize, m_bufferSize-remainingsSize);
+
     if (!readSize)
     { 
       m_eof = true;
@@ -578,6 +593,7 @@ public:
       m_curStringSize = remainingsSize;
       return;
     }
+
     m_posInBuffer = 0;
     m_lastInBuffer = remainingsSize + readSize;
     return this->readLine ();
@@ -598,6 +614,7 @@ private:
   int m_eof;
   const char *m_curString;
   int m_curStringSize;
+  int m_bufferSize;
 };
 
 class FileReader : public FileOpener

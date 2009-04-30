@@ -1860,7 +1860,7 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
   FileReader reader (filename);
   
   std::string line;
-  line.reserve (FileOpener::BUFFER_SIZE);
+  line.reserve (FileOpener::INITIAL_BUFFER_SIZE);
   reader.readLine ();
   reader.assignLineToString (line);
   m_config->setTickPeriod(parseHeaders (line));
