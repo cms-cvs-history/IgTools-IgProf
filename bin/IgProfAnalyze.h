@@ -30,6 +30,7 @@
 #include <sys/stat.h>
 #include <map>
 #include <stdint.h>
+#include <cstdio>
 
 bool isWhitespace(char c)
 {

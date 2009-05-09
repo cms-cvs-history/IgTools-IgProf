@@ -10,6 +10,7 @@
 #include "FWCore/ServiceRegistry/interface/Service.h"
 #include <string>
 #include <dlfcn.h>
+#include <cstdio>
 
 class IgProfModule : public edm::EDAnalyzer
 {

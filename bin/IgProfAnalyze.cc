@@ -24,6 +24,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <cstdio>
 
 #define IGPROF_MAX_DEPTH 1000
 

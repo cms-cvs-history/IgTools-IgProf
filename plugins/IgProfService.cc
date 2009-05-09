@@ -17,6 +17,7 @@
 #include "FWCore/Framework/interface/Run.h"
 #include <string>
 #include <dlfcn.h>
+#include <cstdio>
 
 using namespace edm::service;
 
