@@ -1200,7 +1200,7 @@ struct SuffixOps
                  std::string &oldSymbol, 
                  std::string &suffix)
   {
-    unsigned int tickPos = fullSymbol.rfind ("'");
+    size_t tickPos = fullSymbol.rfind ("'");
     if (tickPos == std::string::npos)
     {
             oldSymbol = fullSymbol;
@@ -1214,7 +1214,7 @@ struct SuffixOps
 
   static std::string removeSuffix (const std::string &fullSymbol)
   {
-    unsigned int tickPos = fullSymbol.rfind ("'");
+    size_t tickPos = fullSymbol.rfind ("'");
     if (tickPos == std::string::npos)
     { return fullSymbol; }
     ASSERT (tickPos < fullSymbol.size ());
@@ -1483,7 +1483,7 @@ void symremap (ProfileInfo &prof, std::vector<FlatInfo *> infos, bool usegdb, bo
           out << "file " << fileInfo->NAME << "\n";
           prevfile = fileInfo; 
         }
-        out << "echo IGPROF_SYMCHECK <" << (int) sym << ">\\n\n"
+        out << "echo IGPROF_SYMCHECK <" << (intptr_t) sym << ">\\n\n"
                "info line *" << toString (sym->FILEOFF)<< "\n";
       }
     }
@@ -1511,7 +1511,7 @@ void symremap (ProfileInfo &prof, std::vector<FlatInfo *> infos, bool usegdb, bo
       
       if (SYMCHECK_RE.match(line, 0, 0, &match))
       {
-        ProfileInfo::SymCache::iterator symitr = prof.symcache ().find((SymbolInfo *)(atoi(match.matchString (line, 1).c_str())));
+        ProfileInfo::SymCache::iterator symitr = prof.symcache ().find((SymbolInfo *)(atol(match.matchString (line, 1).c_str())));
         ASSERT(symitr !=prof.symcache().end());
         sym = *symitr;
         SuffixOps::splitSuffix (sym->NAME, oldname, suffix);
@@ -1542,7 +1542,7 @@ void symremap (ProfileInfo &prof, std::vector<FlatInfo *> infos, bool usegdb, bo
     {
       SymbolInfo *symbol = (*i)->SYMBOL;
       ASSERT (symbol);
-      out << (int) (symbol) << ": " << symbol->NAME << "\n";
+      out << (intptr_t) (symbol) << ": " << symbol->NAME << "\n";
     }
     file->close ();
     delete file;
@@ -2220,14 +2220,14 @@ public:
     return m_info->rank();
   }
   
-  unsigned int symbolId()
+  intptr_t symbolId()
   {
-    return (unsigned int) (m_info->SYMBOL);
+    return (intptr_t) (m_info->SYMBOL);
   }
   
-  unsigned int fileId()
+  intptr_t fileId()
   {
-    return (unsigned int) (m_info->SYMBOL->FILE);
+    return (intptr_t) (m_info->SYMBOL->FILE);
   } 
 private:
   FlatInfo *m_info;
@@ -2410,7 +2410,7 @@ private:
 
 void
 printHeader (const char *description, const char *kind, 
-       bool showpaths, bool showcalls, size_t maxval, size_t maxcnt)
+       bool showpaths, bool showcalls, int maxval, int maxcnt)
 {
   std::cout << "\n" << std::string (70, '-') << "\n" 
         << description << "\n\n";

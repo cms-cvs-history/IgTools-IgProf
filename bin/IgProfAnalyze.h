@@ -1,6 +1,7 @@
 #ifndef IG_PROF_ANALYZE
 #define IG_PROF_ANALYZE
 
+#define __STDC_FORMAT_MACROS 1
 #include <classlib/iotools/InputStream.h>
 #include <classlib/iotools/StorageInputStream.h>
 #include <classlib/iotools/BufferInputStream.h>
@@ -30,6 +31,7 @@
 #include <sys/stat.h>
 #include <map>
 #include <stdint.h>
+#include <inttypes.h>
 #include <IgTools/IgProf/bin/IgResolveSymbols.h>
 #include <cstdio>
 
@@ -517,7 +519,7 @@ toString (int64_t value)
 {
   // FIXME: not thread safe... Do we actually care? Probably not.
   static char buffer [1024];
-  sprintf (buffer,"%lld",value);
+  sprintf (buffer,"%" PRIi64,value);
   return buffer;
 }
 
@@ -525,7 +527,7 @@ toString (int64_t value)
 class AlignedPrinter
 {
 public:
-  AlignedPrinter (size_t size)
+  AlignedPrinter (int size)
   :m_size (size)
   {
   }
@@ -537,13 +539,13 @@ public:
     fflush (stdout);
   }
 private:
-  size_t m_size;
+  int m_size;
 };
 
 class FractionPrinter
 {
 public:
-  FractionPrinter (size_t sizeN, size_t sizeD)
+  FractionPrinter (int sizeN, int sizeD)
   :m_sizeN (sizeN), m_sizeD (sizeD) 
   {
   }
@@ -557,8 +559,8 @@ public:
   }
   
 private:
-  size_t m_sizeN;
-  size_t m_sizeD;
+  int m_sizeN;
+  int m_sizeD;
 };
 
 class PrintIf

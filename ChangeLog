@@ -1,3 +1,8 @@
+2009-05-19  Lassi A. Tuura  <lat@iki.fi>
+
+	* IgProfAnalyze.h, IgProfAnalyze.cc: Clean-up type-unsafe code
+	which trips up with various errors on 64-bit systems.
+
 2008-03-10  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* IgProf.cc (dumpOneProfile): Handles the case a (non-root) 
