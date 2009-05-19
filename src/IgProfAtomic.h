@@ -1,7 +1,7 @@
 #ifndef IG_PROF_IG_PROF_ATOMIC_H
 # define IG_PROF_IG_PROF_ATOMIC_H
 
-# if __i386__ || __ppc__
+# if __i386__ || __x86_64__ || __ppc__
 # else
 #  error Sorry this platform is not supported.
 # endif
@@ -21,7 +21,7 @@ typedef int IgProfAtomic; // correct for all supported platforms for now
 inline IgProfAtomic
 IgProfAtomicInc (volatile IgProfAtomic *val)
 {
-# if __i386__
+# if __i386__ || __x86_64__
     IgProfAtomic result;
     __asm__ __volatile__
 	("   lock; xaddl %0, (%1); incl %0;"
@@ -48,7 +48,7 @@ IgProfAtomicInc (volatile IgProfAtomic *val)
 inline IgProfAtomic
 IgProfAtomicDec (volatile IgProfAtomic *val)
 {
-# if __i386__
+# if __i386__ || __x86_64__
     IgProfAtomic result;
     __asm__ __volatile__
 	("lock; xaddl %0, (%1); decl %0;"

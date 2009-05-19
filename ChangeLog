@@ -1,5 +1,7 @@
 2009-05-19  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProfAtomic.h: Add x86-64 support.
+
 	* IgProf.cc (initialise), IgProfPerf (enableTimer): Change the
 	performance profiling sampling frequency from 10 to 5ms, it seems
 	to still report correct total times; smaller intervals appear to
