@@ -35,18 +35,6 @@
 #include <IgTools/IgProf/bin/IgResolveSymbols.h>
 #include <cstdio>
 
-bool isWhitespace(char c)
-{
-  //^ \t\n\r\f\v
-  if (c == ' '
-      || c == '\t'
-      || c == '\n'
-      || c == '\r'
-      || c == '\f'
-      || c == '\v') return true;
-  return false;
-}
-
 class IntConverter
 {
 public:
