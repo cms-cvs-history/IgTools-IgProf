@@ -1,5 +1,10 @@
 2009-05-19  Lassi A. Tuura  <lat@iki.fi>
 
+	* IgProf.cc (initialise), IgProfPerf (enableTimer): Change the
+	performance profiling sampling frequency from 10 to 5ms, it seems
+	to still report correct total times; smaller intervals appear to
+	result in skew, but I didn't research this closely.
+
 	* IgProfAnalyze.h, IgProfAnalyze.cc: Clean-up type-unsafe code
 	which trips up with various errors on 64-bit systems.
 

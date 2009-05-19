@@ -59,7 +59,7 @@ profileSignalHandler(int /* nsig */, siginfo_t * /* info */, void * /* ctx */)
 static void
 enableTimer(void)
 {
-  itimerval interval = { { 0, 10000 }, { 0, 10000 } };
+  itimerval interval = { { 0, 5000 }, { 0, 5000 } };
   setitimer(s_itimer, &interval, 0);
 }
 

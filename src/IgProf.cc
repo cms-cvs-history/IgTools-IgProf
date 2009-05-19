@@ -364,7 +364,7 @@ IgProf::initialize(int *moduleid, void (*threadinit)(void), bool perthread)
     }
 
     itimerval precision;
-    itimerval interval = { { 0, 10000 }, { 100, 0 } };
+    itimerval interval = { { 0, 5000 }, { 100, 0 } };
     itimerval nullified = { { 0, 0 }, { 0, 0 } };
     setitimer(ITIMER_PROF, &interval, 0);
     getitimer(ITIMER_PROF, &precision);
