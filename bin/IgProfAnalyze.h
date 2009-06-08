@@ -111,8 +111,14 @@ public:
   static void addNameToIdMapping (const std::string &name, int id, bool isTick)
   {
     ASSERT (id < 31);
-    ASSERT ((s_isMaxMask & (1 << id)) == 0);
-    ASSERT (countersByName ().find (name) == countersByName ().end ());
+    if (((s_isMaxMask & (1 << id)) != 0) 
+        && (countersByName ().find (name) != countersByName ().end ()))
+    {
+      // FIXME: for the moment we do not remap id's to match those of
+      //        files which have already been read.
+      ASSERT (countersByName ()[name] == id);
+      return; 
+    }
     
     if (name.find("_MAX") != std::string::npos)
     { s_isMaxMask |= 1 << id; }
@@ -457,10 +463,13 @@ thousands (int64_t value, int leftPadding=0)
 {
   // Converts an integer value to a string
   // adding `'` to separate thousands and possibly
-  ASSERT (value >= 0);
   ASSERT (leftPadding >= 0);
   int64_t n = 1; int digitCount = 0;
   std::string result = "";
+  bool sign = value >= 0; 
+
+  if (value < 0)
+    value = -value;
   if (!value)
     result = "0";
     
@@ -484,7 +493,7 @@ thousands (int64_t value, int leftPadding=0)
     ASSERT (leftPadding-digitCount > 0);
     result = std::string ("", leftPadding-digitCount) + result;
   }
-  return result;
+  return (sign ? "" : "-")  + result;
 }
 
 std::string

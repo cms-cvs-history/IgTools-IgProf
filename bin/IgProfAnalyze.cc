@@ -282,6 +282,16 @@ public:
     return m_regexpFilter;
   }
 
+  void setBaseline (const std::string &baseline)
+  {
+    m_baseline = baseline; 
+  }
+
+  const std::string &baseline (void)
+  {
+    return m_baseline;
+  }
+
   void disableFilters(void) 
   { 
     m_filtersEnabled = false; 
@@ -306,6 +316,7 @@ private:
   float m_tickPeriod;
   bool m_mergeLibraries;
   RegexpFilter *m_regexpFilter;
+  std::string m_baseline;
 };
 
 Configuration::Configuration ()
@@ -326,6 +337,28 @@ Configuration::Configuration ()
 {
 }
 
+class StackTraceFilter
+{
+public:
+  virtual void filter(SymbolInfo *symbol, 
+                      int64_t &counter, 
+                      int64_t &freq) = 0;
+};
+
+class ZeroFilter : public StackTraceFilter
+{
+public:
+  virtual void filter(SymbolInfo *symbol, int64_t &counter, int64_t &freq) { counter=1; freq = 0; }
+};
+
+class BaseLineFilter : public StackTraceFilter
+{
+public:
+  virtual void filter(SymbolInfo *symbol, int64_t &counter, int64_t &freq) 
+  { 
+    counter=-counter; freq = 0; 
+  }
+};
 
 class IgProfAnalyzerApplication
 {
@@ -336,8 +369,9 @@ public:
   void run (void);
   ArgsList::const_iterator parseArgs (const ArgsList &args);
   ProfileInfo* readAllDumps (ArgsList::const_iterator &begin,
-             ArgsList::const_iterator &end);
-  void readDump (ProfileInfo &prof, const std::string& filename);
+                             ArgsList::const_iterator &end,
+                             const std::string &baseLine = std::string(""));
+  void readDump (ProfileInfo &prof, const std::string& filename, StackTraceFilter *filter = 0);
   void analyse (ProfileInfo &prof);
   void callgrind (ProfileInfo &prof);
   void prepdata (ProfileInfo &prof);
@@ -357,11 +391,18 @@ IgProfAnalyzerApplication::IgProfAnalyzerApplication (int argc, const char **arg
 
 ProfileInfo *
 IgProfAnalyzerApplication::readAllDumps (ArgsList::const_iterator &begin,
-                       ArgsList::const_iterator &end)
+                                         ArgsList::const_iterator &end, 
+                                         const std::string &baseLine)
 {
-  std::cerr << "Reading profile data" << std::endl;
   ProfileInfo *prof = new ProfileInfo;
-  
+
+  if (!baseLine.empty())
+  {
+    std::cerr << "Reading baseline" << std::endl;
+    this->readDump (*prof, baseLine, new BaseLineFilter);
+  }
+
+  std::cerr << "Reading profile data" << std::endl;
   for (ArgsList::const_iterator profileFilename = begin;
        profileFilename != end;
        profileFilename++)
@@ -370,6 +411,7 @@ IgProfAnalyzerApplication::readAllDumps (ArgsList::const_iterator &begin,
     if (m_config->verbose ())
       { std::cerr << std::endl; }
   }
+
   return prof;
 }
 
@@ -590,10 +632,6 @@ public:
     ASSERT(counter);
     do
     {
-      ASSERT (counter->cnt() >= 0);
-      ASSERT (counter->freq() >= 0);
-      ASSERT (counter->ccnt() >= 0);
-      ASSERT (counter->cfreq() >= 0);
       counter = counter->next();
     } while (initialCounter != counter);
   }
@@ -1619,8 +1657,6 @@ private:
                                 childCounter->id ());
       ASSERT(countersCount < 32);
       ASSERT(parentCounter);
-      ASSERT(childCounter->freq() >= 0);
-      ASSERT(childCounter->cnt() >= 0);
       parentCounter->freq() += childCounter->freq ();
       if (parentCounter->isMax()) {
         if (parentCounter->cnt() < childCounter->cnt()) {
@@ -1632,10 +1668,6 @@ private:
       }
       ASSERT (parentCounter->cnt() >= childCounter->cnt());
       ASSERT (parentCounter->freq() >= childCounter->freq());
-      ASSERT (childCounter->ccnt() == 0);
-      ASSERT (childCounter->cfreq() == 0);
-      ASSERT (parentCounter->ccnt() == 0);
-      ASSERT (parentCounter->cfreq() == 0);
       childCounter = childCounter->next();
     } while (childCounter != initialCounter);
 
@@ -1847,9 +1879,8 @@ parseLeak (const char *lineStart, Position &pos, int &leakAddress, int64_t &leak
   return true;
 }
 
-
 void
-IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filename)
+IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filename, StackTraceFilter *filter)
 {
   ProfileInfo::Nodes &nodes = prof.nodes ();
   typedef std::vector<NodeInfo *> Nodes;
@@ -1998,7 +2029,7 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
       ASSERT (counter);
     
       if (m_config->hasKey () && ! Counter::isKey (ctrid)) continue;
-      
+      if (filter) filter->filter(sym, ctrval, ctrfreq);
       counter->freq() += ctrfreq;
       counter->cnt() += ctrval;
     }
@@ -2302,7 +2333,7 @@ public:
 float percent (int64_t a, int64_t b)
 {
   double value = static_cast<double>(a) / static_cast<double>(b);
-  if (value < 0. || value > 1.0) 
+  if (value < -1.0 || value > 1.0) 
   {
     std::cerr << "Something is wrong. Invalid percentage value: " << value * 100. << std::endl;
     std::cerr << "N: " << a << " D: " << b << std::endl;
@@ -2493,13 +2524,6 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
   int64_t totals = first->CUM_KEY[0];
   int64_t totfreq = first->CUM_KEY[1];
 
-  if (totals < 0) {
-    std::cerr << "There is something weird going on for " << first->name() << " in " << first->filename() << "\n"
-              << "Cumulative counts is negative: " << totals << "!!!\n" << std::endl;
-    exit(1);
-  }
-  ASSERT(totfreq >= 0);
-  
   typedef std::vector <MainGProfRow *> CumulativeSortedTable;
   typedef CumulativeSortedTable FinalTable;
   typedef std::vector <MainGProfRow *> SelfSortedTable;
@@ -2867,7 +2891,7 @@ IgProfAnalyzerApplication::run (void)
   ArgsLeftCounter left (args.end ());
   ASSERT (left (firstFile));
   ArgsList::const_iterator lastFile = args.end ();
-  ProfileInfo *prof = readAllDumps (firstFile, lastFile);
+  ProfileInfo *prof = readAllDumps (firstFile, lastFile, m_config->baseline ());
 
   if (!Counter::countersByName ().size ())
   { 
@@ -3045,6 +3069,11 @@ IgProfAnalyzerApplication::parseArgs (const ArgsList &args)
       }
 
       m_config->setRegexpFilter (filter);
+    }
+    else if (is ("--baseline", "-b") && left (arg))
+    {
+      std::string baseline = *(++arg);
+      m_config->setBaseline (baseline);
     }
     else if (is ("--"))
     {
