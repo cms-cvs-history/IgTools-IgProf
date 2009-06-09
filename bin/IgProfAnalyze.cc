@@ -988,12 +988,14 @@ struct CompareBySymbol
   }
 };
 
+class FlatInfo;
+typedef std::map<SymbolInfo *, FlatInfo *> FlatInfoMap;
+
 class FlatInfo
 {
 public:
   typedef std::set<CallInfo*, CompareBySymbol<CallInfo> > Calls;
   typedef std::set<SymbolInfo *> Callers;
-  typedef std::map<SymbolInfo *, FlatInfo *> FlatMap;
 
   CallInfo *getCallee (SymbolInfo *symbol, bool create=false)
   {
@@ -1012,15 +1014,9 @@ public:
     return callInfo;
   }
   
-  static FlatMap &flatMap (void)
+  static FlatInfo *getInMap (FlatInfoMap *flatMap, SymbolInfo *sym, bool create=true)
   {
-    static FlatMap s_flatMap;
-    return s_flatMap;
-  }
-  
-  static FlatInfo *getInMap (FlatInfo::FlatMap *flatMap, SymbolInfo *sym, bool create=true)
-  {
-    FlatMap::iterator i = flatMap->find (sym);
+    FlatInfoMap::iterator i = flatMap->find (sym);
     if (i != flatMap->end ())
       return i->second;
 
@@ -1028,7 +1024,7 @@ public:
       return 0;
 
     FlatInfo *result = new FlatInfo (sym);
-    flatMap->insert (FlatMap::value_type (sym, result));
+    flatMap->insert (FlatInfoMap::value_type (sym, result));
     return result;
   }
   
@@ -1254,7 +1250,7 @@ struct SuffixOps
 class TreeMapBuilderFilter : public IgProfFilter
 {
 public:
-  TreeMapBuilderFilter (ProfileInfo *prof, Configuration *config, FlatInfo::FlatMap *flatMap)
+  TreeMapBuilderFilter (ProfileInfo *prof, Configuration *config, FlatInfoMap *flatMap)
   :m_prof (prof), m_zeroCounter (-1), m_flatMap (flatMap), m_firstInfo(0) {
     int id = Counter::getIdForCounterName (config->key ());
     ASSERT (id != -1);
@@ -1438,7 +1434,7 @@ private:
   ProfileInfo *m_prof;
   Counter m_zeroCounter;
   int m_keyId;
-  FlatInfo::FlatMap *m_flatMap;
+  FlatInfoMap *m_flatMap;
   FlatInfo *m_firstInfo;
 };
 
@@ -2350,7 +2346,7 @@ float percent (int64_t a, int64_t b)
 class GProfMainRowBuilder 
 {
 public:
-  GProfMainRowBuilder (int64_t totals, FlatInfo::FlatMap *flatMap)
+  GProfMainRowBuilder (int64_t totals, FlatInfoMap *flatMap)
    : m_info (0), m_row (0), m_callmax (0), m_totals(totals), m_flatMap (flatMap)
   {
   }
@@ -2450,7 +2446,7 @@ private:
   MainGProfRow *m_row;
   int64_t m_callmax;
   int64_t m_totals;
-  FlatInfo::FlatMap *m_flatMap;
+  FlatInfoMap *m_flatMap;
   MainGProfRow *m_mainCallrow; 
 };
 
@@ -2490,7 +2486,8 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
   prepdata(prof);
   if (m_config->verbose())
     { std::cerr << "Building call tree map" << std::endl; }
-  TreeMapBuilderFilter *callTreeBuilder = new TreeMapBuilderFilter(&prof, m_config, &(FlatInfo::flatMap()));
+  FlatInfoMap flatMap;
+  TreeMapBuilderFilter *callTreeBuilder = new TreeMapBuilderFilter(&prof, m_config, &flatMap);
   walk(prof.spontaneous(), callTreeBuilder);
   // Sorting flat entries
   if (m_config->verbose ())
@@ -2498,13 +2495,13 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
   int rank = 1;
   typedef std::vector <FlatInfo *> FlatVector;
   FlatVector sorted; 
-  if (FlatInfo::flatMap().empty()) {
+  if (flatMap.empty()) {
     std::cerr << "Could not find any information to print." << std::endl; 
     exit(1);
   }
 
-  for (FlatInfo::FlatMap::const_iterator i = FlatInfo::flatMap ().begin ();
-     i != FlatInfo::flatMap ().end ();
+  for (FlatInfoMap::const_iterator i = flatMap.begin ();
+     i != flatMap.end ();
        i++)
   { sorted.push_back (i->second); }
   
@@ -2542,7 +2539,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
   typedef std::vector <MainGProfRow *> SelfSortedTable;
   
   FinalTable table;
-  GProfMainRowBuilder builder (totals, &(FlatInfo::flatMap()));
+  GProfMainRowBuilder builder (totals, &flatMap);
 
   for (FlatVector::const_iterator i = sorted.begin ();
      i != sorted.end ();
