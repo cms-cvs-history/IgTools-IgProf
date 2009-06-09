@@ -1018,12 +1018,6 @@ public:
     return s_flatMap;
   }
   
-  static FlatInfo *first (void)
-  {
-    ASSERT (s_first);
-    return s_first;
-  }
-  
   static FlatInfo *getInMap (FlatInfo::FlatMap *flatMap, SymbolInfo *sym, bool create=true)
   {
     FlatMap::iterator i = flatMap->find (sym);
@@ -1035,7 +1029,6 @@ public:
 
     FlatInfo *result = new FlatInfo (sym);
     flatMap->insert (FlatMap::value_type (sym, result));
-    if (! s_first) s_first = result;
     return result;
   }
   
@@ -1075,11 +1068,9 @@ protected:
   }
 private:
   static int s_keyId;
-  static FlatInfo *s_first;
 };
 
 int FlatInfo::s_keyId = -1;
-FlatInfo *FlatInfo::s_first = 0;
 
 class SymbolInfoFactory 
 {
@@ -1264,7 +1255,7 @@ class TreeMapBuilderFilter : public IgProfFilter
 {
 public:
   TreeMapBuilderFilter (ProfileInfo *prof, Configuration *config, FlatInfo::FlatMap *flatMap)
-  :m_prof (prof), m_zeroCounter (-1), m_flatMap (flatMap) {
+  :m_prof (prof), m_zeroCounter (-1), m_flatMap (flatMap), m_firstInfo(0) {
     int id = Counter::getIdForCounterName (config->key ());
     ASSERT (id != -1);
     m_keyId = id;
@@ -1294,8 +1285,12 @@ public:
     ASSERT (node);
     SymbolInfo *sym = symfor (node);
     ASSERT (sym);
-    FlatInfo *symnode = FlatInfo::getInMap (m_flatMap, sym);
+    FlatInfo *symnode = FlatInfo::getInMap(m_flatMap, sym);
     ASSERT (symnode);
+
+    if (!m_firstInfo)
+      m_firstInfo = symnode;
+
     if (symnode->DEPTH < 0 || int(seen().size()) < symnode->DEPTH)
       symnode->DEPTH = int(seen().size());
 
@@ -1308,7 +1303,7 @@ public:
     if (parent)
     {
       SymbolInfo *parsym = parent->symbol ();
-      FlatInfo *parentInfo = FlatInfo::getInMap (m_flatMap, parsym, false);
+      FlatInfo *parentInfo = FlatInfo::getInMap(m_flatMap, parsym, false);
       ASSERT (parentInfo);
 
       symnode->CALLERS.insert (parsym);
@@ -1370,6 +1365,12 @@ public:
   virtual std::string name () const { return "tree map builder"; }
   virtual enum FilterType type () const { return BOTH; }
 
+  void getTotals (int64_t &totals, int64_t &totfreqs) 
+  {
+    ASSERT (m_firstInfo);
+    totals = m_firstInfo->CUM_KEY[0];
+    totfreqs = m_firstInfo->CUM_KEY[1];
+  }
 private:
   typedef std::map<std::string, SymbolInfo *>  SeenSymbols;
 
@@ -1438,6 +1439,7 @@ private:
   Counter m_zeroCounter;
   int m_keyId;
   FlatInfo::FlatMap *m_flatMap;
+  FlatInfo *m_firstInfo;
 };
 
 class TextStreamer
@@ -2488,7 +2490,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
   prepdata(prof);
   if (m_config->verbose())
     { std::cerr << "Building call tree map" << std::endl; }
-  IgProfFilter *callTreeBuilder = new TreeMapBuilderFilter(&prof, m_config, &(FlatInfo::flatMap()));
+  TreeMapBuilderFilter *callTreeBuilder = new TreeMapBuilderFilter(&prof, m_config, &(FlatInfo::flatMap()));
   walk(prof.spontaneous(), callTreeBuilder);
   // Sorting flat entries
   if (m_config->verbose ())
@@ -2531,11 +2533,9 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
 
   bool isMax = Counter::isMax(keyId);
   
-  FlatInfo *first = FlatInfo::first();
-  ASSERT (first);
-
-  int64_t totals = first->CUM_KEY[0];
-  int64_t totfreq = first->CUM_KEY[1];
+  int64_t totals;
+  int64_t totfreq;
+  callTreeBuilder->getTotals(totals, totfreq);
 
   typedef std::vector <MainGProfRow *> CumulativeSortedTable;
   typedef CumulativeSortedTable FinalTable;
