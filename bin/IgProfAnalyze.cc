@@ -2348,16 +2348,16 @@ float percent (int64_t a, int64_t b)
 class GProfMainRowBuilder 
 {
 public:
-  GProfMainRowBuilder (FlatInfo *info, int64_t totals)
-   : m_info (info), m_row (0), m_callmax (0), m_totals(totals)
+  GProfMainRowBuilder (int64_t totals, FlatInfo::FlatMap *flatMap)
+   : m_info (0), m_row (0), m_callmax (0), m_totals(totals), m_flatMap (flatMap)
   {
-    init ();
   }
 
   void addCaller (SymbolInfo *callerSymbol)
   { 
+    ASSERT (m_info);
     ASSERT (m_row);
-    FlatInfo *origin = FlatInfo::flatMap ()[callerSymbol];
+    FlatInfo *origin = (*m_flatMap)[callerSymbol];
     CallInfo *thisCall = origin->getCallee(m_info->SYMBOL);
    
     ASSERT(thisCall);
@@ -2380,10 +2380,11 @@ public:
   
   void addCallee (CallInfo *thisCall)
   {
+    ASSERT (m_info);
+    ASSERT (m_row);
     // calleeInfo is the global information about this symbol
     // thisCall contains the information when this symbol is called by m_info
-    ASSERT (m_row);
-    FlatInfo *calleeInfo = FlatInfo::flatMap()[thisCall->SYMBOL];
+    FlatInfo *calleeInfo = (*m_flatMap)[thisCall->SYMBOL];
 
     if (!thisCall->VALUES[0])
       { return; }
@@ -2409,13 +2410,24 @@ public:
     //ASSERT (callrow->SELF_CALLS <= callrow->TOTAL_CALLS);
   }
   
-  void init (void)
+  void beginEditingWith (FlatInfo *info)
   {
+    ASSERT (!m_info);
+    ASSERT (!m_row);
+    m_info = info;
     m_row = new MainGProfRow ();
     m_row->initFromInfo (m_info);
     m_row->PCT = percent (m_info->CUM_KEY[0], m_totals);
     m_row->CUM = m_info->CUM_KEY[0];
     m_row->SELF = m_info->SELF_KEY[0];   
+  }
+
+  void endEditing (void)
+  {
+    ASSERT(m_info);
+    ASSERT(m_row);
+    m_info = 0;
+    m_row = 0;
   }
 
   MainGProfRow *build (bool isMax)
@@ -2436,6 +2448,7 @@ private:
   MainGProfRow *m_row;
   int64_t m_callmax;
   int64_t m_totals;
+  FlatInfo::FlatMap *m_flatMap;
   MainGProfRow *m_mainCallrow; 
 };
 
@@ -2529,7 +2542,8 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
   typedef std::vector <MainGProfRow *> SelfSortedTable;
   
   FinalTable table;
- 
+  GProfMainRowBuilder builder (totals, &(FlatInfo::flatMap()));
+
   for (FlatVector::const_iterator i = sorted.begin ();
      i != sorted.end ();
      i++)
@@ -2540,7 +2554,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
 
     // Sort calling and called functions.
     // FIXME: should sort callee and callers
-    GProfMainRowBuilder builder (info, totals);
+    builder.beginEditingWith (info);
    
     for (FlatInfo::Callers::const_iterator j = info->CALLERS.begin ();
        j != info->CALLERS.end ();
@@ -2552,6 +2566,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
        j++)
     { builder.addCallee (*j); }
     table.push_back (builder.build (isMax)); 
+    builder.endEditing ();
   }
 
   SelfSortedTable selfSortedTable;
