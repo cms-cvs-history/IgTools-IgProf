@@ -376,6 +376,7 @@ public:
   void callgrind (ProfileInfo &prof);
   void prepdata (ProfileInfo &prof);
 private:
+  void verboseMessage (const char *msg);
   Configuration *m_config;
   int m_argc;
   const char **m_argv;
@@ -408,8 +409,7 @@ IgProfAnalyzerApplication::readAllDumps (ArgsList::const_iterator &begin,
        profileFilename++)
   {
     this->readDump (*prof, *profileFilename);
-    if (m_config->verbose ())
-      { std::cerr << std::endl; }
+    verboseMessage ("");
   }
 
   return prof;
@@ -2133,6 +2133,13 @@ void walk (T *first, Filter<T> *filter=0)
 }
 
 void
+IgProfAnalyzerApplication::verboseMessage (const char *msg)
+{
+  if (m_config->verbose())
+    std::cerr << msg << std::endl;
+}
+
+void
 IgProfAnalyzerApplication::prepdata (ProfileInfo& prof/*, // FIXME: is all this actually needed???
                    std::list<int> &ccnt, 
                    std::list<int> &cfreq*/)
@@ -2152,10 +2159,8 @@ IgProfAnalyzerApplication::prepdata (ProfileInfo& prof/*, // FIXME: is all this 
   {
 //    walk<NodeInfo> (prof.spontaneous(), new PrintTreeFilter);
 
-    if (m_config->verbose ())
-    {
-      std::cerr << "Merge nodes belonging to the same library." << std::endl;
-    }
+    verboseMessage("Merge nodes belonging to the same library.");
+
     UseFileNamesFilter *filter = new UseFileNamesFilter;
     walk<NodeInfo> (prof.spontaneous(), filter);
 //    walk<NodeInfo> (prof.spontaneous(), new PrintTreeFilter);
@@ -2163,17 +2168,11 @@ IgProfAnalyzerApplication::prepdata (ProfileInfo& prof/*, // FIXME: is all this 
 
   if (m_config->regexpFilter())
   {
-    if (m_config->verbose ())
-    {
-      std::cerr << "Merge nodes using user-provided regular expression." << std::endl;
-    }
+    verboseMessage ("Merge nodes using user-provided regular expression.");
     walk<NodeInfo> (prof.spontaneous(), m_config->regexpFilter());
   }
 
-  if (m_config->verbose ())
-  {
-    std::cerr << "Summing counters" << std::endl;
-  }
+  verboseMessage ("Summing counters");
   IgProfFilter *sumFilter = new AddCumulativeInfoFilter ();
   walk<NodeInfo> (prof.spontaneous(), sumFilter);
   walk(prof.spontaneous(), new CheckTreeConsistencyFilter());
@@ -2484,14 +2483,12 @@ void
 IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
 {
   prepdata(prof);
-  if (m_config->verbose())
-    { std::cerr << "Building call tree map" << std::endl; }
+  verboseMessage ("Building call tree map");
   FlatInfoMap flatMap;
   TreeMapBuilderFilter *callTreeBuilder = new TreeMapBuilderFilter(&prof, m_config, &flatMap);
   walk(prof.spontaneous(), callTreeBuilder);
   // Sorting flat entries
-  if (m_config->verbose ())
-    { std::cerr << "Sorting" << std::endl; }
+  verboseMessage ("Sorting");
   int rank = 1;
   typedef std::vector <FlatInfo *> FlatVector;
   FlatVector sorted; 
@@ -2513,8 +2510,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
   
   if (m_config->doDemangle () || m_config->useGdb ())
   {
-    if (m_config->verbose ())
-      std::cerr << "Resolving symbols" << std::endl;
+    verboseMessage("Resolving symbols");
     symremap (prof, sorted, m_config->useGdb (), m_config->doDemangle ());
   }
  
@@ -2523,8 +2519,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
     exit(1);
   }
 
-  if (m_config->verbose ())
-    std::cerr << "Generating report" << std::endl;
+  verboseMessage("Generating report");
   
   int keyId = m_config->keyId ();
 
