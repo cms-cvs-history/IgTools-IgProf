@@ -1024,17 +1024,17 @@ public:
     return s_first;
   }
   
-  static FlatInfo *get (SymbolInfo *sym, bool create=true)
+  static FlatInfo *getInMap (FlatInfo::FlatMap *flatMap, SymbolInfo *sym, bool create=true)
   {
-    FlatMap::iterator i = FlatInfo::flatMap ().find (sym);
-    if (i != FlatInfo::flatMap ().end ())
+    FlatMap::iterator i = flatMap->find (sym);
+    if (i != flatMap->end ())
       return i->second;
 
     if (!create)
       return 0;
 
     FlatInfo *result = new FlatInfo (sym);
-    flatMap ().insert (FlatMap::value_type (sym, result));
+    flatMap->insert (FlatMap::value_type (sym, result));
     if (! s_first) s_first = result;
     return result;
   }
@@ -1263,8 +1263,8 @@ struct SuffixOps
 class TreeMapBuilderFilter : public IgProfFilter
 {
 public:
-  TreeMapBuilderFilter (ProfileInfo *prof, Configuration *config)
-  :m_prof (prof), m_zeroCounter (-1) {
+  TreeMapBuilderFilter (ProfileInfo *prof, Configuration *config, FlatInfo::FlatMap *flatMap)
+  :m_prof (prof), m_zeroCounter (-1), m_flatMap (flatMap) {
     int id = Counter::getIdForCounterName (config->key ());
     ASSERT (id != -1);
     m_keyId = id;
@@ -1294,7 +1294,7 @@ public:
     ASSERT (node);
     SymbolInfo *sym = symfor (node);
     ASSERT (sym);
-    FlatInfo *symnode = FlatInfo::get (sym);
+    FlatInfo *symnode = FlatInfo::getInMap (m_flatMap, sym);
     ASSERT (symnode);
     if (symnode->DEPTH < 0 || int(seen().size()) < symnode->DEPTH)
       symnode->DEPTH = int(seen().size());
@@ -1308,7 +1308,7 @@ public:
     if (parent)
     {
       SymbolInfo *parsym = parent->symbol ();
-      FlatInfo *parentInfo = FlatInfo::get (parsym, false);
+      FlatInfo *parentInfo = FlatInfo::getInMap (m_flatMap, parsym, false);
       ASSERT (parentInfo);
 
       symnode->CALLERS.insert (parsym);
@@ -1370,7 +1370,6 @@ public:
   virtual std::string name () const { return "tree map builder"; }
   virtual enum FilterType type () const { return BOTH; }
 
-  typedef std::map<SymbolInfo *, FlatInfo *> FlatMap;
 private:
   typedef std::map<std::string, SymbolInfo *>  SeenSymbols;
 
@@ -1438,6 +1437,7 @@ private:
   ProfileInfo *m_prof;
   Counter m_zeroCounter;
   int m_keyId;
+  FlatInfo::FlatMap *m_flatMap;
 };
 
 class TextStreamer
@@ -2488,7 +2488,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
   prepdata(prof);
   if (m_config->verbose())
     { std::cerr << "Building call tree map" << std::endl; }
-  IgProfFilter *callTreeBuilder = new TreeMapBuilderFilter(&prof, m_config);
+  IgProfFilter *callTreeBuilder = new TreeMapBuilderFilter(&prof, m_config, &(FlatInfo::flatMap()));
   walk(prof.spontaneous(), callTreeBuilder);
   // Sorting flat entries
   if (m_config->verbose ())
