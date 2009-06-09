@@ -368,15 +368,12 @@ public:
   IgProfAnalyzerApplication (int argc, const char **argv);
   void run (void);
   ArgsList::const_iterator parseArgs (const ArgsList &args);
-  ProfileInfo* readAllDumps (ArgsList::const_iterator &begin,
-                             ArgsList::const_iterator &end,
-                             const std::string &baseLine = std::string(""));
   void readDump (ProfileInfo &prof, const std::string& filename, StackTraceFilter *filter = 0);
   void analyse (ProfileInfo &prof);
   void callgrind (ProfileInfo &prof);
   void prepdata (ProfileInfo &prof);
 private:
-  void verboseMessage (const char *msg);
+  void verboseMessage (const char *msg, const char *arg = 0);
   Configuration *m_config;
   int m_argc;
   const char **m_argv;
@@ -388,31 +385,6 @@ IgProfAnalyzerApplication::IgProfAnalyzerApplication (int argc, const char **arg
  m_argc (argc),
  m_argv (argv)
 {
-}
-
-ProfileInfo *
-IgProfAnalyzerApplication::readAllDumps (ArgsList::const_iterator &begin,
-                                         ArgsList::const_iterator &end, 
-                                         const std::string &baseLine)
-{
-  ProfileInfo *prof = new ProfileInfo;
-
-  if (!baseLine.empty())
-  {
-    std::cerr << "Reading baseline" << std::endl;
-    this->readDump (*prof, baseLine, new BaseLineFilter);
-  }
-
-  std::cerr << "Reading profile data" << std::endl;
-  for (ArgsList::const_iterator profileFilename = begin;
-       profileFilename != end;
-       profileFilename++)
-  {
-    this->readDump (*prof, *profileFilename);
-    verboseMessage ("");
-  }
-
-  return prof;
 }
 
 float
@@ -1884,9 +1856,8 @@ IgProfAnalyzerApplication::readDump (ProfileInfo &prof, const std::string &filen
   typedef std::vector<NodeInfo *> Nodes;
   Nodes nodestack;
   nodestack.reserve (IGPROF_MAX_DEPTH);
-  
-  if (m_config->verbose ())
-    std::cerr << "Parsing igprof output file: " << filename << std::endl;
+ 
+  verboseMessage ("Parsing igprof output file:", filename.c_str());
   FileReader reader (filename);
   
   std::string line;
@@ -2133,26 +2104,31 @@ void walk (T *first, Filter<T> *filter=0)
 }
 
 void
-IgProfAnalyzerApplication::verboseMessage (const char *msg)
+IgProfAnalyzerApplication::verboseMessage (const char *msg, const char *arg)
 {
-  if (m_config->verbose())
-    std::cerr << msg << std::endl;
+  if (!m_config->verbose())
+    return;
+  std::cerr << msg; 
+
+  if (arg)
+    std::cerr << " " << arg;
+
+  if (msg[0])
+    std::cerr << ".";
+
+  std::cerr << std::endl;
 }
 
 void
-IgProfAnalyzerApplication::prepdata (ProfileInfo& prof/*, // FIXME: is all this actually needed???
-                   std::list<int> &ccnt, 
-                   std::list<int> &cfreq*/)
+IgProfAnalyzerApplication::prepdata (ProfileInfo& prof)
 {
   for (Configuration::Filters::const_iterator i = m_config->filters ().begin ();
      i != m_config->filters ().end ();
      i++)
   {
     (*i)->init (&prof);
-    if (m_config->verbose ())
-    { std::cerr << "Applying filter " << (*i)->name () 
-                    << "." << std::endl; }
-      walk<NodeInfo>(prof.spontaneous(), *i);
+    verboseMessage ("Applying filter", (*i)->name ().c_str());
+    walk<NodeInfo>(prof.spontaneous(), *i);
   }
 
   if (m_config->mergeLibraries())
@@ -2892,13 +2868,29 @@ IgProfAnalyzerApplication::run (void)
   {
     args.push_back (m_argv[i]);
   }
-  ArgsList::const_iterator firstFile = this->parseArgs (args);
   m_config->addFilter(new RemoveIgProfFilter());
+
+  ArgsList::const_iterator firstFile = this->parseArgs (args);
   ASSERT (firstFile != args.end ());
   ArgsLeftCounter left (args.end ());
   ASSERT (left (firstFile));
-  ArgsList::const_iterator lastFile = args.end ();
-  ProfileInfo *prof = readAllDumps (firstFile, lastFile, m_config->baseline ());
+
+  ProfileInfo *prof = new ProfileInfo;
+
+  if (!m_config->baseline ().empty())
+  {
+    std::cerr << "Reading baseline" << std::endl;
+    this->readDump (*prof, m_config->baseline (), new BaseLineFilter);
+  }
+
+  std::cerr << "Reading profile data" << std::endl;
+  for (ArgsList::const_iterator profileFilename = this->parseArgs(args);
+       profileFilename != args.end();
+       profileFilename++)
+  {
+    this->readDump (*prof, *profileFilename);
+    verboseMessage ("");
+  }
 
   if (!Counter::countersByName ().size ())
   { 
@@ -2909,25 +2901,21 @@ IgProfAnalyzerApplication::run (void)
   if (m_config->key () == "")
   {
     if (Counter::countersByName ().size () > 1)
-    {
       printAvailableCounters (Counter::countersByName ());
-    }
     else
-    {
       m_config->setKey ((*(Counter::countersByName ().begin ())).first);
-    }
   }
   if (! m_config->isShowCallsDefined ())
   {
     if (lat::StringOps::contains (m_config->key (), "MEM_"))
-      { m_config->setShowCalls (true); }
+      m_config->setShowCalls (true);
     else
-      { m_config->setShowCalls (false); }
+      m_config->setShowCalls (false);
   }
   if (m_config->callgrind ())
-    { callgrind (*prof); }
+    callgrind (*prof);
   else
-    { analyse (*prof); }
+    analyse (*prof);
 }
 
 
