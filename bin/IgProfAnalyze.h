@@ -542,22 +542,21 @@ private:
 class FractionPrinter
 {
 public:
-  FractionPrinter (int sizeN, int sizeD)
-  :m_sizeN (sizeN), m_sizeD (sizeD) 
+  FractionPrinter (int size)
+  :m_size (size) 
   {
   }
   
   void operator ()(const std::string &n, const std::string &d)
   {
-    printf ("%*s", m_sizeN, n.c_str ());
+    printf ("%*s", m_size, n.c_str ());
     char denBuffer[256];
-    sprintf (denBuffer, " / %%-%ds", m_sizeD);
+    sprintf (denBuffer, " / %%-%ds", m_size);
     printf (denBuffer, d.c_str ());
   }
   
 private:
-  int m_sizeN;
-  int m_sizeD;
+  int m_size;
 };
 
 class PrintIf

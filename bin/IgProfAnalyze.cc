@@ -299,6 +299,16 @@ public:
     // TODO: remove dummy assertion. (bbc800a) 
     ASSERT(m_filters.empty());
   }
+
+  void setDiffMode (bool value)
+  {
+    m_diffMode = value;
+  }
+  
+  bool diffMode(void)
+  {
+    return m_diffMode;
+  }
 private:
   Filters m_filters;
   std::string m_key;
@@ -317,6 +327,7 @@ private:
   bool m_mergeLibraries;
   RegexpFilter *m_regexpFilter;
   std::string m_baseline;
+  bool m_diffMode;
 };
 
 Configuration::Configuration ()
@@ -333,7 +344,8 @@ Configuration::Configuration ()
   m_normalValue (true),
   m_filtersEnabled (true),
   m_tickPeriod(0.01),
-  m_regexpFilter(0)
+  m_regexpFilter(0),
+  m_diffMode(false)
 {
 }
 
@@ -348,7 +360,10 @@ public:
 class ZeroFilter : public StackTraceFilter
 {
 public:
-  virtual void filter(SymbolInfo *symbol, int64_t &counter, int64_t &freq) { counter=1; freq = 0; }
+  virtual void filter(SymbolInfo *symbol, int64_t &counter, int64_t &freq) 
+  { 
+    counter=0; freq = 0; 
+  }
 };
 
 class BaseLineFilter : public StackTraceFilter
@@ -356,9 +371,11 @@ class BaseLineFilter : public StackTraceFilter
 public:
   virtual void filter(SymbolInfo *symbol, int64_t &counter, int64_t &freq) 
   { 
-    counter=-counter; freq = 0; 
+    counter=-counter; freq = -freq; 
   }
 };
+
+class TreeMapBuilderFilter;
 
 class IgProfAnalyzerApplication
 {
@@ -369,7 +386,7 @@ public:
   void run (void);
   ArgsList::const_iterator parseArgs (const ArgsList &args);
   void readDump (ProfileInfo &prof, const std::string& filename, StackTraceFilter *filter = 0);
-  void analyse (ProfileInfo &prof);
+  void analyse (ProfileInfo &prof, TreeMapBuilderFilter *baselineBuilder);
   void callgrind (ProfileInfo &prof);
   void prepdata (ProfileInfo &prof);
 private:
@@ -540,8 +557,6 @@ public:
     { 
       ASSERT (loopCount++ < 32);
       ASSERT (counter);
-      ASSERT (counter->cfreq() == 0);
-      ASSERT (counter->ccnt() == 0);
 
       counter->cfreq() = counter->freq();
       counter->ccnt() = counter->cnt();
@@ -1222,8 +1237,8 @@ struct SuffixOps
 class TreeMapBuilderFilter : public IgProfFilter
 {
 public:
-  TreeMapBuilderFilter (ProfileInfo *prof, Configuration *config, FlatInfoMap *flatMap)
-  :m_prof (prof), m_zeroCounter (-1), m_flatMap (flatMap), m_firstInfo(0) {
+  TreeMapBuilderFilter (ProfileInfo *prof, Configuration *config)
+  :m_prof (prof), m_zeroCounter (-1), m_flatMap (new FlatInfoMap), m_firstInfo(0) {
     int id = Counter::getIdForCounterName (config->key ());
     ASSERT (id != -1);
     m_keyId = id;
@@ -1259,8 +1274,8 @@ public:
     if (!m_firstInfo)
       m_firstInfo = symnode;
 
-    if (symnode->DEPTH < 0 || int(seen().size()) < symnode->DEPTH)
-      symnode->DEPTH = int(seen().size());
+    if (symnode->DEPTH < 0 || int(m_seen.size()) < symnode->DEPTH)
+      symnode->DEPTH = int(m_seen.size());
 
     Counter *nodeCounter = Counter::getCounterInRing (node->COUNTERS, m_keyId);
     if (!nodeCounter) 
@@ -1321,13 +1336,13 @@ public:
   {
     ASSERT (node);
     ASSERT (node->symbol ());
-    if (seen ().count(node->symbol()->NAME) <= 0)
+    if (m_seen.count(node->symbol()->NAME) <= 0)
     {
       std::cerr << "Error: " << node->symbol()->NAME << std::endl;
     }
-    ASSERT (seen ().count(node->symbol()->NAME) > 0);
-    seen ().erase (node->symbol ()->NAME);
-    ASSERT (seen ().count(node->symbol()->NAME) == 0);
+    ASSERT (m_seen.count(node->symbol()->NAME) > 0);
+    m_seen.erase (node->symbol ()->NAME);
+    ASSERT (m_seen.count(node->symbol()->NAME) == 0);
   }
 
   virtual std::string name () const { return "tree map builder"; }
@@ -1339,6 +1354,11 @@ public:
     totals = m_firstInfo->CUM_KEY[0];
     totfreqs = m_firstInfo->CUM_KEY[1];
   }
+
+  FlatInfoMap *flatMap ()
+  {
+    return m_flatMap;
+  }
 private:
   typedef std::map<std::string, SymbolInfo *>  SeenSymbols;
 
@@ -1348,8 +1368,8 @@ private:
     SymbolInfo *reportSymbol = node->reportSymbol ();
     if (reportSymbol)
     {
-      seen ().insert (SeenSymbols::value_type (reportSymbol->NAME, 
-                                             reportSymbol));
+      m_seen.insert (SeenSymbols::value_type (reportSymbol->NAME, 
+                                              reportSymbol));
       return reportSymbol;
     }
     
@@ -1358,8 +1378,8 @@ private:
     ASSERT (node->originalSymbol ());
     std::string symbolName = node->originalSymbol ()->NAME;
     
-    SeenSymbols::iterator i = seen ().find (symbolName);
-    if (i != seen ().end ())
+    SeenSymbols::iterator i = m_seen.find (symbolName);
+    if (i != m_seen.end ())
     {
       std::string newName = getUniqueName (symbolName);
       SymbolInfoFactory::SymbolsByName &namedSymbols = SymbolInfoFactory::namedSymbols ();
@@ -1379,12 +1399,12 @@ private:
     ASSERT (node);
     node->reportSymbol (reportSymbol);
     ASSERT (node->symbol ());
-    seen ().insert (SeenSymbols::value_type (node->symbol ()->NAME, 
+    m_seen.insert (SeenSymbols::value_type (node->symbol ()->NAME, 
                          node->symbol ()));
     return node->symbol ();
   }
   
-  static std::string getUniqueName (const std::string &symbolName)
+  std::string getUniqueName (const std::string &symbolName)
   {
     int index = 2;
     std::string origname = SuffixOps::removeSuffix (symbolName);
@@ -1393,14 +1413,8 @@ private:
     do 
     {
       candidate = origname + "'" + toString (index++);
-    } while (seen ().find (candidate) != seen ().end ());
+    } while (m_seen.find (candidate) != m_seen.end ());
     return candidate;   
-  }
-
-  static SeenSymbols &seen (void)
-  {
-    static SeenSymbols s_seen;
-    return s_seen;
   }
 
   ProfileInfo *m_prof;
@@ -1408,6 +1422,7 @@ private:
   int m_keyId;
   FlatInfoMap *m_flatMap;
   FlatInfo *m_firstInfo;
+  SeenSymbols m_seen;
 };
 
 class TextStreamer
@@ -1636,8 +1651,8 @@ private:
       else {
         parentCounter->cnt() += childCounter->cnt ();
       }
-      ASSERT (parentCounter->cnt() >= childCounter->cnt());
-      ASSERT (parentCounter->freq() >= childCounter->freq());
+      //ASSERT (parentCounter->cnt() >= childCounter->cnt());
+      //ASSERT (parentCounter->freq() >= childCounter->freq());
       childCounter = childCounter->next();
     } while (childCounter != initialCounter);
 
@@ -2157,10 +2172,9 @@ IgProfAnalyzerApplication::prepdata (ProfileInfo& prof)
 class FlatInfoComparator 
 {
 public:
-  FlatInfoComparator (int counterId, int ordering, bool cumulative=true)
+  FlatInfoComparator (int counterId, int ordering)
   :m_counterId (counterId),
-   m_ordering (ordering),
-   m_cumulative (cumulative)
+   m_ordering (ordering)
   {}
   bool operator() (FlatInfo *a, FlatInfo *b)
   {
@@ -2173,12 +2187,12 @@ public:
     else if (cmp < 0) return false;
     return strcmp (a->name (), b->name ()) < 0;
   }
-private:
-  int64_t cmpnodekey (FlatInfo *a, FlatInfo *b)
+protected:
+  virtual int64_t cmpnodekey (FlatInfo *a, FlatInfo *b)
   {
     int64_t aVal = a->CUM_KEY[0];
     int64_t bVal = b->CUM_KEY[0];
-    return  -1 * m_ordering * (bVal - aVal);
+    return  -1 * m_ordering * (abs(bVal) - abs(aVal));
   }
 
   int cmpcallers (FlatInfo *a, FlatInfo *b)
@@ -2188,9 +2202,38 @@ private:
   
   int m_counterId;
   int m_ordering;
-  int m_cumulative;
 };
 
+class FlatInfoComparatorWithBaseline : public FlatInfoComparator
+{
+public:
+  FlatInfoComparatorWithBaseline (int counterId, int ordering, FlatInfoMap *map)
+  :FlatInfoComparator (counterId, ordering),
+   m_baselineMap (map)
+  {
+  }
+protected:
+  virtual int64_t cmpnodekey (FlatInfo *a, FlatInfo *b)
+  {
+    int64_t aVal = a->CUM_KEY[0];
+    int64_t bVal = b->CUM_KEY[0];
+
+    FlatInfoMap::iterator origA = m_baselineMap->find(a->SYMBOL);
+    FlatInfoMap::iterator origB = m_baselineMap->find(b->SYMBOL);
+
+    int64_t aOrigVal = aVal;
+    int64_t bOrigVal = bVal;
+
+    if (origA != m_baselineMap->end())
+      aOrigVal = origA->second->CUM_KEY[0];
+    if (origB != m_baselineMap->end())
+      bOrigVal = origB->second->CUM_KEY[0]; 
+
+    return  -1 * m_ordering * ((bVal-bOrigVal)/bOrigVal - (aVal - aOrigVal)/aOrigVal);
+  } 
+private:
+  FlatInfoMap *m_baselineMap;
+};
 
 class GProfRow
 {
@@ -2306,13 +2349,10 @@ public:
 float percent (int64_t a, int64_t b)
 {
   double value = static_cast<double>(a) / static_cast<double>(b);
-  if (value < -1.0 || value > 1.0) 
+  if (value < 0 || value > 1.0) 
   {
-    std::cerr << "Something is wrong. Invalid percentage value: " << value * 100. << std::endl;
-    std::cerr << "N: " << a << " D: " << b << std::endl;
-    std::cerr << "Quitting." << std::endl;  
-    // FIXME: remove assertion and simply quit.
-    ASSERT(false);
+    std::cerr << "Something is wrong. Invalid percentage value: " << value * 100. << "%" << std::endl;
+    std::cerr << "Looks like you really wanted to do a between two unrelated runs? Run again with --diff-mode (-D)." << std::endl;
     exit(1);
   }
   return value * 100.;
@@ -2321,9 +2361,24 @@ float percent (int64_t a, int64_t b)
 class GProfMainRowBuilder 
 {
 public:
-  GProfMainRowBuilder (int64_t totals, FlatInfoMap *flatMap)
-   : m_info (0), m_row (0), m_callmax (0), m_totals(totals), m_flatMap (flatMap)
+  GProfMainRowBuilder (TreeMapBuilderFilter *flatMapBuilder,
+                       TreeMapBuilderFilter *baselineBuilder,
+                       bool diffMode)
+   : m_info (0), m_row (0), m_callmax (0), 
+     m_totals(0),
+     m_totfreq(0),
+     m_diffMode(diffMode),
+     m_flatMap (flatMapBuilder->flatMap())
   {
+    flatMapBuilder->getTotals (m_totals, m_totfreq);
+    if (baselineBuilder)
+    {
+      int64_t oldTotals = 0;
+      int64_t oldTotfreq = 0;
+      baselineBuilder->getTotals (oldTotals, oldTotfreq);
+      m_totals -= oldTotals;
+      m_totfreq -= oldTotfreq;
+    }
   }
 
   void addCaller (SymbolInfo *callerSymbol)
@@ -2338,8 +2393,12 @@ public:
       { return; }
     OtherGProfRow *callrow = new OtherGProfRow ();
     callrow->initFromInfo (origin);
-    callrow->PCT = percent (thisCall->VALUES[0], m_totals);
-    
+  
+    if (m_diffMode)
+      callrow->PCT = 0;
+    else
+      callrow->PCT = percent (thisCall->VALUES[0], m_totals);
+
     callrow->SELF_COUNTS = thisCall->VALUES[0];
     callrow->CHILDREN_COUNTS = origin->CUM_KEY[0];
     
@@ -2368,7 +2427,10 @@ public:
     OtherGProfRow *callrow = new OtherGProfRow ();
     ASSERT (calleeInfo);
     callrow->initFromInfo (calleeInfo);
-    callrow->PCT = percent (thisCall->VALUES[0], m_totals);
+    if (m_diffMode)
+      callrow->PCT = 0;
+    else
+      callrow->PCT = percent (thisCall->VALUES[0], m_totals);
 
     callrow->SELF_COUNTS = thisCall->VALUES[0];
     callrow->CHILDREN_COUNTS = calleeInfo->CUM_KEY[0];
@@ -2390,7 +2452,10 @@ public:
     m_info = info;
     m_row = new MainGProfRow ();
     m_row->initFromInfo (m_info);
-    m_row->PCT = percent (m_info->CUM_KEY[0], m_totals);
+    if (m_diffMode)
+      m_row->PCT = 0;
+    else
+      m_row->PCT = percent (m_info->CUM_KEY[0], m_totals);
     m_row->CUM = m_info->CUM_KEY[0];
     m_row->SELF = m_info->SELF_KEY[0];   
   }
@@ -2416,27 +2481,54 @@ public:
     memcpy (m_row->SELF_ALL, m_info->SELF_KEY, 3*sizeof(int64_t));
     return m_row;
   }
+  
+  int64_t totals(void)
+  {
+    return m_totals;
+  }
+
+  int64_t totfreq(void)
+  {
+    return m_totfreq;
+  }
 private:
   FlatInfo *m_info;
   MainGProfRow *m_row;
   int64_t m_callmax;
   int64_t m_totals;
-  FlatInfoMap *m_flatMap;
-  MainGProfRow *m_mainCallrow; 
+  int64_t m_totfreq;
+  bool m_diffMode;
+  FlatInfoMap   *m_flatMap;
+  MainGProfRow  *m_mainCallrow; 
 };
 
-void
-printHeader (const char *description, const char *kind, 
-       bool showpaths, bool showcalls, int maxval, int maxcnt)
+class HeaderPrinter
 {
-  std::cout << "\n" << std::string (70, '-') << "\n" 
-        << description << "\n\n";
-  std::cout << "% total  ";
-  (AlignedPrinter (maxval)) (kind);
-  if (showcalls) { (AlignedPrinter (maxcnt)) ("Calls"); }
-  if (showpaths) { (AlignedPrinter (maxcnt)) ("Paths"); }
-  std::cout << "Function\n";
-}
+public:
+  HeaderPrinter (bool showpaths, bool showcalls, int maxval, int maxcnt)
+  :m_showPaths(showpaths),
+   m_showCalls(showcalls),
+   m_maxval(maxval),
+   m_maxcnt(maxcnt)
+  {}
+
+  void print (const char *description, const char *kind) 
+  {
+    std::cout << "\n" << std::string (70, '-') << "\n" 
+              << description << "\n\n";
+    std::cout << "% total  ";
+    (AlignedPrinter (m_maxval)) (kind);
+    if (m_showCalls) { (AlignedPrinter (m_maxcnt)) ("Calls"); }
+    if (m_showPaths) { (AlignedPrinter (m_maxcnt)) ("Paths"); }
+    std::cout << "Function\n";
+  }
+
+private:
+  bool m_showPaths;
+  bool m_showCalls;
+  int  m_maxval;
+  int  m_maxcnt;
+};
 
 int64_t
 max (int64_t a, int64_t b)
@@ -2447,8 +2539,9 @@ max (int64_t a, int64_t b)
 class SortRowBySelf
 {
 public:
-  bool operator () (MainGProfRow *a, MainGProfRow *b) {
-    return a->SELF > b->SELF;
+  bool operator()(MainGProfRow *a, MainGProfRow *b) 
+  {
+    return abs(a->SELF) > abs(b->SELF); 
     //if (a->SELF != b->SELF) return a->SELF > b->SELF;
     //if (a->DEPTH != b->DEPTH) return a->DEPTH < b->DEPTH;
     //return a->NAME < b->NAME;
@@ -2456,30 +2549,32 @@ public:
 };
 
 void
-IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
+IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *baselineBuilder)
 {
   prepdata(prof);
   verboseMessage ("Building call tree map");
-  FlatInfoMap flatMap;
-  TreeMapBuilderFilter *callTreeBuilder = new TreeMapBuilderFilter(&prof, m_config, &flatMap);
+  TreeMapBuilderFilter *callTreeBuilder = new TreeMapBuilderFilter(&prof, m_config);
   walk(prof.spontaneous(), callTreeBuilder);
   // Sorting flat entries
   verboseMessage ("Sorting");
   int rank = 1;
   typedef std::vector <FlatInfo *> FlatVector;
   FlatVector sorted; 
-  if (flatMap.empty()) {
+  FlatInfoMap *flatMap = callTreeBuilder->flatMap();
+
+  if (flatMap->empty()) {
     std::cerr << "Could not find any information to print." << std::endl; 
     exit(1);
   }
 
-  for (FlatInfoMap::const_iterator i = flatMap.begin ();
-     i != flatMap.end ();
+  for (FlatInfoMap::const_iterator i = flatMap->begin ();
+       i != flatMap->end ();
        i++)
   { sorted.push_back (i->second); }
-  
+
   sort (sorted.begin(), sorted.end(), FlatInfoComparator(m_config->keyId (),
-        m_config->ordering ()));
+                                                         m_config->ordering ()));
+
   
   for (FlatVector::const_iterator i = sorted.begin(); i != sorted.end(); i++)
   { (*i)->setRank (rank++); }
@@ -2501,16 +2596,14 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
 
   bool isMax = Counter::isMax(keyId);
   
-  int64_t totals;
-  int64_t totfreq;
-  callTreeBuilder->getTotals(totals, totfreq);
-
   typedef std::vector <MainGProfRow *> CumulativeSortedTable;
   typedef CumulativeSortedTable FinalTable;
   typedef std::vector <MainGProfRow *> SelfSortedTable;
   
   FinalTable table;
-  GProfMainRowBuilder builder (totals, &flatMap);
+  GProfMainRowBuilder builder (callTreeBuilder, baselineBuilder, m_config->diffMode());
+  int64_t totals = builder.totals();
+  int64_t totfreq = builder.totfreq();
 
   for (FlatVector::const_iterator i = sorted.begin ();
      i != sorted.end ();
@@ -2545,8 +2638,8 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
   {
     selfSortedTable.push_back (*i);
   }
-  
-  stable_sort (selfSortedTable.begin (), selfSortedTable.end (), SortRowBySelf ());
+ 
+  stable_sort (selfSortedTable.begin (), selfSortedTable.end (), SortRowBySelf());
    
   if (m_config->outputType () == Configuration::TEXT)
   {
@@ -2564,23 +2657,30 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
     }
     else {
       maxcnt = max (8, max (thousands (totals).size (), 
-                       thousands (totfreq).size ()));
+                            thousands (totfreq).size ()));
     }
     int maxval = maxcnt + (isPerfTicks ? 1 : 0);
 
     std::string basefmt = isPerfTicks ? "%.2f" : "%s";
-    FractionPrinter valfmt (maxval, maxval);
-    FractionPrinter cntfmt (maxcnt, maxcnt);
-    
-    printHeader ("Flat profile (cumulative >= 1%)", "Total", 
-           showpaths, showcalls, maxval, maxcnt);
-    
+    FractionPrinter valfmt (maxval);
+    FractionPrinter cntfmt (maxcnt);
+    HeaderPrinter hp (showpaths, showcalls, maxval, maxcnt);   
+    bool diffMode = m_config->diffMode ();
+    if (diffMode) 
+      hp.print ("Flat profile (cumulatively different entries only)", "Total");
+    else
+      hp.print ("Flat profile (cumulative >= 1%)", "Total"); 
+
     for (FinalTable::const_iterator i = table.begin ();
        i != table.end ();
        i++)
     {
-      MainGProfRow &row = **i; 
-      printf ("%7.1f  ", row.PCT);
+      MainGProfRow &row = **i;
+      if (diffMode)
+        printf ("      -  ");
+      else
+        printf ("%7.1f  ", row.PCT);
+      
       if (isPerfTicks && ! m_config->callgrind()) {
         printf ("%*s  ", maxval, thousands (static_cast<double>(row.CUM) * tickPeriod, 0, 2).c_str());
       } else {
@@ -2592,24 +2692,31 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
       printf ("%s [%d]", row.name(), row.rank());
       if (showlibs) { std::cout << row.filename(); }
       std::cout << "\n";
-      if (row.PCT < 1.)
+      if ((row.PCT < 1. && !diffMode) || row.CUM == 0)
         break;
     }
     
     std::cout << "\n";
     
-    printHeader ("Flat profile (self >= 0.01%)", "Self", 
-           showpaths, showcalls, maxval, maxcnt);
+    if (diffMode)
+      hp.print ("Flat profile (self different entries only)", "Self");
+    else
+      hp.print ("Flat profile (self >= 0.01%)", "Self"); 
     
     for (SelfSortedTable::const_iterator i = selfSortedTable.begin ();
       i != selfSortedTable.end ();
       i++)
     {
       MainGProfRow &row = **i;
-      float pct = percent (row.SELF, totals);
-        
-      printf ("%7.2f  ", pct);
-       
+      float pct = 0; 
+      if (diffMode)
+        printf ("      -  ");
+      else
+      {
+        pct = percent(row.SELF, totals);
+        printf ("%7.2f  ", pct);
+      }
+
       if (isPerfTicks && ! m_config->callgrind()) {
         printf ("%*s  ", maxval, thousands (static_cast<double>(row.SELF) * tickPeriod, 0, 2).c_str());
       }
@@ -2622,7 +2729,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
       printf ("%s [%d]", row.name(), row.rank());
       if (showlibs) { std::cout << row.filename(); }
       std::cout << "\n";
-      if (pct < 0.01)
+      if ((pct < 0.01 && !diffMode) || row.SELF == 0)
         break;
     }
     std::cout << "\n\n" << std::string (70, '-') << "\n";
@@ -2662,13 +2769,23 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
       {
         OtherGProfRow &row = **c;
         std::cout << std::string (8, ' ');
-        printf ("%7.1f  ", row.PCT);
+
+        if (diffMode)
+          printf ("      -  ");
+        else
+        {
+          printf ("%7.2f  ", row.PCT);
+        }
+
         ASSERT (maxval);
         std::cout << std::string (maxval, '.') << "  ";
-        if (isPerfTicks && ! m_config->callgrind()) {
+        if (isPerfTicks && ! m_config->callgrind()) 
+        {
           valfmt (thousands (static_cast<double>(row.SELF_COUNTS) * tickPeriod, 0, 2), 
                   thousands (static_cast<double>(row.CHILDREN_COUNTS) * tickPeriod, 0, 2));
-        } else {
+        } 
+        else 
+        {
           valfmt (thousands (row.SELF_COUNTS), thousands (row.CHILDREN_COUNTS));
         }
         
@@ -2693,7 +2810,13 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
       char rankBuffer[256];
       sprintf (rankBuffer, "[%d]", mainRow.rank());
       printf ("%-8s", rankBuffer);
-      printf ("%7.1f  ", mainRow.PCT);
+      if (diffMode)
+        printf ("      -  ");
+      else
+      {
+        printf ("%7.1f  ", mainRow.PCT);
+      }
+
       if (isPerfTicks && ! m_config->callgrind()) {
         (AlignedPrinter (maxval)) (thousands (static_cast<double>(mainRow.CUM) * tickPeriod, 0, 2));
         valfmt (thousands (static_cast<double>(mainRow.SELF) * tickPeriod, 0, 2),
@@ -2722,7 +2845,13 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof)
       {
         OtherGProfRow &row = **c;
         std::cout << std::string (8, ' ');
-        printf ("%7.1f  ", row.PCT);
+        if (diffMode)
+          printf ("      -  ");
+        else
+        {
+          printf ("%7.2f  ", row.PCT);
+        }
+        
         std::cout << std::string (maxval, '.') << "  ";
         
         if (isPerfTicks && ! m_config->callgrind()) {
@@ -2876,15 +3005,19 @@ IgProfAnalyzerApplication::run (void)
   ASSERT (left (firstFile));
 
   ProfileInfo *prof = new ProfileInfo;
+  TreeMapBuilderFilter *baselineBuilder = 0;
 
   if (!m_config->baseline ().empty())
   {
     std::cerr << "Reading baseline" << std::endl;
     this->readDump (*prof, m_config->baseline (), new BaseLineFilter);
+    //prepdata (*prof);
+    baselineBuilder = new TreeMapBuilderFilter(prof, m_config);
+    walk(prof->spontaneous(), baselineBuilder);
   }
 
   std::cerr << "Reading profile data" << std::endl;
-  for (ArgsList::const_iterator profileFilename = this->parseArgs(args);
+  for (ArgsList::const_iterator profileFilename = firstFile;
        profileFilename != args.end();
        profileFilename++)
   {
@@ -2915,7 +3048,7 @@ IgProfAnalyzerApplication::run (void)
   if (m_config->callgrind ())
     callgrind (*prof);
   else
-    analyse (*prof);
+    analyse (*prof, baselineBuilder);
 }
 
 
@@ -3070,6 +3203,10 @@ IgProfAnalyzerApplication::parseArgs (const ArgsList &args)
       std::string baseline = *(++arg);
       m_config->setBaseline (baseline);
     }
+    else if (is ("--diff-mode", "-D"))
+    {
+      m_config->setDiffMode (true);
+    }
     else if (is ("--"))
     {
       ASSERT (false);
@@ -3082,6 +3219,11 @@ IgProfAnalyzerApplication::parseArgs (const ArgsList &args)
     }
     else
     {
+      if (m_config->diffMode () && m_config->baseline().empty())
+      {
+        std::cerr << "Option --diff-mode / -D requires --baseline / -b" << std::endl;
+        exit(1);
+      }
       return arg;
     };
   }
