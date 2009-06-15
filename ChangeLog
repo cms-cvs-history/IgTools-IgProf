@@ -1,3 +1,12 @@
+2009-06-15  Lassi A. Tuura  <lat@iki.fi>
+
+	* IgProf.cc (initialize): Start async thread only if dump file
+	name is non-empty; typo previously always started the thread.
+	(exitThread): Disable profile signal when thread is exiting so
+	that the fork() inside popen() for gzip has a chance of finishing
+	rather than getting caught into infinite loop on ERESTARTNOINTR.
+	(dopthread_create): Do not wrap igprof internal threads.
+
 2009-05-19  Lassi A. Tuura  <lat@iki.fi>
 
 	* IgProfAtomic.h: Add x86-64 support.

@@ -389,7 +389,7 @@ IgProf::initialize(int *moduleid, void (*threadinit)(void), bool perthread)
 #endif
     if (s_pthreads)
     {
-      if (s_dumpflag)
+      if (s_dumpflag[0])
         pthread_create (&s_dumpthread, 0, &asyncDumpThread, 0);
 
       IgHook::hook(dopthread_create_hook_main.raw);
@@ -469,6 +469,11 @@ IgProf::exitThread(bool final)
 {
   if (! s_pthreads && ! final)
     return;
+
+  itimerval stopped = { { 0, 0 }, { 0, 0 } };
+  setitimer(ITIMER_PROF, &stopped, 0);
+  setitimer(ITIMER_VIRTUAL, &stopped, 0);
+  setitimer(ITIMER_REAL, &stopped, 0);
 
   pthread_t thread = pthread_self ();
   IgProfTraceAlloc *bufs
@@ -692,16 +697,20 @@ dopthread_create(IgHook::SafeData<igprof_dopthread_create_t> &hook,
 		 void * (*start_routine)(void *),
 		 void *arg)
 {
-  // Pass the actual arguments to our wrapper in a temporary memory
-  // structure.  We need to hide the creation from memory profiler
-  // in case it's running concurrently with this profiler.
-  IgProf::disable(false);
-  IgProfWrappedArg *wrapped = new IgProfWrappedArg;
-  wrapped->start_routine = start_routine;
-  wrapped->arg = arg;
-  IgProf::enable(false);
-  int ret = hook.chain(thread, attr, &threadWrapper, wrapped);
-  return ret;
+  if (start_routine == dumpAllProfiles)
+    return hook.chain(thread, attr, start_routine, arg);
+  else
+  {
+    // Pass the actual arguments to our wrapper in a temporary memory
+    // structure.  We need to hide the creation from memory profiler
+    // in case it's running concurrently with this profiler.
+    IgProf::disable(false);
+    IgProfWrappedArg *wrapped = new IgProfWrappedArg;
+    wrapped->start_routine = start_routine;
+    wrapped->arg = arg;
+    IgProf::enable(false);
+    return hook.chain(thread, attr, &threadWrapper, wrapped);
+  }
 }
 
 /** Trapped calls to exit() and _exit().  */
