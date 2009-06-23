@@ -1,3 +1,28 @@
+2009-06-18  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* IgProfAnalyse.cc, IgProfAnalyse.h: general clean up of source,
+	  removing a few function local static objects used by some of 
+	  the tree filters, in order to simplify multiple filter
+	  passes. This is in preparation for the --baseline / --diff-mode 
+	  options which require multiple passes over the same call tree
+	  information.
+
+	* IgProfAnalyse.cc, IgProfAnalyse.h: introduction of the i
+	    
+	      --baseline <filename>
+
+	  option which allows to read two profiles and use one as
+	  baseline for the other. This can be used as a rudimental
+	  leak / performance regression detector. 
+	  There is moreover a modifier option
+
+	      --diff-mode
+
+	  which allows to show differences between two unrelated runs.
+	  Notice that --diff-mode option is mandatory when 
+	  the baseline report has even just one single node which has 
+	  more counts than the other.
+
 2009-06-15  Lassi A. Tuura  <lat@iki.fi>
 
 	* IgProf.cc (initialize): Start async thread only if dump file
