@@ -41,6 +41,9 @@ usage ()
                "  [-nf/--no-filter] [-lf/--list-filters]\n"
                "  { [-t/--text], [-s/--sqlite] }\n"
                "  [--libs] [--demangle] [--gdb] [-v/--verbose]\n"
+               "  [-Mc/--max-count-value <value>] [-mc/--min-count-value <value>]\n"
+               "  [-Mf/--max-calls-value <value>] [-mc/--min-calls-value <value>]\n"
+               "  [-Ma/--max-average-value <value>] [-ma/--min-average-value <value>]\n"
                "  [--] [FILE]...\n" << std::endl;
 }
 
@@ -309,6 +312,16 @@ public:
   {
     return m_diffMode;
   }
+
+  bool hasHitFilter(void)
+  {
+    return minCountValue > 0 
+           || maxCountValue > 0
+           || minCallsValue > 0
+           || maxCallsValue > 0
+           || minAverageValue > 0
+           || maxAverageValue > 0;
+  }
 private:
   Filters m_filters;
   std::string m_key;
@@ -328,6 +341,13 @@ private:
   RegexpFilter *m_regexpFilter;
   std::string m_baseline;
   bool m_diffMode;
+public:
+  int64_t minCountValue;
+  int64_t maxCountValue;
+  int64_t minCallsValue;
+  int64_t maxCallsValue;
+  int64_t minAverageValue;
+  int64_t maxAverageValue;
 };
 
 Configuration::Configuration ()
@@ -345,7 +365,13 @@ Configuration::Configuration ()
   m_filtersEnabled (true),
   m_tickPeriod(0.01),
   m_regexpFilter(0),
-  m_diffMode(false)
+  m_diffMode(false),
+  minCountValue(-1),
+  maxCountValue(-1),
+  minCallsValue(-1),
+  maxCallsValue(-1),
+  minAverageValue(-1),
+  maxAverageValue(-1)
 {
 }
 
@@ -373,6 +399,69 @@ public:
   { 
     counter=-counter; freq = -freq; 
   }
+};
+
+// Filters the incoming stacktraces by the size
+// of their counters (either absolute total, average, or 
+// by the number of calls to a given stacktrace).
+// If the counter value is not within limits,
+// the the stacktrace is not accumulated in the
+// tree.
+class HitFilter : public StackTraceFilter
+{
+public:
+  HitFilter(Configuration &config)
+  :m_minValue(config.minCountValue), m_maxValue(config.maxCountValue),
+   m_minFreq(config.minCallsValue), m_maxFreq(config.maxCallsValue),
+   m_minAvg(config.minAverageValue), m_maxAvg(config.maxAverageValue)
+  {}
+
+  virtual void filter(SymbolInfo *symbol, int64_t &counter, int64_t &freq)
+  {
+    if (m_minValue > 0 && counter < m_minValue)
+    {
+      counter = 0; freq = 0;    
+      return;
+    }
+
+    if (m_maxValue > 0 && counter > m_maxValue)
+    {
+      counter = 0; freq = 0;    
+      return;
+    }
+
+    if (m_minFreq > 0 && freq < m_minFreq)
+    {
+      counter = 0; freq = 0;    
+      return;
+    }
+    
+    if (m_maxFreq > 0 && freq > m_maxFreq)
+    {
+      counter = 0; freq = 0;
+      return;
+    }
+
+    if (m_minAvg > 0 && freq && (counter/freq < m_minAvg))
+    {
+      counter = 0; freq = 0;    
+      return;
+    }                           
+
+    if (m_maxAvg > 0 && freq && (counter/freq > m_maxAvg))
+    {
+      counter = 0; freq = 0;
+      return;
+    }
+  }
+
+private:
+  int64_t m_minValue;
+  int64_t m_maxValue;
+  int64_t m_minFreq;
+  int64_t m_maxFreq;
+  int64_t m_minAvg;
+  int64_t m_maxAvg;
 };
 
 class TreeMapBuilderFilter;
@@ -3017,11 +3106,15 @@ IgProfAnalyzerApplication::run (void)
   }
 
   std::cerr << "Reading profile data" << std::endl;
+  StackTraceFilter *stackTraceFilter = 0;
+  if (m_config->hasHitFilter())
+    stackTraceFilter = new HitFilter (*m_config);
+
   for (ArgsList::const_iterator profileFilename = firstFile;
        profileFilename != args.end();
        profileFilename++)
   {
-    this->readDump (*prof, *profileFilename);
+    this->readDump (*prof, *profileFilename, stackTraceFilter);
     verboseMessage ("");
   }
 
@@ -3051,6 +3144,17 @@ IgProfAnalyzerApplication::run (void)
     analyse (*prof, baselineBuilder);
 }
 
+
+int64_t
+parseOptionToInt(const std::string &valueString, const char *msg)
+{
+  char *endptr;
+  int64_t value = strtoll(valueString.c_str(), &endptr, 10);
+  if (endptr && *endptr == 0)
+    return value;
+  std::cerr << "Error, " << msg << " expects an integer." << std::endl;
+  exit(1);
+}
 
 IgProfAnalyzerApplication::ArgsList::const_iterator
 IgProfAnalyzerApplication::parseArgs (const ArgsList &args)
@@ -3207,6 +3311,18 @@ IgProfAnalyzerApplication::parseArgs (const ArgsList &args)
     {
       m_config->setDiffMode (true);
     }
+    else if (is ("--max-count-value", "-Mc") && left (arg))
+      m_config->maxCountValue = parseOptionToInt(*(++arg), "--max-value / -Mc");
+    else if (is ("--min-count-value", "-mc"))
+      m_config->minCountValue = parseOptionToInt(*(++arg), "--min-value / -mc");
+    else if (is ("--max-calls-value", "-Mf") && left (arg))
+      m_config->maxCallsValue = parseOptionToInt(*(++arg), "--max-calls-value / -Mf");
+    else if (is ("--min-calls-value", "-mf") && left (arg))
+      m_config->minCallsValue = parseOptionToInt(*(++arg), "--min-calls-value / -mf");
+    else if (is ("--max-average-value", "-Ma") && left (arg))
+      m_config->maxAverageValue = parseOptionToInt(*(++arg), "--max-average-value / -Ma");
+    else if (is ("--min-average-value", "-ma") && left (arg))
+      m_config->minAverageValue = parseOptionToInt(*(++arg), "--min-average-value / -ma");
     else if (is ("--"))
     {
       ASSERT (false);

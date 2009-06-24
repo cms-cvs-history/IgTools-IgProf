@@ -1,3 +1,15 @@
+2009-06-23  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* IgProfAnalyse.cc: new stacktrace filtering possibilities 
+	  added. In particular possible to filter:
+
+	    * counters that have more / less accumulated counts 
+	      than what specified by --min-count-value / --max-count-value.
+	    * counters that have more / less calls than what specified
+	      by --min-calls-vales / --max-call-value.
+	    * counters that have more / less average count size value than
+	      what specified by --min-average-value / --max-average-value.
+
 2009-06-18  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* IgProfAnalyse.cc, IgProfAnalyse.h: general clean up of source,
