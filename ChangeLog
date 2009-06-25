@@ -1,3 +1,9 @@
+2009-06-25  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* IgProfAnalyse.cc, IgProfAnalyse.h: massive indentation and 
+	  formatting fixes to align to whatever is used in 
+	  igprof / IgHook.
+
 2009-06-23  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* IgProfAnalyse.cc: new stacktrace filtering possibilities 

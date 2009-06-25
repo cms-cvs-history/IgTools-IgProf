@@ -47,7 +47,7 @@ bool isWhitespace(char c)
 class PipeReader
 {
 public:
-  PipeReader (const std::string &args, lat::IOChannel *source=0)
+  PipeReader(const std::string &args, lat::IOChannel *source=0)
     : m_argz(args),
       m_is(0),
       m_isbuf(0),
@@ -66,14 +66,14 @@ public:
     { 
       m_cmd = new lat::SubProcess(m_argz.argz(), 
                                 lat::SubProcess::One | lat::SubProcess::Read | lat::SubProcess::NoCloseError,
-                                source, m_pipe.sink (), &s_stderr);
+                                source, m_pipe.sink(), &s_stderr);
     }
-    m_is = new lat::IOChannelInputStream(m_pipe.source ());
+    m_is = new lat::IOChannelInputStream(m_pipe.source());
     m_isbuf = new lat::InputStreamBuf(m_is);
-    m_istd  = new std::istream (m_isbuf);    
+    m_istd  = new std::istream(m_isbuf);    
   }
   
-  ~PipeReader (void)
+  ~PipeReader(void)
   {
     if (m_pipe.source()) {
       m_pipe.source()->close();
@@ -84,7 +84,7 @@ public:
     delete m_cmd;
  }
   
-  std::istream &output (void)
+  std::istream &output(void)
   {
     return *m_istd;
   }
@@ -123,7 +123,7 @@ public:
   typedef int Offset;
 private:
   struct CacheItem {
-    CacheItem (Offset offset, const std::string &name)
+    CacheItem(Offset offset, const std::string &name)
     :OFFSET(offset), NAME(name) {};
     Offset OFFSET;
     std::string NAME;
@@ -142,9 +142,9 @@ private:
   };
 public:
   std::string NAME;
-  FileInfo (void) : NAME ("<dynamically generated>") {}
-  FileInfo (const std::string &name, bool useGdb)
-  : NAME (name)
+  FileInfo(void) : NAME("<dynamically generated>") {}
+  FileInfo(const std::string &name, bool useGdb)
+  : NAME(name)
   {
     if (useGdb)
     {
@@ -182,7 +182,7 @@ public:
     return i->OFFSET;      
   }
 private:
-  void createOffsetMap (void)
+  void createOffsetMap(void)
   {
     // FIXME: On macosx we should really use otool
     #ifndef __APPLE__
@@ -239,11 +239,11 @@ private:
     while (nm.output())
     {
       std::string line;
-      std::getline(nm.output (), line);
+      std::getline(nm.output(), line);
     
       if (!nm.output()) break;
       if (line.empty()) continue;
-      // If line does not match "^(\\d+) \\S (\S+)$", exit.
+      // If line does not match "^(\\d+)[ ]\\S[ ](\S+)$", exit.
       const char *begin = line.c_str();
       char *endptr = 0;
       int address = strtol(begin, &endptr, 10);
