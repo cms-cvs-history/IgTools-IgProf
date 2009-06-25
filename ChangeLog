@@ -1,5 +1,10 @@
 2009-06-25  Giulio Eulisse <giulio.eulisse@cern.ch>
 
+	* IgProfAnalyse.h: fixes formatting of negative numbers.
+
+	* IgProfAnalyse.cc: fixes formatting of progress counter if
+	  a baseline is specified.
+
 	* IgProfAnalyzer.cc: Fixes regression reported by Pete.
 	  The problem was that the logic to determine which counter
 	  to pick up by default if no counters are specified has to
@@ -8,8 +13,8 @@
 
 	* IgProfAnalyzer.cc: remove useless static variable.
 
-	* IgProfAnalyse.cc, IgProfAnalyse.h: massive indentation and 
-	  formatting fixes to align to whatever is used in 
+	* IgProfAnalyse.cc, IgProfAnalyse.h: massive indentation and
+	  formatting fixes to align to whatever is used in
 	  igprof / IgHook.
 
 2009-06-23  Giulio Eulisse <giulio.eulisse@cern.ch>

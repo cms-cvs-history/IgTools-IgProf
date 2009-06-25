@@ -500,11 +500,12 @@ std::string
 thousands(double value, int leftPadding, int decimalPositions)
 {
   value = round(value * 100.) / 100.;
+  decimalPositions += value < 0 ? 1 : 0;
   int padding = leftPadding-decimalPositions;
   std::string result = thousands(int64_t(value), padding > 0 ? padding : 0);
   ASSERT(decimalPositions < 63);
   char buffer[64];
-  double decimal = value-int64_t(value);
+  double decimal = fabs(value-int64_t(value));
   sprintf(buffer+1, "%.2f", decimal);
   buffer[decimalPositions+3] = 0;
   return result + &buffer[2];

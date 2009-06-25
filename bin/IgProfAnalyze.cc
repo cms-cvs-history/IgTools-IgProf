@@ -3114,6 +3114,7 @@ IgProfAnalyzerApplication::run(void)
     //prepdata(*prof);
     baselineBuilder = new TreeMapBuilderFilter(prof, m_config);
     walk(prof->spontaneous(), baselineBuilder);
+    std::cerr << std::endl;
   }
 
   std::cerr << "Reading profile data" << std::endl;
