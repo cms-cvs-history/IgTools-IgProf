@@ -1,5 +1,13 @@
 2009-06-25  Giulio Eulisse <giulio.eulisse@cern.ch>
 
+	* IgProfAnalyzer.cc: Fixes regression reported by Pete.
+	  The problem was that the logic to determine which counter
+	  to pick up by default if no counters are specified has to
+	  be moved right after the baseline is read in, otherwise
+	  things fails if no explicit `-r PERF_TICKS` is specified.
+
+	* IgProfAnalyzer.cc: remove useless static variable.
+
 	* IgProfAnalyse.cc, IgProfAnalyse.h: massive indentation and 
 	  formatting fixes to align to whatever is used in 
 	  igprof / IgHook.

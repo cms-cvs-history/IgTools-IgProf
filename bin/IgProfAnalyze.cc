@@ -1138,11 +1138,7 @@ protected:
     memset(SELF_KEY, 0, 3*sizeof(int64_t));
     memset(CUM_KEY, 0, 3*sizeof(int64_t));
   }
-private:
-  static int s_keyId;
 };
-
-int FlatInfo::s_keyId = -1;
 
 class SymbolInfoFactory 
 {
@@ -1327,7 +1323,8 @@ class TreeMapBuilderFilter : public IgProfFilter
 {
 public:
   TreeMapBuilderFilter(ProfileInfo *prof, Configuration *config)
-    :m_prof(prof), m_zeroCounter(-1), m_flatMap(new FlatInfoMap), m_firstInfo(0) {
+    :m_prof(prof), m_zeroCounter(-1), m_flatMap(new FlatInfoMap), m_firstInfo(0) 
+  {
     int id = Counter::getIdForCounterName(config->key());
     ASSERT(id != -1);
     m_keyId = id;
@@ -1954,6 +1951,18 @@ parseLeak(const char *lineStart, Position &pos, int &leakAddress, int64_t &leakS
 }
 
 void
+printAvailableCounters(const Counter::IdCache &cache)
+{
+  typedef Counter::IdCache::const_iterator iterator;
+  lat::StringList tempList;
+  for (iterator i = cache.begin(); i != cache.end(); i++)
+  { tempList.push_back((*i).first); }
+  std::cerr << "No profile counter selected for reporting, please select one of: "
+            << lat::StringOps::join(tempList, std::string(",")) << std::endl;
+  exit(1);
+}
+
+void
 IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filename, StackTraceFilter *filter)
 {
   ProfileInfo::Nodes &nodes = prof.nodes();
@@ -2108,18 +2117,20 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
     }
     lineCount++;
   }
-}
 
-void
-printAvailableCounters(const Counter::IdCache &cache)
-{
-  typedef Counter::IdCache::const_iterator iterator;
-  lat::StringList tempList;
-  for (iterator i = cache.begin(); i != cache.end(); i++)
-  { tempList.push_back((*i).first); }
-  std::cerr << "No profile counter selected for reporting, please select one of: "
-            << lat::StringOps::join(tempList, std::string(",")) << std::endl;
-  exit(1);
+  if (!Counter::countersByName().size())
+  {
+    std::cerr << "No counter values in profile data." << std::endl;
+    exit(1);
+  }
+ 
+  if (m_config->key() == "")
+  {
+    if (Counter::countersByName().size() > 1)
+      printAvailableCounters(Counter::countersByName());
+    else
+      m_config->setKey((*(Counter::countersByName().begin())).first);
+  }
 }
 
 template <class T>
@@ -3118,19 +3129,6 @@ IgProfAnalyzerApplication::run(void)
     verboseMessage("");
   }
 
-  if (!Counter::countersByName().size())
-  { 
-    std::cerr << "No counter values in profile data." << std::endl; 
-    exit(1);
-  }
-  
-  if (m_config->key() == "")
-  {
-    if (Counter::countersByName().size() > 1)
-      printAvailableCounters(Counter::countersByName());
-    else
-      m_config->setKey((*(Counter::countersByName().begin())).first);
-  }
   if (! m_config->isShowCallsDefined())
   {
     if (lat::StringOps::contains(m_config->key(), "MEM_"))
