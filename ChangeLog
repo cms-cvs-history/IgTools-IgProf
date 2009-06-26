@@ -1,5 +1,8 @@
 2009-06-26  Giulio Eulisse <giulio.eulisse@cern.ch>
-	
+
+	* IgProfAnalyse.h, IgProfAnalyse.cc, IgResolveSymbols.h: fix more 
+	  indentation / formatting issues.
+
 	* IgProfAnalyse.cc: fixes another regression in building reports
 	  which was introduce by revision 1.70.
 

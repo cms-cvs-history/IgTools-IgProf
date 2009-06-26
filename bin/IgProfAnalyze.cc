@@ -99,7 +99,7 @@ public:
       for (Nodes::const_iterator i = CHILDREN.begin();
            i != CHILDREN.end();
            i++)
-      {(*i)->printDebugInfo(level+1);}
+        (*i)->printDebugInfo(level+1);
     }
   
   Counter &counter(const std::string &name)
@@ -115,17 +115,21 @@ public:
   void removeChild(NodeInfo *node) {
     ASSERT(node);
     Nodes::iterator new_end = std::remove_if(CHILDREN.begin(), 
-                                              CHILDREN.end(), 
-                                              std::bind2nd(std::equal_to<NodeInfo *>(), node));
+                                             CHILDREN.end(), 
+                                             std::bind2nd(std::equal_to<NodeInfo *>(), node));
     if (new_end != CHILDREN.end())
-    { CHILDREN.erase(new_end, CHILDREN.end()); }
+      CHILDREN.erase(new_end, CHILDREN.end()); 
   }
   
   SymbolInfo *symbol(void) const
-    { return m_reportSymbol ? m_reportSymbol : SYMBOL; }
+    { 
+      return m_reportSymbol ? m_reportSymbol : SYMBOL; 
+    }
   
   void reportSymbol(SymbolInfo *reportSymbol)
-    { m_reportSymbol = reportSymbol; }
+    { 
+      m_reportSymbol = reportSymbol; 
+    }
   
   SymbolInfo *reportSymbol(void) const
     {
@@ -224,10 +228,10 @@ public:
   
   void addFilter(IgProfFilter *filter) {
     if (m_filtersEnabled)
-    { m_filters.push_back(filter); }
+      m_filters.push_back(filter); 
   }
 
-  void setKey(const std::string &value) {m_key = value; };
+  void setKey(const std::string &value) { m_key = value; };
   bool hasKey(void) { return ! m_key.empty(); }
   std::string key(void) { return m_key; }
   int keyId(void) 
@@ -263,16 +267,16 @@ public:
   void setOutputType(enum OutputType value) { m_outputType = value; }
   OutputType outputType(void) { return m_outputType; }
 
-  void setOrdering(enum Ordering value) {m_ordering = value; }
+  void setOrdering(enum Ordering value) { m_ordering = value; }
   Ordering ordering(void) { return m_ordering; }
 
-  void setNormalValue(bool value) {m_normalValue = value; }
-  bool normalValue(void) {return m_normalValue; }
+  void setNormalValue(bool value) { m_normalValue = value; }
+  bool normalValue(void) { return m_normalValue; }
  
-  void setTickPeriod(float value) {m_tickPeriod = value; }
+  void setTickPeriod(float value) { m_tickPeriod = value; }
   float tickPeriod(void) {return m_tickPeriod; }
   
-  void setMergeLibraries(bool value) {m_mergeLibraries = value; }
+  void setMergeLibraries(bool value) { m_mergeLibraries = value; }
   bool mergeLibraries(void) { return m_mergeLibraries; }
 
   void setRegexpFilter(RegexpFilter *filter)
@@ -372,8 +376,7 @@ Configuration::Configuration()
    maxCallsValue(-1),
    minAverageValue(-1),
    maxAverageValue(-1)
-{
-}
+{}
 
 class StackTraceFilter
 {
@@ -490,8 +493,7 @@ IgProfAnalyzerApplication::IgProfAnalyzerApplication(int argc, const char **argv
   :m_config(new Configuration()),
    m_argc(argc),
    m_argv(argv)
-{
-}
+{}
 
 float
 parseHeaders(const std::string &headerLine)
@@ -583,8 +585,8 @@ symlookup(FileInfo *file, int fileoff, const std::string& symname, bool useGdb)
 
 void
 printSyntaxError(const std::string &text, 
-                  const std::string &filename, 
-                  int line, int position)
+                 const std::string &filename, 
+                 int line, int position)
 {
   std::cerr << filename << ":" << "line " << line
             << ", character " << position <<" unexpected input:\n"
@@ -622,8 +624,7 @@ public:
   IgProfFilter(void)
     : m_prof(0) {}
   
-  virtual void init(ProfileInfo *prof)
-    { m_prof = prof; }
+  virtual void init(ProfileInfo *prof) { m_prof = prof; }
 protected:
   ProfileInfo::Syms &syms(void) { return m_prof->syms(); }
   ProfileInfo::Nodes &nodes(void) { return m_prof->nodes(); } 
@@ -654,7 +655,7 @@ public:
     }
 
   virtual void post(NodeInfo *parent,
-                     NodeInfo *node)
+                    NodeInfo *node)
     {
       ASSERT(node);
       Counter *initialCounter = node->COUNTERS;
@@ -696,7 +697,7 @@ public:
     :m_noParentCount(0)
     {}
   virtual void post(NodeInfo *parent,
-                     NodeInfo *node)
+                    NodeInfo *node)
     {
       if (!parent) {
         m_noParentCount++;
@@ -712,7 +713,7 @@ public:
       } while (initialCounter != counter);
     }
   virtual std::string name(void) const { return "Check consitency of tree"; }
-  virtual enum FilterType type(void) const {return POST; }
+  virtual enum FilterType type(void) const { return POST; }
 private:
   int m_noParentCount;
 };
@@ -724,14 +725,19 @@ public:
     {}
 
   virtual void pre(NodeInfo *parent,
-                    NodeInfo *node)
+                   NodeInfo *node)
     {
       m_parentStack.erase(std::find(m_parentStack.begin(), m_parentStack.end(), parent), m_parentStack.end());
       m_parentStack.push_back(parent);  
     
       std::cerr << std::string(2*(m_parentStack.size()-1),' ') << node->symbol()->NAME; 
       Counter *initialCounter = node->COUNTERS;
-      if (! initialCounter) {std::cerr << std::endl; return;}
+      if (! initialCounter) 
+      { 
+        std::cerr << std::endl; 
+        return;
+      }
+
       Counter *counter= initialCounter;
       ASSERT(counter);
       do
@@ -776,10 +782,10 @@ void mergeToNode(NodeInfo *parent, NodeInfo *node)
       Counter *parentChildCounter = Counter::addCounterToRing(parentChild->COUNTERS,
                                                               nodeChildCounter->id());
       parentChildCounter->freq() += nodeChildCounter->freq();
-      if (nodeChildCounter->isMax()) {
-        if (parentChildCounter->cnt() < nodeChildCounter->cnt()) {
+      if (nodeChildCounter->isMax()) 
+      {
+        if (parentChildCounter->cnt() < nodeChildCounter->cnt())
           parentChildCounter->cnt() = nodeChildCounter->cnt();
-        }
       }
       else {
         parentChildCounter->cnt() += nodeChildCounter->cnt();
@@ -809,9 +815,7 @@ void mergeCountersToNode(NodeInfo *source, NodeInfo *dest)
   ASSERT(dest);
   int countersCount = 0;
   if (! source->COUNTERS)
-  {
     return;
-  }
 
   Counter *initialCounter = source->COUNTERS;
   ASSERT(initialCounter);
@@ -820,16 +824,15 @@ void mergeCountersToNode(NodeInfo *source, NodeInfo *dest)
   {
     ++countersCount;
     Counter *destCounter = Counter::addCounterToRing(dest->COUNTERS,
-                                                      sourceCounter->id());
+                                                     sourceCounter->id());
     ASSERT(countersCount < 32);
     ASSERT(sourceCounter);
     ASSERT(sourceCounter->freq() >= 0);
     ASSERT(sourceCounter->cnt() >= 0);
     destCounter->freq() += sourceCounter->freq();
     if (destCounter->isMax()) {
-      if (destCounter->cnt() < sourceCounter->cnt()) {
+      if (destCounter->cnt() < sourceCounter->cnt())
         destCounter->cnt() = sourceCounter->cnt();
-      }
     }
     else {
       destCounter->cnt() += sourceCounter->cnt();
@@ -988,7 +991,7 @@ class RemoveIgProfFilter : public IgProfFilter
 {
 public:
   virtual void post(NodeInfo *parent,
-                     NodeInfo *node)
+                    NodeInfo *node)
     {
       if (!parent)
         return;
@@ -1004,8 +1007,8 @@ public:
       }
     }
   
-  virtual std::string name(void) const {return "igprof remover"; }
-  virtual enum FilterType type(void) const {return POST; }
+  virtual std::string name(void) const { return "igprof remover"; }
+  virtual enum FilterType type(void) const { return POST; }
 };
 
 class RemoveStdFilter : public IgProfFilter
@@ -1014,7 +1017,7 @@ public:
   /// Merge use by C++ std namespace entities to parents.
   
   virtual void post(NodeInfo *parent,
-                     NodeInfo *node)
+                    NodeInfo *node)
     {
       if (!parent)
         return;
@@ -1080,10 +1083,10 @@ public:
       dummy.SYMBOL = symbol;
       Calls::const_iterator i = CALLS.find(&dummy);
       if (i != CALLS.end())
-      { return *i; }
-      if (!create) {
+        return *i;
+      if (!create)
         std::cerr << symbol->NAME << std::endl;
-      }
+
       ASSERT(create);
       CallInfo *callInfo = new CallInfo(symbol);
       this->CALLS.insert(callInfo);
@@ -1172,7 +1175,7 @@ public:
       // FIXME: die if exists $filebyid{$1};
       std::string absname = origname;
       if (index(origname, '/') == -1)
-      { absname = paths.which(origname); }
+        absname = paths.which(origname);
 
       absname = lat::Filename(absname).truename();
       // TODO:
@@ -1180,19 +1183,15 @@ public:
       //     if length($origname);
       FilesByName::iterator fileIter = m_namedFiles.find(absname);
       if (fileIter != m_namedFiles.end())
-      { return fileIter->second; }
+        return fileIter->second;
       else
       {
         FileInfo *file;
       
         if (lat::Filename(absname).isDirectory() == true)
-        {
           file = new FileInfo("<dynamically generated>", false);
-        }
         else 
-        {
           file = new FileInfo(absname, m_useGdb); 
-        }
  
         m_namedFiles.insert(FilesByName::value_type(absname, file));
         int oldsize = m_files.size();
@@ -1201,7 +1200,7 @@ public:
         { 
           m_files.resize(fileid + 1);
           for (int i = oldsize; i < oldsize + missingSize; i++)
-          { ASSERT(m_files[i] == 0); }
+            ASSERT(m_files[i] == 0); 
         }
         m_files[fileid] = file;
         return file;
@@ -1210,7 +1209,7 @@ public:
 
   
   SymbolInfo *createSymbolInfo(const std::string &line, unsigned int symid, 
-                                Position &pos, int lineCount)
+                               Position &pos, int lineCount)
     {
       // Regular expressions matching the file and symbolname information.
       static lat::Regexp fRE("F(\\d+)\\+(-?\\d+) N=\\((.*?)\\)\\)\\+\\d+\\s*");
@@ -1238,7 +1237,7 @@ public:
         fileoff = getIntMatch(3);
         symname = match.matchString(line, 4);
         file = createFileInfo(match.matchString(line, 2),
-                               getIntMatch(1));
+                              getIntMatch(1));
         ASSERT(file);
       }
       else
@@ -1294,8 +1293,8 @@ private:
 struct SuffixOps
 {
   static void splitSuffix(const std::string &fullSymbol, 
-                           std::string &oldSymbol, 
-                           std::string &suffix)
+                          std::string &oldSymbol, 
+                          std::string &suffix)
     {
       size_t tickPos = fullSymbol.rfind("'");
       if (tickPos == std::string::npos)
@@ -1313,7 +1312,7 @@ struct SuffixOps
     {
       size_t tickPos = fullSymbol.rfind("'");
       if (tickPos == std::string::npos)
-      { return fullSymbol; }
+        return fullSymbol;
       ASSERT(tickPos < fullSymbol.size());
       return std::string(fullSymbol.c_str(), tickPos - 1);
     }
@@ -1324,15 +1323,15 @@ class TreeMapBuilderFilter : public IgProfFilter
 public:
   TreeMapBuilderFilter(ProfileInfo *prof, Configuration *config)
     :m_prof(prof), m_zeroCounter(-1), m_flatMap(new FlatInfoMap), m_firstInfo(0) 
-  {
-    int id = Counter::getIdForCounterName(config->key());
-    ASSERT(id != -1);
-    m_keyId = id;
-    ASSERT(m_zeroCounter.ccnt() == 0);
-    ASSERT(m_zeroCounter.cfreq() == 0);
-    ASSERT(m_zeroCounter.cnt() == 0);
-    ASSERT(m_zeroCounter.freq() == 0);   
-  }
+    {
+      int id = Counter::getIdForCounterName(config->key());
+      ASSERT(id != -1);
+      m_keyId = id;
+      ASSERT(m_zeroCounter.ccnt() == 0);
+      ASSERT(m_zeroCounter.cfreq() == 0);
+      ASSERT(m_zeroCounter.cnt() == 0);
+      ASSERT(m_zeroCounter.freq() == 0);   
+    }
  
   /** Creates the GPROF like output. 
     
@@ -1365,7 +1364,7 @@ public:
 
       Counter *nodeCounter = Counter::getCounterInRing(node->COUNTERS, m_keyId);
       if (!nodeCounter) 
-      { return; }
+        return;
 
       bool isMax = nodeCounter->isMax();
 
@@ -1381,51 +1380,48 @@ public:
       
         if (isMax) 
         {
-          if (callInfo->VALUES[0] < nodeCounter->ccnt()) {
+          if (callInfo->VALUES[0] < nodeCounter->ccnt()) 
             callInfo->VALUES[0] = nodeCounter->ccnt();
-          }
         }
-        else {
+        else
           callInfo->VALUES[0] += nodeCounter->ccnt();
-        }
+        
         callInfo->VALUES[1] += nodeCounter->cfreq(); 
         callInfo->VALUES[2]++;
       }
     
       // Do SELF_KEY
-      if (isMax) {
-        if (symnode->SELF_KEY[0] < nodeCounter->cnt()) {
+      if (isMax) 
+      {
+        if (symnode->SELF_KEY[0] < nodeCounter->cnt()) 
           symnode->SELF_KEY[0] = nodeCounter->cnt();
-        }
       }
-      else {
+      else
         symnode->SELF_KEY[0] += nodeCounter->cnt();
-      }
+
       symnode->SELF_KEY[1] += nodeCounter->freq();
       symnode->SELF_KEY[2]++;
     
       // Do CUM_KEY
       if (isMax) {
-        if (symnode->CUM_KEY[0] < nodeCounter->ccnt()) {
+        if (symnode->CUM_KEY[0] < nodeCounter->ccnt())
           symnode->CUM_KEY[0] = nodeCounter->ccnt();
-        }
       }
-      else {
+      else
         symnode->CUM_KEY[0] += nodeCounter->ccnt();
-      }
+      
       symnode->CUM_KEY[1] += nodeCounter->cfreq();
       symnode->CUM_KEY[2]++;
     }
 
   virtual void post(NodeInfo *parent,
-                     NodeInfo *node)
+                    NodeInfo *node)
     {
       ASSERT(node);
       ASSERT(node->symbol());
       if (m_seen.count(node->symbol()->NAME) <= 0)
-      {
         std::cerr << "Error: " << node->symbol()->NAME << std::endl;
-      }
+      
       ASSERT(m_seen.count(node->symbol()->NAME) > 0);
       m_seen.erase(node->symbol()->NAME);
       ASSERT(m_seen.count(node->symbol()->NAME) == 0);
@@ -1455,7 +1451,7 @@ private:
       if (reportSymbol)
       {
         m_seen.insert(SeenSymbols::value_type(reportSymbol->NAME, 
-                                                reportSymbol));
+                                              reportSymbol));
         return reportSymbol;
       }
     
@@ -1474,10 +1470,10 @@ private:
         {
           SymbolInfo *originalSymbol = node->originalSymbol();
           reportSymbol = new SymbolInfo(newName.c_str(),
-                                         originalSymbol->FILE,
-                                         originalSymbol->FILEOFF);
+                                        originalSymbol->FILE,
+                                        originalSymbol->FILEOFF);
           namedSymbols.insert(SymbolInfoFactory::SymbolsByName::value_type(newName, 
-                                                                             reportSymbol));
+                                                                           reportSymbol));
         }
         else
           reportSymbol = s->second;
@@ -1486,7 +1482,7 @@ private:
       node->reportSymbol(reportSymbol);
       ASSERT(node->symbol());
       m_seen.insert(SeenSymbols::value_type(node->symbol()->NAME, 
-                                              node->symbol()));
+                                            node->symbol()));
       return node->symbol();
     }
   
@@ -1725,7 +1721,7 @@ private:
       {
         ++countersCount;
         Counter *parentCounter = Counter::addCounterToRing(parent->COUNTERS, 
-                                                            childCounter->id());
+                                                           childCounter->id());
         ASSERT(countersCount < 32);
         ASSERT(parentCounter);
         parentCounter->freq() += childCounter->freq();
@@ -1779,7 +1775,11 @@ public:
     {
       Counter *i = node->COUNTERS;
       while (i)
-      {i = i->next(); if (i == node->COUNTERS) break;}
+      {
+        i = i->next(); 
+        if (i == node->COUNTERS) 
+          break;
+      }
     }
   virtual std::string name(void) const { return "tree_info_filter"; }
   virtual enum FilterType type(void) const { return PRE; }
@@ -1799,10 +1799,13 @@ parseStackLine(const char *line, std::vector<NodeInfo *> &nodestack)
   char *endptr = 0;
   int newPosition = strtol(line+1, &endptr, 10) - 1;
   if (endptr == line+1)
-  { return 0; }
+    return 0;
 
   do 
-  { ++endptr; } while (*endptr == ' ' || *endptr == '\t');
+  { 
+    ++endptr; 
+  } 
+  while (*endptr == ' ' || *endptr == '\t');
   
   int stackSize = nodestack.size();
   ASSERT(newPosition <= stackSize);
@@ -1822,23 +1825,23 @@ parseFunctionRef(const char *lineStart, Position &pos,
   const char *line = lineStart + pos();
   // Matches "FN(\\d+)\\+\\d+\\s*" and sets symid = $1
   if (line[0] != 'F' && line[1] != 'N')
-  { return false; }
+    return false; 
   char *endptr = 0;
   int fnRef = strtol(line+2, &endptr, 10);
   if (endptr == line + 2)
-  {return false; }
+    return false; 
   if (*endptr != '+' )
-  { return false; }
+    return false; 
   char *endptr2 = 0;
   int offset = strtol(endptr, &endptr2, 10);
   if (endptr == endptr2)
-  { return false; }
+    return false; 
   
   symid = fnRef;
   fileoff = offset;
 
   while (*endptr2 == ' ' || *endptr2 == '\t')
-  { ++endptr2; }
+    ++endptr2; 
   pos(endptr2 - lineStart);
   return true;
 }
@@ -1849,15 +1852,15 @@ parseFunctionDef(const char *lineStart, Position &pos, unsigned int &symid)
   const char *line = lineStart + pos();
   // Matches FN(\\d+)=\\( and sets symid = $1
   if (line[0] != 'F' && line[1] != 'N')
-  { return false; }
+    return false;
   char *endptr = 0;
   int fnRef = strtol(line+2, &endptr, 10);
   if (endptr == line + 2)
-  {return false; }
+    return false; 
   if (*endptr++ != '=')
-  { return false; }
+    return false; 
   if (*endptr++ != '(')
-  { return false; }
+    return false; 
   
   symid = fnRef;
 
@@ -1867,44 +1870,44 @@ parseFunctionDef(const char *lineStart, Position &pos, unsigned int &symid)
 
 static bool
 parseCounterVal(const char *lineStart, Position &pos, 
-                 int &ctrid, int64_t &ctrfreq, 
-                 int64_t &ctrvalNormal, int64_t &ctrvalPeak)
+                int &ctrid, int64_t &ctrfreq, 
+                int64_t &ctrvalNormal, int64_t &ctrvalPeak)
 {
   // Matches "V(\\d+):\\((\\d+),(\\d+)(,(\\d+))?\\)\\s*" and then sets the arguments accordingly. 
   const char *line = lineStart + pos();
   
   if (line[0] != 'V')
-  { return false; }
+    return false;
   
   char *endptr = 0;
   int cntRef = strtol(++line, &endptr, 10);
   if (endptr == line || *endptr != ':' || *++endptr != '(')
-  { return false; }
+    return false;
   
   char *endptr2 = 0;
   int64_t count1 = strtoll(++endptr, &endptr2, 10);
   if (endptr2 == endptr || *endptr2 != ',')
-  { return false; }
+    return false;
 
   char *endptr3 = 0;
   int64_t count2 = strtoll(++endptr2, &endptr3, 10);
   if (endptr3 == endptr2 || *endptr3 != ',')
-  { return false; }
+    return false;
   
   char *endptr4 = 0;
   int64_t count3 = strtoll(++endptr3, &endptr4, 10);
   if (endptr3 == endptr4)
-  { return false; }
+    return false;
 
   if (*endptr4++ != ')')
-  { return false; }
+    return false;
   
   ctrid = cntRef;
   ctrfreq = count1;
   ctrvalNormal = count2;
   ctrvalPeak= count3;
   while (*endptr4 == ' ' || *endptr4 == '\t')
-  { endptr4++; }
+    endptr4++;
   pos(endptr4 - lineStart);
   return true;
 }
@@ -1922,28 +1925,28 @@ parseLeak(const char *lineStart, Position &pos, int &leakAddress, int64_t &leakS
   const char *line = lineStart + pos();
   if (*line != ';' || *++line != 'L' || *++line != 'K' || *++line != '=' 
       || *++line != '(' || *++line != '0' || *++line != 'x')
-  { return false; }
+    return false; 
   
   char *endptr = 0;
   int address = strtol(++line, &endptr, 16);
   if (endptr == line)
-  { return false; }
+    return false; 
   
   if (*endptr++ != ',')
-  { return false; }
+    return false;
   
   char *endptr2 = 0;
   int64_t size = strtoll(endptr, &endptr2, 10);
   if (endptr == line)
-  { return false; }
+    return false;
   if (*endptr2++ != ')')
-  { return false; }
+    return false;
   
   leakAddress = address;
   leakSize = size;
   
   while (*endptr2 == ' ' || *endptr2 == '\t')
-  { endptr2++; }
+    endptr2++;
   
   pos(endptr2 - lineStart);
 
@@ -1956,7 +1959,7 @@ printAvailableCounters(const Counter::IdCache &cache)
   typedef Counter::IdCache::const_iterator iterator;
   lat::StringList tempList;
   for (iterator i = cache.begin(); i != cache.end(); i++)
-  { tempList.push_back((*i).first); }
+    tempList.push_back((*i).first);
   std::cerr << "No profile counter selected for reporting, please select one of: "
             << lat::StringOps::join(tempList, std::string(",")) << std::endl;
   exit(1);
@@ -2021,7 +2024,8 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
               && parseFunctionRef(line.c_str(), pos, symid, fileoff))
     {
       sym = symbolsFactory.getSymbol(symid);
-      if (!sym) {
+      if (!sym) 
+      {
         std::cerr << "Error at line " << lineCount << ": symbol with id " 
                   << symid << " was referred before being defined in input file.\n" 
                   << "> " << line << std::endl; 
@@ -2030,9 +2034,7 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
     }
     else if (line.size() > pos()+2
              && parseFunctionDef(line.c_str(), pos, symid))
-    {
       sym = symbolsFactory.createSymbolInfo(line, symid, pos, lineCount);
-    }
     else
     {
       printSyntaxError(line, filename, lineCount, pos());
@@ -2048,7 +2050,7 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
       child = new NodeInfo(sym);
       nodes.push_back(child);
       if (parent)
-      { parent->CHILDREN.push_back(child); }
+        parent->CHILDREN.push_back(child);
     }
 
     nodestack.push_back(child);
@@ -2067,7 +2069,7 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
       int64_t leakSize;
       
       if (line.size() == pos())
-      { break; }
+        break; 
       else if (line.size() >= pos()+2
                && parseCounterVal(line.c_str(), pos, ctrid, ctrfreq, ctrvalNormal, ctrvalPeak))
       {
@@ -2085,8 +2087,8 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
         IntConverter getIntMatch(line, &match);
         ctrid = getIntMatch(1);
         Counter::addNameToIdMapping(ctrname, ctrid,
-                                     (ctrname == "PERF_TICKS" 
-                                      && ! m_config->callgrind()));
+                                    (ctrname == "PERF_TICKS" 
+                                     && ! m_config->callgrind()));
         ctrfreq = getIntMatch(3);
         ctrval = m_config->normalValue() ? getIntMatch(4)
                  : getIntMatch(6);
@@ -2110,8 +2112,12 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
       ASSERT(counter == Counter::getCounterInRing(child->COUNTERS, ctrid));
       ASSERT(counter);
     
-      if (m_config->hasKey() && ! Counter::isKey(ctrid)) continue;
-      if (filter) filter->filter(sym, ctrval, ctrfreq);
+      if (m_config->hasKey() && ! Counter::isKey(ctrid)) 
+        continue;
+
+      if (filter) 
+        filter->filter(sym, ctrval, ctrfreq);
+
       counter->freq() += ctrfreq;
       counter->cnt() += ctrval;
     }
@@ -2171,7 +2177,7 @@ public:
       ASSERT(node);
       for (NodesIterator i = node->begin(); 
            i != node->end(); i++)
-      { m_stack->push_back(Item(node, *i, 0)); }
+        m_stack->push_back(Item(node, *i, 0));
     }
   
   void addToStack(Node *parent, Node *prev)
@@ -2206,15 +2212,13 @@ void walk(T *first, Filter<T> *filter=0)
     if (node)
     {
       if ( filter->type() & FilterBase::PRE)
-      { filter->pre(parent, node); }
+        filter->pre(parent, node);
       if ( filter->type() & FilterBase::POST)
-      { manipulator.addToStack(parent, node); }
+        manipulator.addToStack(parent, node);
       manipulator.addChildrenToStack(node);
     }
     else
-    {
       filter->post(parent, item.post());
-    }
   }
 }
 
@@ -2280,11 +2284,15 @@ public:
     {
       int64_t cmp;
       cmp = cmpnodekey(a, b);
-      if (cmp > 0) return true;
-      else if (cmp < 0) return false;
+      if (cmp > 0) 
+        return true;
+      else if (cmp < 0) 
+        return false;
       cmp = cmpcallers(a, b);
-      if (cmp > 0) return true;
-      else if (cmp < 0) return false;
+      if (cmp > 0) 
+        return true;
+      else if (cmp < 0) 
+        return false;
       return strcmp(a->name(), b->name()) < 0;
     }
 protected:
@@ -2462,8 +2470,8 @@ class GProfMainRowBuilder
 {
 public:
   GProfMainRowBuilder(TreeMapBuilderFilter *flatMapBuilder,
-                       TreeMapBuilderFilter *baselineBuilder,
-                       bool diffMode)
+                      TreeMapBuilderFilter *baselineBuilder,
+                      bool diffMode)
     : m_info(0), m_row(0), m_callmax(0), 
       m_totals(0),
       m_totfreq(0),
@@ -2490,7 +2498,7 @@ public:
    
       ASSERT(thisCall);
       if (!thisCall->VALUES[0])
-      { return; }
+        return;
       OtherGProfRow *callrow = new OtherGProfRow();
       callrow->initFromInfo(origin);
   
@@ -2519,7 +2527,7 @@ public:
       FlatInfo *calleeInfo = (*m_flatMap)[thisCall->SYMBOL];
 
       if (!thisCall->VALUES[0])
-      { return; }
+        return;
 
       if (m_callmax < thisCall->VALUES[0])
         m_callmax = thisCall->VALUES[0];
@@ -2572,12 +2580,10 @@ public:
   MainGProfRow *build(bool isMax)
     {
       ASSERT(m_row);
-      if (isMax) {
+      if (isMax) 
         m_row->KIDS = m_callmax;
-      }
-      else {
+      else
         m_row->KIDS = m_info->CUM_KEY[0] - m_info->SELF_KEY[0];
-      }
       memcpy(m_row->CUM_ALL, m_info->CUM_KEY, 3*sizeof(int64_t));
       memcpy(m_row->SELF_ALL, m_info->SELF_KEY, 3*sizeof(int64_t));
       return m_row;
@@ -2619,8 +2625,10 @@ public:
                 << description << "\n\n";
       std::cout << "% total  ";
       (AlignedPrinter(m_maxval))(kind);
-      if (m_showCalls) {(AlignedPrinter(m_maxcnt))("Calls"); }
-      if (m_showPaths) {(AlignedPrinter(m_maxcnt))("Paths"); }
+      if (m_showCalls) 
+        (AlignedPrinter(m_maxcnt))("Calls");
+      if (m_showPaths) 
+        (AlignedPrinter(m_maxcnt))("Paths");
       std::cout << "Function\n";
     }
 
@@ -2663,7 +2671,8 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
   FlatVector sorted; 
   FlatInfoMap *flatMap = callTreeBuilder->flatMap();
 
-  if (flatMap->empty()) {
+  if (flatMap->empty()) 
+  {
     std::cerr << "Could not find any information to print." << std::endl; 
     exit(1);
   }
@@ -2671,14 +2680,14 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
   for (FlatInfoMap::const_iterator i = flatMap->begin();
        i != flatMap->end();
        i++)
-  { sorted.push_back(i->second); }
+    sorted.push_back(i->second);
 
   sort(sorted.begin(), sorted.end(), FlatInfoComparator(m_config->keyId(),
-                                                         m_config->ordering()));
+                                                        m_config->ordering()));
 
   
   for (FlatVector::const_iterator i = sorted.begin(); i != sorted.end(); i++)
-  {(*i)->setRank(rank++); }
+    (*i)->setRank(rank++);
   
   if (m_config->doDemangle() || m_config->useGdb())
   {
@@ -2721,12 +2730,12 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
     for (FlatInfo::Callers::const_iterator j = info->CALLERS.begin();
          j != info->CALLERS.end();
          j++)
-    { builder.addCaller(*j); }
+      builder.addCaller(*j);
 
     for (FlatInfo::Calls::const_iterator j = info->CALLS.begin();
          j != info->CALLS.end();
          j++)
-    { builder.addCallee(*j); }
+      builder.addCallee(*j);
     table.push_back(builder.build(isMax)); 
     builder.endEditing();
   }
@@ -2736,9 +2745,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
   for (FinalTable::const_iterator i = table.begin();
        i != table.end();
        i++)
-  {
     selfSortedTable.push_back(*i);
-  }
  
   stable_sort(selfSortedTable.begin(), selfSortedTable.end(), SortRowBySelf());
    
@@ -2752,14 +2759,12 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
     float tickPeriod = m_config->tickPeriod();
 
     int maxcnt=0;
-    if (isPerfTicks && ! m_config->callgrind()) {
+    if (isPerfTicks && ! m_config->callgrind())
       maxcnt = max(8, max(thousands(static_cast<double>(totals) * tickPeriod, 0, 2).size(), 
-                            thousands(static_cast<double>(totfreq) * tickPeriod, 0, 2).size()));
-    }
-    else {
+                          thousands(static_cast<double>(totfreq) * tickPeriod, 0, 2).size()));
+    else
       maxcnt = max(8, max(thousands(totals).size(), 
-                            thousands(totfreq).size()));
-    }
+                          thousands(totfreq).size()));
     int maxval = maxcnt + (isPerfTicks ? 1 : 0);
 
     std::string basefmt = isPerfTicks ? "%.2f" : "%s";
@@ -2782,16 +2787,17 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
       else
         printf("%7.1f  ", row.PCT);
       
-      if (isPerfTicks && ! m_config->callgrind()) {
+      if (isPerfTicks && ! m_config->callgrind())
         printf("%*s  ", maxval, thousands(static_cast<double>(row.CUM) * tickPeriod, 0, 2).c_str());
-      } else {
+      else
         printf("%*s  ", maxval, thousands(row.CUM).c_str());
-      }
+
       PrintIf p(maxcnt);
       p(showcalls, thousands(row.CUM_ALL[1]));
       p(showpaths, thousands(row.SELF_ALL[2]));
       printf("%s [%d]", row.name(), row.rank());
-      if (showlibs) { std::cout << row.filename(); }
+      if (showlibs) 
+        std::cout << row.filename();
       std::cout << "\n";
       if ((row.PCT < 1. && !diffMode) || row.CUM == 0)
         break;
@@ -2818,17 +2824,17 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
         printf("%7.2f  ", pct);
       }
 
-      if (isPerfTicks && ! m_config->callgrind()) {
+      if (isPerfTicks && ! m_config->callgrind())
         printf("%*s  ", maxval, thousands(static_cast<double>(row.SELF) * tickPeriod, 0, 2).c_str());
-      }
-      else {
+      else
         printf("%*s  ", maxval, thousands(row.SELF).c_str());
-      }
+      
       PrintIf p(maxcnt);
       p(showcalls, thousands(row.SELF_ALL[1]));
       p(showpaths, thousands(row.SELF_ALL[2]));
       printf("%s [%d]", row.name(), row.rank());
-      if (showlibs) { std::cout << row.filename(); }
+      if (showlibs) 
+        std::cout << row.filename();
       std::cout << "\n";
       if ((pct < 0.01 && !diffMode) || row.SELF == 0)
         break;
@@ -2845,7 +2851,8 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
                        + (showpaths ? 1 : 0)*(2*maxcnt+5);
       
       std::cout << "\n";
-      for (int x = 0 ; x <((1+divlen)/2); x++) {printf("- "); }
+      for (int x = 0 ; x <((1+divlen)/2); x++) 
+        printf("- ");
       std::cout << std::endl;
 
       MainGProfRow &mainRow = **i;
@@ -2857,11 +2864,19 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
         (AlignedPrinter(maxval))("Self");
         valfmt("Self", "Children");
         printf("  ");
-        if (showcalls) {cntfmt("Calls", "Total"); printf("  ");}
+        if (showcalls) 
+        { 
+          cntfmt("Calls", "Total"); 
+          printf("  ");
+        }
         
-        if (showpaths) {cntfmt("Paths", "Total"); printf("  ");}
+        if (showpaths) 
+        {
+          cntfmt("Paths", "Total"); 
+          printf("  ");
+        }
+
         printf("Function\n");
-      
       } 
       
       for (MainGProfRow::Callers::const_iterator c = mainRow.CALLERS.begin();
@@ -2874,37 +2889,33 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
         if (diffMode)
           printf("      -  ");
         else
-        {
           printf("%7.1f  ", row.PCT);
-        }
 
         ASSERT(maxval);
         std::cout << std::string(maxval, '.') << "  ";
         if (isPerfTicks && ! m_config->callgrind()) 
-        {
           valfmt(thousands(static_cast<double>(row.SELF_COUNTS) * tickPeriod, 0, 2), 
-                  thousands(static_cast<double>(row.CHILDREN_COUNTS) * tickPeriod, 0, 2));
-        } 
+                 thousands(static_cast<double>(row.CHILDREN_COUNTS) * tickPeriod, 0, 2));
         else 
-        {
           valfmt(thousands(row.SELF_COUNTS), thousands(row.CHILDREN_COUNTS));
-        }
         
         printf("  ");
         if (showcalls) 
         { 
           cntfmt(thousands(row.SELF_CALLS), 
-                  thousands(row.TOTAL_CALLS));
+                 thousands(row.TOTAL_CALLS));
           printf("  ");
         }
+  
         if (showpaths)
         {
           cntfmt(thousands(row.SELF_PATHS), 
-                  thousands(row.TOTAL_PATHS));
+                 thousands(row.TOTAL_PATHS));
           printf("  ");
         }
         printf("  %s [%d]", row.name(), row.rank());
-        if (showlibs) {std::cout << "  " << row.filename(); }
+        if (showlibs) 
+          std::cout << "  " << row.filename();
         std::cout << "\n";
       }
       
@@ -2914,30 +2925,36 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
       if (diffMode)
         printf("      -  ");
       else
-      {
         printf("%7.1f  ", mainRow.PCT);
-      }
 
-      if (isPerfTicks && ! m_config->callgrind()) {
+      if (isPerfTicks && ! m_config->callgrind()) 
+      {
         (AlignedPrinter(maxval))(thousands(static_cast<double>(mainRow.CUM) * tickPeriod, 0, 2));
         valfmt(thousands(static_cast<double>(mainRow.SELF) * tickPeriod, 0, 2),
-                thousands(static_cast<double>(mainRow.KIDS) * tickPeriod, 0, 2));
+               thousands(static_cast<double>(mainRow.KIDS) * tickPeriod, 0, 2));
       }
-      else {
+      else 
+      {
         (AlignedPrinter(maxval))(thousands(mainRow.CUM));
         valfmt(thousands(mainRow.SELF), thousands(mainRow.KIDS));
       }
       printf("  ");
       if (showcalls) 
-      {(AlignedPrinter(maxcnt))(thousands(mainRow.CUM_ALL[1]));
-      (AlignedPrinter(maxcnt))(""); printf(" "); }
+      {
+        (AlignedPrinter(maxcnt))(thousands(mainRow.CUM_ALL[1]));
+        (AlignedPrinter(maxcnt))(""); printf(" "); 
+      }
       if (showpaths)
-      {(AlignedPrinter(maxcnt))(thousands(mainRow.SELF_ALL[2]));
-      (AlignedPrinter(maxcnt))(""); printf(" "); }
+      {
+        (AlignedPrinter(maxcnt))(thousands(mainRow.SELF_ALL[2]));
+        (AlignedPrinter(maxcnt))(""); printf(" "); 
+      }
       
       std::cout << mainRow.name();
       
-      if (showlibs) { std::cout << mainRow.filename(); }
+      if (showlibs) 
+        std::cout << mainRow.filename();
+
       std::cout << "\n";
       
       for (MainGProfRow::Calls::const_iterator c = mainRow.CALLS.begin();
@@ -2949,36 +2966,34 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
         if (diffMode)
           printf("      -  ");
         else
-        {
           printf("%7.1f  ", row.PCT);
-        }
         
         std::cout << std::string(maxval, '.') << "  ";
         
-        if (isPerfTicks && ! m_config->callgrind()) {
+        if (isPerfTicks && ! m_config->callgrind()) 
           valfmt(thousands(static_cast<double>(row.SELF_COUNTS) * tickPeriod, 0, 2),
-                  thousands(static_cast<double>(row.CHILDREN_COUNTS) * tickPeriod, 0, 2));
-        } else {
+                 thousands(static_cast<double>(row.CHILDREN_COUNTS) * tickPeriod, 0, 2));
+        else
           valfmt(thousands(row.SELF_COUNTS), thousands(row.CHILDREN_COUNTS));
-        }
         
         printf("  ");
         
         if (showcalls) 
         { 
           cntfmt(thousands(row.SELF_CALLS), 
-                  thousands(row.TOTAL_CALLS)); 
+                 thousands(row.TOTAL_CALLS)); 
           printf("  ");
         }
         if (showpaths)
         {
           cntfmt(thousands(row.SELF_PATHS), 
-                  thousands(row.TOTAL_PATHS));
+                 thousands(row.TOTAL_PATHS));
           printf("  ");
         }
         printf("  %s [%d]", row.name(), row.rank());
     
-        if (showlibs) {std::cout << "  " << row.filename(); }
+        if (showlibs) 
+          std::cout << "  " << row.filename();
         std::cout << "\n";
       }
     }
@@ -3095,9 +3110,8 @@ IgProfAnalyzerApplication::run(void)
 {
   ArgsList args; 
   for (int i = 0; i < m_argc; i++) 
-  {
     args.push_back(m_argv[i]);
-  }
+  
   m_config->addFilter(new RemoveIgProfFilter());
 
   ArgsList::const_iterator firstFile = this->parseArgs(args);
@@ -3169,7 +3183,7 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
     if (is("--help"))
     { usage(); exit(1); }
     else if (is("--verbose", "-v"))
-    { m_config->setVerbose(true); }
+      m_config->setVerbose(true);
     else if (is("--report", "-r") && left(arg))
     {
       std::string key = *(++arg);
@@ -3182,23 +3196,27 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
     else if (is("--value") && left(arg) > 1)
     {
       std::string type = *(++arg);
-      if (type == "peak") {m_config->setNormalValue(false);}
-      else if (type == "normal") {m_config->setNormalValue(true);}
-      else {
+      if (type == "peak") 
+        m_config->setNormalValue(false);
+      else if (type == "normal") 
+        m_config->setNormalValue(true);
+      else 
+      {
         std::cerr << "Unexpected --value argument " << type << std::endl;
         exit(1);
       }
     }
     else if (is("--merge-libraries", "-ml"))
-    {
       m_config->setMergeLibraries(true);
-    }
     else if (is("--order", "-o"))
     {
       std::string order = *(arg++);
-      if (order == "ascending") {m_config->setOrdering(Configuration::ASCENDING);}
-      else if (order == "descending") {m_config->setOrdering(Configuration::DESCENDING);}
-      else {
+      if (order == "ascending") 
+        m_config->setOrdering(Configuration::ASCENDING);
+      else if (order == "descending") 
+        m_config->setOrdering(Configuration::DESCENDING);
+      else 
+      {
         std::cerr << "Unexpected --order / -o argument " << order << std::endl;
         exit(1);
       }
@@ -3236,9 +3254,7 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
       // exit(0);
     }
     else if (is("--libs", "-l"))
-    {
       m_config->setShowLib(true);
-    }
     else if (is("--callgrind", "-C"))
     {
       ASSERT(false);
@@ -3246,21 +3262,17 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
       // { $callgrind = 1; shift(@ARGV); }
     }
     else if (is("--text", "-t"))
-    { m_config->setOutputType(Configuration::TEXT); }
+      m_config->setOutputType(Configuration::TEXT);
     else if (is("--sqlite", "-s"))
-    { m_config->setOutputType(Configuration::SQLITE); }
+      m_config->setOutputType(Configuration::SQLITE);
     else if (is("--demangle", "-d"))
-    { m_config->setDoDemangle(true); }
+      m_config->setDoDemangle(true);
     else if (is("--gdb", "-g"))
-    { m_config->setUseGdb(true); }
+      m_config->setUseGdb(true);
     else if (is("--paths", "-p"))
-    {
       m_config->setShowPaths(true);
-    }
     else if (is("--calls", "-c"))
-    {
       m_config->setShowCalls(true);
-    }
     else if (is("--merge-regexp", "-mr") && left(arg))
     {
       std::string re = *(++arg);
@@ -3294,9 +3306,7 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
           exit(1);
         }
         if (*regexpOption && *regexpOption++ != ';')
-        {
           std::cerr << "Error in regular expression: " << regexpOption << std::endl;
-        }
         filter->addSubstitution(new lat::Regexp(re), with);
       }
 
@@ -3308,9 +3318,7 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
       m_config->setBaseline(baseline);
     }
     else if (is("--diff-mode", "-D"))
-    {
       m_config->setDiffMode(true);
-    }
     else if (is("--max-count-value", "-Mc") && left(arg))
       m_config->maxCountValue = parseOptionToInt(*(++arg), "--max-value / -Mc");
     else if (is("--min-count-value", "-mc"))
@@ -3367,21 +3375,21 @@ main(int argc, const char **argv)
   catch(lat::Error &e) {
 
     std::cerr << "Internal error \"" << e.explain() << "\".\n"
-                 "Oh my, you have found a bug in igprof-analyse!\n"
-                 "Please file a bug report and some mean to reproduce it to:\n\n"
-                 "  https://savannah.cern.ch/bugs/?group=cmssw\n\n" << std::endl;
+      "Oh my, you have found a bug in igprof-analyse!\n"
+      "Please file a bug report and some mean to reproduce it to:\n\n"
+      "  https://savannah.cern.ch/bugs/?group=cmssw\n\n" << std::endl;
   }
   catch(std::exception &e) {
     std::cerr << "Internal error: \"" << e.what() << "\".\n"
-                 "\nOh my, you have found a bug in igprof-analyse!\n"
-                 "Please file a bug report and some mean to reproduce it to:\n\n"
-                 "  https://savannah.cern.ch/bugs/?group=cmssw\n\n" << std::endl;
+      "\nOh my, you have found a bug in igprof-analyse!\n"
+      "Please file a bug report and some mean to reproduce it to:\n\n"
+      "  https://savannah.cern.ch/bugs/?group=cmssw\n\n" << std::endl;
   }
   catch(...) 
   {
     std::cerr << "Internal error.\n"
-                 "Oh my, you have found a bug in igprof-analyse!\n"
-                 "Please file a bug report and some mean to reproduce it to:\n\n"
-                 "  https://savannah.cern.ch/bugs/?group=cmssw\n\n" << std::endl;
+      "Oh my, you have found a bug in igprof-analyse!\n"
+      "Please file a bug report and some mean to reproduce it to:\n\n"
+      "  https://savannah.cern.ch/bugs/?group=cmssw\n\n" << std::endl;
   }
 }

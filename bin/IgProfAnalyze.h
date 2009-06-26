@@ -68,8 +68,7 @@ public:
       m_freqs(freqs),
       m_cumulativeCounts(0),
       m_cumulativeFreqs(0)
-    { 
-    }
+    {} 
   
   Counter(const std::string &counterName, StorageType counts=0, StorageType freqs=0)
     {
@@ -85,7 +84,7 @@ public:
                 << " Cumulative Freqs: " << m_cumulativeFreqs << std::endl;
     }
   
-  Counter *next(void) {return m_next; }
+  Counter *next(void) { return m_next; }
   void setNext(Counter *next) { m_next = next; }
 
   int id(void) {return m_type; }
@@ -121,12 +120,12 @@ public:
       }
     
       if (name.find("_MAX") != std::string::npos)
-      { s_isMaxMask |= 1 << id; }
+        s_isMaxMask |= 1 << id;
       countersByName().insert(Counter::IdCache::value_type(name, id));
       if (isTick)
-      { s_ticksCounterId = id; }
+        s_ticksCounterId = id;
       if (s_keyName == name)
-      { s_keyValue = id; }
+        s_keyValue = id;
     }
 
   static int isMax(const std::string &name)
@@ -150,8 +149,8 @@ public:
   static int ringSize(Counter *initialCounter)
     {
       Counter *i = initialCounter;
-      if (! i)
-      { return 0; }
+      if (!i)
+        return 0;
     
       int size = 1;
       while (i->next() != initialCounter)
@@ -166,12 +165,17 @@ public:
   static Counter *addCounterToRing(Counter *&initialCounter, int id)
     {
       Counter *counter = Counter::getCounterInRing(initialCounter, id);
-      if (counter) { return counter; }
+
+      if (counter) 
+        return counter;
+
       counter = new Counter(id);
+
       if (! initialCounter)
-      { initialCounter = counter; }
+        initialCounter = counter;
       else
-      { initialCounter->add(counter); }
+        initialCounter->add(counter);
+
       return counter;
     }
 
@@ -189,10 +193,13 @@ public:
         ASSERT(i->next());
         if (id == -1 || (i->id() == id))
         {
-          if (pop && (i == i->next())) { initialCounter = 0; }
-          else if (pop && prev) { 
+          if (pop && (i == i->next())) 
+            initialCounter = 0;
+          else if (pop && prev) 
+          { 
             prev->setNext(i->next()); 
-            if (i == initialCounter) initialCounter = prev;
+            if (i == initialCounter) 
+              initialCounter = prev;
           } 
           return i;
         }
@@ -248,9 +255,11 @@ class NameChecker
 {
 public:
   NameChecker(const std::string& arg) : m_arg(arg) {};
-  bool operator()(const char *fullname) {return m_arg == fullname; }
+  bool operator()(const char *fullname) { return m_arg == fullname; }
   bool operator()(const char *fullname, const char *abbr)
-    { return(m_arg == fullname) || (m_arg == abbr); }
+    { 
+      return (m_arg == fullname) || (m_arg == abbr); 
+    }
 private:
   const std::string m_arg; 
 };
@@ -281,8 +290,7 @@ public:
       m_lastInBuffer(INITIAL_BUFFER_SIZE),
       m_eof(false),
       m_bufferSize(INITIAL_BUFFER_SIZE)
-    {
-    }
+    {}
   
   virtual ~FileOpener(void)
     {
@@ -331,14 +339,10 @@ public:
       ASSERT(remainingsSize <= m_bufferSize);
 
       if (remainingsSize == m_bufferSize)
-      {
         resizeBuffer(remainingsSize * 2);
-      }
 
       if (remainingsSize)
-      {
         memmove(m_buffer, m_buffer + beginInBuffer, remainingsSize);
-      }
  
       int readSize = this->stream().read(m_buffer + remainingsSize, m_bufferSize-remainingsSize);
 
@@ -392,16 +396,16 @@ public:
     
       if (m_fileHeader[0] == 0x1f 
           && m_fileHeader[1] == 0x8b) 
-      { addStream(new lat::GZIPInputStream(bufferStream)); } 
+        addStream(new lat::GZIPInputStream(bufferStream));
       else if (m_fileHeader[3] == 0x04 
                && m_fileHeader[2] == 0x03
                && m_fileHeader[1] == 0x4b
                && m_fileHeader[0] == 0x50) 
-      { addStream(new lat::ZipInputStream(bufferStream)); } 
+        addStream(new lat::ZipInputStream(bufferStream));
       else if (m_fileHeader[0] == 'B' 
                && m_fileHeader[1] == 'Z' 
                && m_fileHeader[2] == 'h') 
-      { addStream(new lat::BZIPInputStream(bufferStream)); }
+        addStream(new lat::BZIPInputStream(bufferStream));
     }
   ~FileReader(void)
     {
@@ -452,8 +456,8 @@ public:
       return "";
     }
   
-  Iterator begin(void) {return m_paths.begin();}
-  Iterator end(void) {return m_paths.end();}  
+  Iterator begin(void) { return m_paths.begin(); }
+  Iterator end(void) { return m_paths.end(); }  
 private:
   Paths m_paths;
 };
@@ -527,8 +531,7 @@ class AlignedPrinter
 public:
   AlignedPrinter(int size)
     :m_size(size)
-    {
-    }
+    {}
     
   void operator()(const std::string &n)
     {
@@ -545,8 +548,7 @@ class FractionPrinter
 public:
   FractionPrinter(int size)
     :m_size(size) 
-    {
-    }
+    {}
   
   void operator()(const std::string &n, const std::string &d)
     {
@@ -570,7 +572,7 @@ public:
   void operator()(bool condition, const std::string &value)
     {
       if (condition)
-      { printf("%*s  ", m_size, value.c_str()); }
+        printf("%*s  ", m_size, value.c_str());
     }
 private:
   int m_size;
@@ -580,14 +582,19 @@ class SymbolFilter
 {
 public:
   SymbolFilter &operator=(const char *symbolName)
-    { return this->addFilteredSymbol(symbolName); }
+    { 
+      return this->addFilteredSymbol(symbolName); 
+    }
   
   SymbolFilter &operator,(const char *symbolName)
-    { return this->addFilteredSymbol(symbolName); }
+    { 
+      return this->addFilteredSymbol(symbolName); 
+    }
 
   SymbolFilter &addFilteredSymbol(const char *symbolName)
     {
-      m_symbols.push_back(symbolName); return *this; }
+      m_symbols.push_back(symbolName); return *this; 
+    }
   
   bool contains(const std::string &name)
     {
