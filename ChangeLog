@@ -1,4 +1,10 @@
+2009-06-26  Giulio Eulisse <giulio.eulisse@cern.ch>
+	
+	* IgProfAnalyse.cc: fixes another regression in building reports
+	  which was introduce by revision 1.70.
+
 2009-06-25  Giulio Eulisse <giulio.eulisse@cern.ch>
+	
 	* IgProfAnalyse.cc: fixes regression due to usage of abs 
 	  with int64_t. Changed to use llabs.
 	

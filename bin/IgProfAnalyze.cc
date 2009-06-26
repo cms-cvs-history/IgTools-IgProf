@@ -2566,6 +2566,7 @@ public:
       ASSERT(m_row);
       m_info = 0;
       m_row = 0;
+      m_callmax = 0;
     }
 
   MainGProfRow *build(bool isMax)
