@@ -1,4 +1,10 @@
 2009-06-25  Giulio Eulisse <giulio.eulisse@cern.ch>
+	* IgProfAnalyse.cc: fixes regression due to usage of abs 
+	  with int64_t. Changed to use llabs.
+	
+	* IgProfAnalyse.cc: revert back to use only one decimal
+	  for flat profile output percentages, it simplifies regression
+	  testing.
 
 	* IgProfAnalyse.h: fixes formatting of negative numbers.
 

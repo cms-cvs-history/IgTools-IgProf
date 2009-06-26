@@ -2292,7 +2292,7 @@ protected:
     {
       int64_t aVal = a->CUM_KEY[0];
       int64_t bVal = b->CUM_KEY[0];
-      return  -1 * m_ordering * (abs(bVal) - abs(aVal));
+      return  -1 * m_ordering * (llabs(bVal) - llabs(aVal));
     }
 
   int cmpcallers(FlatInfo *a, FlatInfo *b)
@@ -2641,7 +2641,7 @@ class SortRowBySelf
 public:
   bool operator()(MainGProfRow *a, MainGProfRow *b) 
     {
-      return abs(a->SELF) > abs(b->SELF); 
+      return llabs(a->SELF) > llabs(b->SELF); 
       //if(a->SELF != b->SELF) return a->SELF > b->SELF;
       //if(a->DEPTH != b->DEPTH) return a->DEPTH < b->DEPTH;
       //return a->NAME < b->NAME;
@@ -2874,7 +2874,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
           printf("      -  ");
         else
         {
-          printf("%7.2f  ", row.PCT);
+          printf("%7.1f  ", row.PCT);
         }
 
         ASSERT(maxval);
@@ -2949,7 +2949,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
           printf("      -  ");
         else
         {
-          printf("%7.2f  ", row.PCT);
+          printf("%7.1f  ", row.PCT);
         }
         
         std::cout << std::string(maxval, '.') << "  ";
