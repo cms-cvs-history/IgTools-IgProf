@@ -25,6 +25,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <cstdio>
+#include <cfloat>
 
 #define IGPROF_MAX_DEPTH 1000
 
@@ -1085,9 +1086,8 @@ public:
       if (i != CALLS.end())
         return *i;
       if (!create)
-        std::cerr << symbol->NAME << std::endl;
+        return 0;
 
-      ASSERT(create);
       CallInfo *callInfo = new CallInfo(symbol);
       this->CALLS.insert(callInfo);
       return callInfo;
@@ -1377,7 +1377,7 @@ public:
         symnode->CALLERS.insert(parsym);
 
         CallInfo *callInfo = parentInfo->getCallee(sym, true);
-      
+         
         if (isMax) 
         {
           if (callInfo->VALUES[0] < nodeCounter->ccnt()) 
@@ -2348,7 +2348,8 @@ class GProfRow
 public:
   int FILEOFF;
   float PCT;
-  
+  float SELF_PCT;
+ 
   void initFromInfo(FlatInfo *info)
     {
       ASSERT(info);
@@ -2457,7 +2458,7 @@ public:
 float percent(int64_t a, int64_t b)
 {
   double value = static_cast<double>(a) / static_cast<double>(b);
-  if (value < 0 || value > 1.0) 
+  if (value < -1.0 || value > 1.0) 
   {
     std::cerr << "Something is wrong. Invalid percentage value: " << value * 100. << "%" << std::endl;
     std::cerr << "Looks like you really wanted to do a between two unrelated runs? Run again with --diff-mode (-D)." << std::endl;
@@ -2472,11 +2473,13 @@ public:
   GProfMainRowBuilder(TreeMapBuilderFilter *flatMapBuilder,
                       TreeMapBuilderFilter *baselineBuilder,
                       bool diffMode)
-    : m_info(0), m_row(0), m_callmax(0), 
+    : m_info(0), m_origInfo(0),
+      m_row(0), m_callmax(0),
       m_totals(0),
       m_totfreq(0),
       m_diffMode(diffMode),
-      m_flatMap(flatMapBuilder->flatMap())
+      m_flatMap(flatMapBuilder->flatMap()),
+      m_baselineMap(baselineBuilder ? baselineBuilder->flatMap() : 0)
     {
       flatMapBuilder->getTotals(m_totals, m_totfreq);
       if (baselineBuilder)
@@ -2501,9 +2504,20 @@ public:
         return;
       OtherGProfRow *callrow = new OtherGProfRow();
       callrow->initFromInfo(origin);
-  
+ 
+      // In diff mode the percentage value is the percentual increment
+      // between the two runs. 
+      // In the normal mode (i.e. no negative counts) it is the 
+      // fraction of the total counts.
       if (m_diffMode)
-        callrow->PCT = 0;
+      {
+        FlatInfo *origOrigin = (*m_baselineMap)[callerSymbol];
+        CallInfo *origThisCall = origOrigin->getCallee(m_info->SYMBOL);
+        if (origThisCall)
+          callrow->PCT = percent(thisCall->VALUES[0], llabs(origThisCall->VALUES[0]));
+        else
+          callrow->PCT = FLT_MAX;
+      }
       else
         callrow->PCT = percent(thisCall->VALUES[0], m_totals);
 
@@ -2517,7 +2531,7 @@ public:
       callrow->TOTAL_PATHS = origin->CUM_KEY[2];
       m_row->CALLERS.insert(callrow);
     }  
-  
+
   void addCallee(CallInfo *thisCall)
     {
       ASSERT(m_info);
@@ -2536,7 +2550,12 @@ public:
       ASSERT(calleeInfo);
       callrow->initFromInfo(calleeInfo);
       if (m_diffMode)
-        callrow->PCT = 0;
+      {
+        callrow->PCT = FLT_MAX;
+        CallInfo *origCall = m_origInfo->getCallee(thisCall->SYMBOL);
+        if (origCall)
+            callrow->PCT = percent(thisCall->VALUES[0], llabs(origCall->VALUES[0]));
+      }
       else
         callrow->PCT = percent(thisCall->VALUES[0], m_totals);
 
@@ -2560,12 +2579,39 @@ public:
       m_info = info;
       m_row = new MainGProfRow();
       m_row->initFromInfo(m_info);
+
+      // In normal mode PCT is the percentage relative to the 
+      // total counts.
+      // In diff mode we need to lookup the original value for
+      // the counter and give the percentage of the increment
+      // relative to that.
+      // In case the old counter is not there, we simply set the
+      // percentage to FLT_MAX and later on print "new".
       if (m_diffMode)
-        m_row->PCT = 0;
+      {
+        FlatInfoMap::iterator i = m_baselineMap->find(m_info->SYMBOL);
+        if (i != m_baselineMap->end())
+          m_origInfo = i->second;
+
+        if (m_origInfo && (m_origInfo->CUM_KEY[0] != 0))
+          m_row->PCT = percent(m_info->CUM_KEY[0], llabs(m_origInfo->CUM_KEY[0]));
+        else
+          m_row->PCT = FLT_MAX;
+
+        if (m_origInfo && (m_origInfo->SELF_KEY[0] != 0))
+          m_row->SELF_PCT = percent(m_info->SELF_KEY[0], llabs(m_origInfo->SELF_KEY[0]));
+        else
+          m_row->SELF_PCT = FLT_MAX;
+
+      }
       else
+      {
         m_row->PCT = percent(m_info->CUM_KEY[0], m_totals);
+        m_row->SELF_PCT = percent(m_info->SELF_KEY[0], m_totals);
+      }
+
       m_row->CUM = m_info->CUM_KEY[0];
-      m_row->SELF = m_info->SELF_KEY[0];   
+      m_row->SELF = m_info->SELF_KEY[0];
     }
 
   void endEditing(void)
@@ -2573,6 +2619,7 @@ public:
       ASSERT(m_info);
       ASSERT(m_row);
       m_info = 0;
+      m_origInfo = 0;
       m_row = 0;
       m_callmax = 0;
     }
@@ -2600,30 +2647,36 @@ public:
     }
 private:
   FlatInfo *m_info;
+  FlatInfo *m_origInfo;
   MainGProfRow *m_row;
   int64_t m_callmax;
   int64_t m_totals;
   int64_t m_totfreq;
   bool m_diffMode;
   FlatInfoMap   *m_flatMap;
+  FlatInfoMap   *m_baselineMap;
   MainGProfRow  *m_mainCallrow; 
 };
 
 class HeaderPrinter
 {
 public:
-  HeaderPrinter(bool showpaths, bool showcalls, int maxval, int maxcnt)
+  HeaderPrinter(bool showpaths, bool showcalls, int maxval, int maxcnt, bool diffMode)
     :m_showPaths(showpaths),
      m_showCalls(showcalls),
      m_maxval(maxval),
-     m_maxcnt(maxcnt)
+     m_maxcnt(maxcnt),
+     m_diffMode(diffMode)
     {}
 
   void print(const char *description, const char *kind) 
     {
       std::cout << "\n" << std::string(70, '-') << "\n" 
                 << description << "\n\n";
-      std::cout << "% total  ";
+      if (m_diffMode)
+        std::cout << "delta %  ";
+      else 
+        std::cout << "% total  ";
       (AlignedPrinter(m_maxval))(kind);
       if (m_showCalls) 
         (AlignedPrinter(m_maxcnt))("Calls");
@@ -2637,6 +2690,7 @@ private:
   bool m_showCalls;
   int  m_maxval;
   int  m_maxcnt;
+  bool m_diffMode;
 };
 
 int64_t
@@ -2770,8 +2824,9 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
     std::string basefmt = isPerfTicks ? "%.2f" : "%s";
     FractionPrinter valfmt(maxval);
     FractionPrinter cntfmt(maxcnt);
-    HeaderPrinter hp(showpaths, showcalls, maxval, maxcnt);   
     bool diffMode = m_config->diffMode();
+    HeaderPrinter hp(showpaths, showcalls, maxval, maxcnt, diffMode);
+
     if (diffMode) 
       hp.print ("Flat profile (cumulatively different entries only)", "Total");
     else
@@ -2782,8 +2837,8 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
          i++)
     {
       MainGProfRow &row = **i;
-      if (diffMode)
-        printf("      -  ");
+      if (diffMode && row.PCT == FLT_MAX)
+        printf("    new  ");
       else
         printf("%7.1f  ", row.PCT);
       
@@ -2815,14 +2870,10 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
          i++)
     {
       MainGProfRow &row = **i;
-      float pct = 0; 
-      if (diffMode)
-        printf("      -  ");
+      if (diffMode && row.SELF_PCT == FLT_MAX)
+        printf("    new  ");
       else
-      {
-        pct = percent(row.SELF, totals);
-        printf("%7.2f  ", pct);
-      }
+        printf("%7.2f  ", row.SELF_PCT);
 
       if (isPerfTicks && ! m_config->callgrind())
         printf("%*s  ", maxval, thousands(static_cast<double>(row.SELF) * tickPeriod, 0, 2).c_str());
@@ -2836,7 +2887,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
       if (showlibs) 
         std::cout << row.filename();
       std::cout << "\n";
-      if ((pct < 0.01 && !diffMode) || row.SELF == 0)
+      if ((row.SELF_PCT < 0.01 && !diffMode) || row.SELF == 0)
         break;
     }
     std::cout << "\n\n" << std::string(70, '-') << "\n";
@@ -2860,7 +2911,10 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
       if ((mainRow.rank() % 10) == 1)
       { 
         printf("%-8s", "Rank");
-        printf("%% total  ");
+        if (diffMode)
+          printf("delta %%  ");
+        else
+          printf("%% total  ");
         (AlignedPrinter(maxval))("Self");
         valfmt("Self", "Children");
         printf("  ");
@@ -2886,8 +2940,8 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
         OtherGProfRow &row = **c;
         std::cout << std::string(8, ' ');
 
-        if (diffMode)
-          printf("      -  ");
+        if (diffMode && row.PCT == FLT_MAX)
+          printf("    new  ");
         else
           printf("%7.1f  ", row.PCT);
 
@@ -2922,8 +2976,8 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
       char rankBuffer[256];
       sprintf(rankBuffer, "[%d]", mainRow.rank());
       printf("%-8s", rankBuffer);
-      if (diffMode)
-        printf("      -  ");
+      if (diffMode && mainRow.PCT == FLT_MAX)
+        printf("    new  ");
       else
         printf("%7.1f  ", mainRow.PCT);
 
@@ -2963,8 +3017,8 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
       {
         OtherGProfRow &row = **c;
         std::cout << std::string(8, ' ');
-        if (diffMode)
-          printf("      -  ");
+        if (diffMode && row.PCT == FLT_MAX)
+          printf("    new  ");
         else
           printf("%7.1f  ", row.PCT);
         
@@ -3126,7 +3180,7 @@ IgProfAnalyzerApplication::run(void)
   {
     std::cerr << "Reading baseline" << std::endl;
     this->readDump(*prof, m_config->baseline(), new BaseLineFilter);
-    //prepdata(*prof);
+    prepdata(*prof);
     baselineBuilder = new TreeMapBuilderFilter(prof, m_config);
     walk(prof->spontaneous(), baselineBuilder);
     std::cerr << std::endl;

@@ -1,3 +1,10 @@
+2009-06-29  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* IgProfAnalyse.cc: diff mode now shows percentage difference
+	  between baseline and input.
+	  It is also smart enough to recognize that a given function is
+	  not there in the baseline and reports it as "new".
+
 2009-06-26  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* IgProfAnalyse.h, IgProfAnalyse.cc, IgResolveSymbols.h: fix more 
