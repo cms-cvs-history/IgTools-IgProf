@@ -65,7 +65,7 @@ private:
 class NodeInfo
 {
 public:
-  typedef std::list <NodeInfo *> Nodes;
+  typedef std::vector<NodeInfo *> Nodes;
   typedef Nodes::iterator Iterator;
     
   Nodes CHILDREN;
@@ -75,13 +75,14 @@ public:
     : COUNTERS(0), SYMBOL(symbol), m_reportSymbol(0) {};
   NodeInfo *getChildrenBySymbol(SymbolInfo *symbol)
     {
-      ASSERT(symbol);
       for (Nodes::const_iterator i = CHILDREN.begin();
            i != CHILDREN.end();
            i++)
       {
-        ASSERT(SYMBOL);
-        if ((*i)->SYMBOL->NAME == symbol->NAME)
+        if ((*i)->SYMBOL == symbol)
+          return *i;
+
+        if (symbol && ((*i)->SYMBOL->NAME == symbol->NAME))
           return *i;
       }
       return 0;
@@ -757,57 +758,55 @@ private:
   std::vector<NodeInfo *> m_parentStack; 
 };
 
+// node is the node to be removed. parent is the parent of
+// that node, which will get all the children of node.
+// We iterate on all the children of node. 
+// If parent does not have any children with the same name, we simply add it
+// to the list of children.
+// If parent already has a children with the same symbol name
+// we merge the counters and call mergeToNode for every one of the children.
+// Finally if node is among the children of parent, remove it from them.
 void mergeToNode(NodeInfo *parent, NodeInfo *node)
 {
-  NodeInfo::Nodes::const_iterator i = node->CHILDREN.begin();
-  while (i != node->CHILDREN.end())
+  for (size_t i = 0, e = node->CHILDREN.size(); i != e; i++)
   {
-    NodeInfo *nodeChild = *i;
+    NodeInfo *nodeChild = node->CHILDREN[i];
     ASSERT(nodeChild);
-    ASSERT(nodeChild->symbol());
+    if (!nodeChild->symbol())
+      continue;
     NodeInfo *parentChild = parent->getChildrenBySymbol(nodeChild->symbol());
-    
-    // If the child is not already child of parent, simply add it.
     if (!parentChild)
     {
       parent->CHILDREN.push_back(nodeChild);
-      node->removeChild(*i++);
       continue;
     }
-    
-    // If the child is child of the parent, accumulate all its counters to the child of the parent
-    // and recursively merge it.
+
+    ASSERT(parentChild != nodeChild);
+
     while (Counter *nodeChildCounter = Counter::popCounterFromRing(nodeChild->COUNTERS))
     {
-      ASSERT(nodeChildCounter);
       Counter *parentChildCounter = Counter::addCounterToRing(parentChild->COUNTERS,
                                                               nodeChildCounter->id());
       parentChildCounter->freq() += nodeChildCounter->freq();
-      if (nodeChildCounter->isMax()) 
+      if (nodeChildCounter->isMax())
       {
         if (parentChildCounter->cnt() < nodeChildCounter->cnt())
           parentChildCounter->cnt() = nodeChildCounter->cnt();
       }
-      else {
+      else
         parentChildCounter->cnt() += nodeChildCounter->cnt();
-      }
     }
     mergeToNode(parentChild, nodeChild);
-    ++i;
   }
-  if (node != parent->getChildrenBySymbol(node->symbol()))
+
+  if (node == parent->getChildrenBySymbol(node->symbol()))
   {
-    ASSERT(node->symbol());
-    std::cerr << node->symbol()->NAME << std::endl;
-    ASSERT(parent->getChildrenBySymbol(node->symbol()));
-    ASSERT(parent->getChildrenBySymbol(node->symbol())->symbol());
-    std::cerr << parent->getChildrenBySymbol(node->symbol())->symbol()->NAME << std::endl;
+    NodeInfo::Nodes::iterator new_end = std::remove_if(parent->CHILDREN.begin(),
+                                                       parent->CHILDREN.end(),
+                                                       std::bind2nd(std::equal_to<NodeInfo *>(), node));
+    if (new_end != parent->CHILDREN.end())
+      parent->CHILDREN.erase(new_end, parent->CHILDREN.end());
   }
-  ASSERT(node == parent->getChildrenBySymbol(node->symbol()));
-  unsigned int numOfChildren = parent->CHILDREN.size();
-  parent->removeChild(node);
-  ASSERT(numOfChildren == parent->CHILDREN.size() + 1);   
-  ASSERT(!parent->getChildrenBySymbol(node->symbol()));
 }
 
 void mergeCountersToNode(NodeInfo *source, NodeInfo *dest)
@@ -2458,10 +2457,9 @@ public:
 float percent(int64_t a, int64_t b)
 {
   double value = static_cast<double>(a) / static_cast<double>(b);
-  if (value < -1.0 || value > 1.0) 
+  if (value < -1.0) 
   {
     std::cerr << "Something is wrong. Invalid percentage value: " << value * 100. << "%" << std::endl;
-    std::cerr << "Looks like you really wanted to do a between two unrelated runs? Run again with --diff-mode (-D)." << std::endl;
     exit(1);
   }
   return value * 100.;
@@ -2512,7 +2510,9 @@ public:
       if (m_diffMode)
       {
         FlatInfo *origOrigin = (*m_baselineMap)[callerSymbol];
-        CallInfo *origThisCall = origOrigin->getCallee(m_info->SYMBOL);
+        CallInfo * origThisCall = 0;
+        if (origOrigin)
+          origThisCall = origOrigin->getCallee(m_info->SYMBOL);
         if (origThisCall)
           callrow->PCT = percent(thisCall->VALUES[0], llabs(origThisCall->VALUES[0]));
         else
@@ -2551,10 +2551,13 @@ public:
       callrow->initFromInfo(calleeInfo);
       if (m_diffMode)
       {
-        callrow->PCT = FLT_MAX;
-        CallInfo *origCall = m_origInfo->getCallee(thisCall->SYMBOL);
+        CallInfo *origCall = 0;
+        if (m_origInfo)
+          origCall = m_origInfo->getCallee(thisCall->SYMBOL);
         if (origCall)
-            callrow->PCT = percent(thisCall->VALUES[0], llabs(origCall->VALUES[0]));
+          callrow->PCT = percent(thisCall->VALUES[0], llabs(origCall->VALUES[0]));
+        else
+          callrow->PCT = FLT_MAX;
       }
       else
         callrow->PCT = percent(thisCall->VALUES[0], m_totals);

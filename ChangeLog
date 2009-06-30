@@ -1,3 +1,11 @@
+2009-06-30  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* IgProfAnalyse.cc: rewrote mergeToNode seems to behave 
+	  correctly now. 
+	  Fixes more issues with the --diff-mode, in particular now
+	  it works correcty also in the case some caller / callee is 
+	  not there in the baseline.
+
 2009-06-29  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* IgProfAnalyse.cc: diff mode now shows percentage difference
