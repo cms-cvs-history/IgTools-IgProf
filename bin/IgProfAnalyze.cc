@@ -40,7 +40,7 @@ usage()
                 "  [-F/--filter-module FILE] [ -f FILTER[,FILTER...] ]\n"
                 "  [-mr/--merge-regexp REGEXP]\n"
                 "  [-nf/--no-filter] [-lf/--list-filters]\n"
-                "  { [-t/--text], [-s/--sqlite] }\n"
+                "  { [-t/--text], [-s/--sqlite], [-10, --top-10] }\n"
                 "  [--libs] [--demangle] [--gdb] [-v/--verbose]\n"
                 "  [-Mc/--max-count-value <value>] [-mc/--min-count-value <value>]\n"
                 "  [-Mf/--max-calls-value <value>] [-mc/--min-calls-value <value>]\n"
@@ -354,6 +354,7 @@ public:
   int64_t maxCallsValue;
   int64_t minAverageValue;
   int64_t maxAverageValue;
+  bool    top10;
 };
 
 Configuration::Configuration()
@@ -482,6 +483,7 @@ public:
   void readDump(ProfileInfo &prof, const std::string& filename, StackTraceFilter *filter = 0);
   void analyse(ProfileInfo &prof, TreeMapBuilderFilter *baselineBuilder);
   void callgrind(ProfileInfo &prof);
+  void top10(ProfileInfo &prof);
   void prepdata(ProfileInfo &prof);
 private:
   void verboseMessage(const char *msg, const char *arg = 0);
@@ -1315,6 +1317,89 @@ struct SuffixOps
       ASSERT(tickPos < fullSymbol.size());
       return std::string(fullSymbol.c_str(), tickPos - 1);
     }
+};
+
+
+// This filter navigates the tree, finds out which
+// are the top ten contributions for a given counter
+// and reports them together with their stacktrace.
+//
+// While parsing the tree it maintains a stacktrace
+// and if a leaf has a self counter which enters 
+// in the "top ten", it saves the stacktrace.
+class Top10BuilderFilter : public IgProfFilter
+{
+public:
+  Top10BuilderFilter(Configuration *config)
+  {
+    int id = Counter::getIdForCounterName(config->key());
+    ASSERT(id != -1);
+    m_keyId = id;
+    memset(m_topTenValues, 0, 10 * sizeof(int64_t));
+  }
+
+  virtual void pre(NodeInfo *parent, NodeInfo *node)
+  {
+    // If a node has children, simply record it on the stacktrace
+    // and navigate further.
+    m_currentStackTrace.push_back(node);
+    
+    // If the node does not have children, compare its "self" values
+    // against the topten, find the minimum of the top ten and
+    // if it is smaller than the counter, replace the 
+    Counter *nodeCounter = Counter::getCounterInRing(node->COUNTERS, m_keyId);
+    if (!nodeCounter)
+      return;
+
+    int min = -1;
+    for (int i = 0; i != 10; i++)
+      if (m_topTenValues[i] < nodeCounter->cnt()
+          && (min == -1 || m_topTenValues[i] < m_topTenValues[min]))
+        min = i;
+
+    if (min != -1)
+    {                             
+      m_topTenValues[min] = nodeCounter->cnt();
+      m_topTenStackTrace[min].resize(m_currentStackTrace.size());
+      std::copy(m_currentStackTrace.begin(),
+                m_currentStackTrace.end(),
+                m_topTenStackTrace[min].begin());
+    }
+  }
+  
+  virtual void post(NodeInfo */*parent*/, NodeInfo */*node*/)
+  {
+    if (!m_currentStackTrace.empty())
+      m_currentStackTrace.pop_back();
+  }
+  
+  std::vector<NodeInfo *> &stackTrace(size_t pos, int64_t &value)
+  {
+    std::vector<std::pair<int64_t, size_t> > sorted;
+    for (int i = 0; i != 10; ++i)
+      sorted.push_back(std::make_pair(m_topTenValues[i], i));
+    
+    std::sort(sorted.begin(), sorted.end(), Cmp());
+    value = m_topTenValues[sorted[pos].second];
+    return m_topTenStackTrace[sorted[pos].second];
+  }
+
+  virtual std::string name() const { return "top 10 builder"; }
+  virtual enum FilterType type() const { return BOTH; }
+
+private:
+  struct Cmp
+  {
+    bool operator()(const std::pair<int64_t, size_t> &a, const std::pair<int64_t, size_t> &b)
+    {
+      return b.first < a.first;
+    }
+  };
+
+  unsigned int              m_keyId;
+  int64_t                   m_topTenValues[10];
+  std::vector<NodeInfo *>   m_topTenStackTrace[10];
+  std::vector<NodeInfo *>   m_currentStackTrace;
 };
 
 class TreeMapBuilderFilter : public IgProfFilter
@@ -2715,6 +2800,76 @@ public:
 };
 
 void
+IgProfAnalyzerApplication::top10(ProfileInfo &prof)
+{
+  prepdata(prof);
+
+  // FIXME: make sure that symremap can be called even without 
+  //        passing a flatMap. 
+  verboseMessage("Building call tree map");
+  TreeMapBuilderFilter *callTreeBuilder = new TreeMapBuilderFilter(&prof, m_config);
+  walk(prof.spontaneous(), callTreeBuilder);
+  // Sorting flat entries
+  verboseMessage("Sorting");
+  int rank = 1;
+  typedef std::vector <FlatInfo *> FlatVector;
+  FlatVector sorted;
+  FlatInfoMap *flatMap = callTreeBuilder->flatMap();
+
+  if (flatMap->empty())
+  {
+    std::cerr << "Could not find any information to print." << std::endl;
+    exit(1);
+  }
+
+  for (FlatInfoMap::const_iterator i = flatMap->begin();
+       i != flatMap->end();
+       i++)
+    sorted.push_back(i->second);
+
+  sort(sorted.begin(), sorted.end(), FlatInfoComparator(m_config->keyId(),
+                                                        m_config->ordering()));
+
+
+  for (FlatVector::const_iterator i = sorted.begin(); i != sorted.end(); i++)
+    (*i)->setRank(rank++);
+
+  if (m_config->doDemangle() || m_config->useGdb())
+  {
+    verboseMessage("Resolving symbols");
+    symremap(prof, sorted, m_config->useGdb(), m_config->doDemangle());
+  }
+
+  if (sorted.empty()) {
+    std::cerr << "Could not find any sorted information to print." << std::endl;
+    exit(1);
+  }
+  // Actually building the top 10.
+  verboseMessage("Building top 10");
+  Top10BuilderFilter *topTenFilter = new Top10BuilderFilter(m_config);
+  walk(prof.spontaneous(), topTenFilter);
+  for (size_t i = 0; i != 10; i++)
+  {
+    std::cout << "## Entry " << i+1 << " (";
+    int64_t value;
+    std::vector<NodeInfo *> &nodes = topTenFilter->stackTrace(i, value);
+    if (!value)
+      break;
+    if (m_config->key() == "PERF_TICKS")
+      std::cout << thousands(static_cast<double>(value) * m_config->tickPeriod(), 0, 2)
+                << " seconds)\n";
+    else
+      std::cout << thousands(value) << " bytes)\n";
+  
+    int j = 0;
+    for(std::vector<NodeInfo *>::reverse_iterator i = nodes.rbegin(), e = nodes.rend(); i != e; i++)
+      std::cout << "#" << j++ << " " << (*i)->symbol()->NAME << "\n";
+
+    std::cout << std::endl;
+  }
+}
+
+void
 IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *baselineBuilder)
 {
   prepdata(prof);
@@ -3211,6 +3366,8 @@ IgProfAnalyzerApplication::run(void)
   }
   if (m_config->callgrind())
     callgrind(*prof);
+  else if (m_config->top10)
+    top10(*prof);
   else
     analyse(*prof, baselineBuilder);
 }
@@ -3322,6 +3479,8 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
       m_config->setOutputType(Configuration::TEXT);
     else if (is("--sqlite", "-s"))
       m_config->setOutputType(Configuration::SQLITE);
+    else if (is("--top-10", "-10"))
+      m_config->top10 = true;
     else if (is("--demangle", "-d"))
       m_config->setDoDemangle(true);
     else if (is("--gdb", "-g"))

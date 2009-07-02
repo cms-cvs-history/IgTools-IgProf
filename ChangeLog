@@ -1,3 +1,8 @@
+2009-06-31  Giulio Eulisse <giulio.eulisse@cern.ch>
+	
+	* IgProfAnalyse.cc: new report format which shows the 
+	  stacktrace for the top 10 offenders in a given profile.
+
 2009-06-30  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* IgProfAnalyse.cc: rewrote mergeToNode seems to behave 
