@@ -1,3 +1,9 @@
+2009-07-07  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* IgProfAnalyse.cc: tree like report format which shows
+	  an ascii art top-down tree for the cumulative cost 
+	  of a given counter.
+
 2009-06-31  Giulio Eulisse <giulio.eulisse@cern.ch>
 	
 	* IgProfAnalyse.cc: new report format which shows the 

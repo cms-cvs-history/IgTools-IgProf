@@ -26,6 +26,7 @@
 #include <signal.h>
 #include <cstdio>
 #include <cfloat>
+#include <iomanip>
 
 #define IGPROF_MAX_DEPTH 1000
 
@@ -40,13 +41,25 @@ usage()
                 "  [-F/--filter-module FILE] [ -f FILTER[,FILTER...] ]\n"
                 "  [-mr/--merge-regexp REGEXP]\n"
                 "  [-nf/--no-filter] [-lf/--list-filters]\n"
-                "  { [-t/--text], [-s/--sqlite], [-10, --top-10] }\n"
+                "  { [-t/--text], [-s/--sqlite], [-10, --top-10], [--tree] }\n"
                 "  [--libs] [--demangle] [--gdb] [-v/--verbose]\n"
                 "  [-Mc/--max-count-value <value>] [-mc/--min-count-value <value>]\n"
                 "  [-Mf/--max-calls-value <value>] [-mc/--min-calls-value <value>]\n"
                 "  [-Ma/--max-average-value <value>] [-ma/--min-average-value <value>]\n"
                 "  [--] [FILE]...\n") << std::endl;
 }
+
+float percent(int64_t a, int64_t b)
+{
+  double value = static_cast<double>(a) / static_cast<double>(b);
+  if (value < -1.0)
+  {
+    std::cerr << "Something is wrong. Invalid percentage value: " << value * 100. << "%" << std::endl;
+    exit(1);
+  }
+  return value * 100.;
+}
+
 
 class SymbolInfo
 {
@@ -355,6 +368,7 @@ public:
   int64_t minAverageValue;
   int64_t maxAverageValue;
   bool    top10;
+  bool    tree;
 };
 
 Configuration::Configuration()
@@ -484,6 +498,7 @@ public:
   void analyse(ProfileInfo &prof, TreeMapBuilderFilter *baselineBuilder);
   void callgrind(ProfileInfo &prof);
   void top10(ProfileInfo &prof);
+  void tree(ProfileInfo &prof);
   void prepdata(ProfileInfo &prof);
 private:
   void verboseMessage(const char *msg, const char *arg = 0);
@@ -1319,6 +1334,125 @@ struct SuffixOps
     }
 };
 
+class MassifTreeBuilder : public IgProfFilter
+{
+public:
+  MassifTreeBuilder(Configuration *config) 
+  :m_keyId(Counter::getIdForCounterName(config->key())),
+   m_indent(0),
+   m_totals(0),
+   m_sorter(m_keyId, false),
+   m_reverseSorter(m_keyId, true)
+  {
+    ASSERT(m_keyId != -1);
+  }
+
+  virtual void pre(NodeInfo *parent, NodeInfo *node)
+  {
+    std::sort(node->CHILDREN.begin(), node->CHILDREN.end(), m_reverseSorter);
+    
+    Counter *nodeCounter = Counter::getCounterInRing(node->COUNTERS, m_keyId);
+    
+    float pct = 0;
+    if (!parent)
+      m_totals = nodeCounter->ccnt();
+
+    pct = percent(nodeCounter->ccnt(), m_totals);
+    
+    // Determine which children are above threshold.
+    // Sum up the contribution of those below threshold.
+    // FIXME: Add a new node called "others" to the list
+    //        with the aggregated sum.
+    int lastPrinted = -1;
+    float others = 0.; 
+    for (size_t i = 0, e = node->CHILDREN.size(); i != e; i++)
+    {
+      Counter *childCounter = Counter::getCounterInRing(node->CHILDREN[i]->COUNTERS, m_keyId);
+      ASSERT(childCounter);
+      float childPct = percent(childCounter->ccnt(), m_totals);
+      if ((childPct < 1. && pct < 1.) || childPct < 0.1)
+        others += childPct;
+      else
+        lastPrinted++;
+    }
+
+    if ((size_t)(lastPrinted + 1) != node->CHILDREN.size())
+      node->CHILDREN.resize(lastPrinted + 1);
+    
+    std::sort(node->CHILDREN.begin(), node->CHILDREN.end(), m_sorter);
+
+    if (m_kids.size() <= m_indent)
+      m_kids.resize(m_indent+1);
+
+    m_kids[m_indent] = node->CHILDREN.size();
+
+    for (int i = 0, e = m_kids.size() - 1; i < e; i++)
+    {
+      std::cout << " ";
+      if (m_kids[i] == 0)
+        std::cout << " ";
+      else
+        std::cout << "|";
+    }
+
+    if (nodeCounter)
+      std::cout << "->(" << std::fixed << std::setprecision(2) << pct << ") ";
+
+    if (node->symbol() && !node->symbol()->NAME.empty())
+      std::cout << node->symbol()->NAME;
+    else
+      std::cout << "<no symbol>";
+
+    // After the node gets printed, it's parent has one kid less. 
+    if (m_indent)
+      m_kids[m_indent-1]--;
+
+    std::cout << std::endl;
+    m_indent++;
+  }
+
+  virtual void post(NodeInfo *parent, NodeInfo *node)
+  {
+    m_indent--;
+    m_kids.resize(m_indent);
+  }
+
+  virtual std::string name() const { return "top 10 builder"; }
+  virtual enum FilterType type() const { return BOTH; }
+private:
+
+  struct SortByCumulativeCount 
+  {
+    SortByCumulativeCount(int keyId, bool reverse)
+    :m_keyId(keyId),
+     m_reverse(reverse)
+    {
+    }
+
+    bool operator()(NodeInfo * const&a, NodeInfo * const&b)
+    {
+      if (!a)
+        return !m_reverse;
+      if (!b)
+        return m_reverse;
+      Counter *ca = Counter::getCounterInRing(a->COUNTERS, m_keyId);
+      Counter *cb = Counter::getCounterInRing(b->COUNTERS, m_keyId);
+      int64_t aVal = ca ? ca->ccnt() : 0;
+      int64_t bVal = cb ? cb->ccnt() : 0; 
+
+      return (aVal < bVal) ^ m_reverse;
+    }
+    int                   m_keyId;
+    bool                  m_reverse;
+  };
+
+  int                   m_keyId;
+  size_t                m_indent;
+  int64_t               m_totals;
+  std::vector<size_t>   m_kids;
+  SortByCumulativeCount m_sorter;
+  SortByCumulativeCount m_reverseSorter;
+};
 
 // This filter navigates the tree, finds out which
 // are the top ten contributions for a given counter
@@ -2539,17 +2673,6 @@ public:
   Calls CALLS;
 };
 
-float percent(int64_t a, int64_t b)
-{
-  double value = static_cast<double>(a) / static_cast<double>(b);
-  if (value < -1.0) 
-  {
-    std::cerr << "Something is wrong. Invalid percentage value: " << value * 100. << "%" << std::endl;
-    exit(1);
-  }
-  return value * 100.;
-}
-
 class GProfMainRowBuilder 
 {
 public:
@@ -2798,6 +2921,52 @@ public:
       //return a->NAME < b->NAME;
     }
 };
+
+void
+IgProfAnalyzerApplication::tree(ProfileInfo &prof)
+{
+  prepdata(prof);
+
+  // FIXME: make sure that symremap can be called even without 
+  //        passing a flatMap. 
+  verboseMessage("Building call tree map");
+  TreeMapBuilderFilter *callTreeBuilder = new TreeMapBuilderFilter(&prof, m_config);
+  walk(prof.spontaneous(), callTreeBuilder);
+  // Sorting flat entries
+  verboseMessage("Sorting");
+  int rank = 1;
+  typedef std::vector <FlatInfo *> FlatVector;
+  FlatVector sorted;
+  FlatInfoMap *flatMap = callTreeBuilder->flatMap();
+
+  if (flatMap->empty())
+  {
+    std::cerr << "Could not find any information to print." << std::endl;
+    exit(1);
+  }
+  
+  for (FlatInfoMap::const_iterator i = flatMap->begin();
+       i != flatMap->end();
+       i++)
+    sorted.push_back(i->second);
+
+  sort(sorted.begin(), sorted.end(), FlatInfoComparator(m_config->keyId(),
+                                                        m_config->ordering()));
+
+
+  for (FlatVector::const_iterator i = sorted.begin(); i != sorted.end(); i++)
+    (*i)->setRank(rank++);
+
+  if (m_config->doDemangle() || m_config->useGdb())
+  {
+    verboseMessage("Resolving symbols");
+    symremap(prof, sorted, m_config->useGdb(), m_config->doDemangle());
+  }
+
+  // Actually producing the tree.
+  MassifTreeBuilder *treeBuilder = new MassifTreeBuilder(m_config);
+  walk(prof.spontaneous(), treeBuilder);
+}
 
 void
 IgProfAnalyzerApplication::top10(ProfileInfo &prof)
@@ -3368,6 +3537,8 @@ IgProfAnalyzerApplication::run(void)
     callgrind(*prof);
   else if (m_config->top10)
     top10(*prof);
+  else if (m_config->tree)
+    tree(*prof);
   else
     analyse(*prof, baselineBuilder);
 }
@@ -3481,6 +3652,8 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
       m_config->setOutputType(Configuration::SQLITE);
     else if (is("--top-10", "-10"))
       m_config->top10 = true;
+    else if (is("--tree", "-T"))
+      m_config->tree = true;
     else if (is("--demangle", "-d"))
       m_config->setDoDemangle(true);
     else if (is("--gdb", "-g"))
