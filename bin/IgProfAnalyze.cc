@@ -33,20 +33,36 @@
 void dummy(void) {}
 
 void
-usage()
+dieWithUsage(const char *message = 0)
 {
+  // The following options
+  //
+  // * --list-filter / -lf
+  // * -f FILTER[, FILTER]
+  // * -F/--filter-module [FILE]
+  // * --callgrind
+  //
+  // which where present in the old perl version 
+  // are either obsolete or not supported at the moment 
+  // by igprof-analyse. We do not show them in the usage, but
+  // we do show a different message if someone uses them.
+  if (message)
+    std::cerr << message << "\n";
+
   std::cerr << ("igprof-analyse\n"
                 "  [-r/--report KEY[,KEY]...] [-o/--order ORDER]\n"
                 "  [-p/--paths] [-c/--calls] [--value peak|normal]\n"
-                "  [-F/--filter-module FILE] [ -f FILTER[,FILTER...] ]\n"
                 "  [-mr/--merge-regexp REGEXP]\n"
-                "  [-nf/--no-filter] [-lf/--list-filters]\n"
+                "  [-ml/--merge-libraries REGEXP]\n"
+                "  [-nf/--no-filter]\n"
                 "  { [-t/--text], [-s/--sqlite], [-10, --top-10], [--tree] }\n"
                 "  [--libs] [--demangle] [--gdb] [-v/--verbose]\n"
+                "  [-b/--baseline FILE [--diff-mode]]\n"
                 "  [-Mc/--max-count-value <value>] [-mc/--min-count-value <value>]\n"
                 "  [-Mf/--max-calls-value <value>] [-mc/--min-calls-value <value>]\n"
                 "  [-Ma/--max-average-value <value>] [-ma/--min-average-value <value>]\n"
                 "  [--] [FILE]...\n") << std::endl;
+  exit(1);
 }
 
 float percent(int64_t a, int64_t b)
@@ -493,7 +509,7 @@ public:
 
   IgProfAnalyzerApplication(int argc, const char **argv);
   void run(void);
-  ArgsList::const_iterator parseArgs(const ArgsList &args);
+  void parseArgs(const ArgsList &args);
   void readDump(ProfileInfo &prof, const std::string& filename, StackTraceFilter *filter = 0);
   void analyse(ProfileInfo &prof, TreeMapBuilderFilter *baselineBuilder);
   void callgrind(ProfileInfo &prof);
@@ -505,6 +521,7 @@ private:
   Configuration *m_config;
   int m_argc;
   const char **m_argv;
+  std::vector<std::string>  m_inputFiles;
 };
 
 
@@ -3495,10 +3512,7 @@ IgProfAnalyzerApplication::run(void)
   
   m_config->addFilter(new RemoveIgProfFilter());
 
-  ArgsList::const_iterator firstFile = this->parseArgs(args);
-  ASSERT(firstFile != args.end());
-  ArgsLeftCounter left(args.end());
-  ASSERT(left(firstFile));
+  this->parseArgs(args);
 
   ProfileInfo *prof = new ProfileInfo;
   TreeMapBuilderFilter *baselineBuilder = 0;
@@ -3518,11 +3532,9 @@ IgProfAnalyzerApplication::run(void)
   if (m_config->hasHitFilter())
     stackTraceFilter = new HitFilter(*m_config);
 
-  for (ArgsList::const_iterator profileFilename = firstFile;
-       profileFilename != args.end();
-       profileFilename++)
+  for (size_t i = 0, e = m_inputFiles.size(); i != e; ++i)
   {
-    this->readDump(*prof, *profileFilename, stackTraceFilter);
+    this->readDump(*prof, m_inputFiles[i], stackTraceFilter);
     verboseMessage("");
   }
 
@@ -3555,7 +3567,31 @@ parseOptionToInt(const std::string &valueString, const char *msg)
   exit(1);
 }
 
-IgProfAnalyzerApplication::ArgsList::const_iterator
+void 
+unsupportedOptionDeath(const char *option)
+{
+  std::cerr << "Option " << option << " is not supported anymore" << std::endl;
+  exit(1);
+}
+
+void
+regexpErrorDeath(std::string re, size_t pos)
+{
+  std::cerr << "Error in regular expression:\n\n" << re << std::endl;
+  std::cerr << std::string(pos, ' ') << "^" << std::endl;
+  exit(1);
+}
+
+void
+unexpectedArgumentDeath(const char *opt, const char *arg, const char *possible)
+{
+  std::cerr << "Unexpected argument " << arg << " for option" << opt << std::endl;
+  if (possible)
+    std::cerr << "Possible values: " << possible << std::endl;
+  exit(1);
+}
+
+void
 IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
 {
   
@@ -3566,7 +3602,7 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
     NameChecker is(*arg);
     ArgsLeftCounter left(args.end());
     if (is("--help"))
-    { usage(); exit(1); }
+      dieWithUsage();
     else if (is("--verbose", "-v"))
       m_config->setVerbose(true);
     else if (is("--report", "-r") && left(arg))
@@ -3586,10 +3622,7 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
       else if (type == "normal") 
         m_config->setNormalValue(true);
       else 
-      {
-        std::cerr << "Unexpected --value argument " << type << std::endl;
-        exit(1);
-      }
+        unexpectedArgumentDeath("--value", type.c_str(), "normal (default), peak");
     }
     else if (is("--merge-libraries", "-ml"))
       m_config->setMergeLibraries(true);
@@ -3601,51 +3634,20 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
       else if (order == "descending") 
         m_config->setOrdering(Configuration::DESCENDING);
       else 
-      {
-        std::cerr << "Unexpected --order / -o argument " << order << std::endl;
-        exit(1);
-      }
-      // TESTME: Implement --order option.(e201134) 
-      // { $order = $ARGV[1] eq 'ascending' ? -1 : 1; shift(@ARGV); shift(@ARGV); }
+        unexpectedArgumentDeath("-o / --order", order.c_str(), "ascending (default), descending");
     }
     else if (is("--filter-file", "-F"))
-    {
-      std::cerr << "Option " << *arg << " is not supported for the moment." << std::endl;
-      exit(1);
-      // TODO: Implement --filter-file.
-      // { push(@filterfiles, $ARGV[1]); shift(@ARGV); shift(@ARGV); }
-    }
+      unsupportedOptionDeath(arg->c_str());
     else if (is("--filter", "-f"))
-    {
-      std::cerr << "Option " << *arg << " is not supported for the moment." << std::endl;
-      exit(1); 
-      // TODO: Implement user filters.(84dd354) 
-      // push(@userfilters, split(/,/, $ARGV[1])); shift(@ARGV); shift(@ARGV); }
-    }
+      unsupportedOptionDeath(arg->c_str());
     else if (is("--no-filter", "-nf"))
-    {
-      // TODO: Implement the --no-filter option.(4572c80) 
-      //{ @filters =(); shift(@ARGV); }     
       m_config->disableFilters();
-    }
     else if (is("--list-filters", "-lf"))
-    {
-      ASSERT(false);
-      // TODO: Implement external filters.(e3b0572) 
-      // my %filters = map { s/igprof_filter_(.*)_(pre|post)/$1/g; $_ => 1}
-      //        grep(/^igprof_filter_.*_(pre|post)$/, keys %{::});
-      // print "Available filters are: @{[sort keys %filters]}\n";
-      // print "Selected filters are: @filters @userfilters\n";
-      // exit(0);
-    }
+      unsupportedOptionDeath(arg->c_str());
     else if (is("--libs", "-l"))
       m_config->setShowLib(true);
     else if (is("--callgrind", "-C"))
-    {
-      ASSERT(false);
-      // TODO: implement callgrind output(7e2618e)
-      // { $callgrind = 1; shift(@ARGV); }
-    }
+      unsupportedOptionDeath(arg->c_str());
     else if (is("--text", "-t"))
       m_config->setOutputType(Configuration::TEXT);
     else if (is("--sqlite", "-s"))
@@ -3667,45 +3669,41 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
       std::string re = *(++arg);
       const char *regexpOption = re.c_str();
       RegexpFilter *filter = new RegexpFilter;
+      std::string origRe = re;
 
+      size_t pos = 0;
       while (*regexpOption)
       {
         if (*regexpOption++ != 's')
-        {
-          std::cerr << "Error in regular expression: " << regexpOption << std::endl;
-          exit(1);
-        }
+          regexpErrorDeath(origRe, pos);
+        pos++;
         char separator[] = {0, 0};
         separator[0] = *regexpOption++;
+        pos++;
         int reSize = strcspn(regexpOption, separator);
-        std::string re(regexpOption, reSize);
         regexpOption += reSize;
+        pos += reSize;
         if (*regexpOption++ != separator[0])
-        {
-          std::cerr << "Error in regular expression: " << regexpOption << std::endl;
-          exit(1);
-        }
+          regexpErrorDeath(origRe, pos);
+        pos++;
         int withSize = strcspn(regexpOption, separator);
         std::string with(regexpOption, withSize);
         regexpOption += withSize;
+        pos += withSize;
 
         if (*regexpOption++ != separator[0])
-        {
-          std::cerr << "Error in regular expression: " << regexpOption << std::endl;
-          exit(1);
-        }
+          regexpErrorDeath(origRe, pos);
+        pos++;
         if (*regexpOption && *regexpOption++ != ';')
-          std::cerr << "Error in regular expression: " << regexpOption << std::endl;
+          regexpErrorDeath(origRe, pos);
+        pos++;
         filter->addSubstitution(new lat::Regexp(re), with);
       }
 
       m_config->setRegexpFilter(filter);
     }
     else if (is("--baseline", "-b") && left(arg))
-    {
-      std::string baseline = *(++arg);
-      m_config->setBaseline(baseline);
-    }
+      m_config->setBaseline(*(++arg));
     else if (is("--diff-mode", "-D"))
       m_config->setDiffMode(true);
     else if (is("--max-count-value", "-Mc") && left(arg))
@@ -3722,26 +3720,23 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
       m_config->minAverageValue = parseOptionToInt(*(++arg), "--min-average-value / -ma");
     else if (is("--"))
     {
-      ASSERT(false);
-      return ++arg;
+      while (left(arg) - 1)
+        m_inputFiles.push_back(*(++arg));
     }
     else if ((*arg)[0] == '-')
     {
       std::cerr << "Unknown option " << (*arg) << std::endl;
-      usage(); exit(1);
+      dieWithUsage();
     }
     else
-    {
-      if (m_config->diffMode() && m_config->baseline().empty())
-      {
-        std::cerr << "Option --diff-mode / -D requires --baseline / -b" << std::endl;
-        exit(1);
-      }
-      return arg;
-    };
+      m_inputFiles.push_back(*arg);
   }
-  std::cerr << "ERROR: No input files specified" << std::endl;
-  exit(1);
+
+  if (m_config->diffMode() && m_config->baseline().empty())
+    dieWithUsage("Option --diff-mode / -D requires --baseline / -b");
+
+  if (m_inputFiles.empty())
+    dieWithUsage("ERROR: No input files specified");
 }
 
 void 
