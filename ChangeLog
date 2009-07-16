@@ -1,3 +1,12 @@
+2009-07-16  Giulio Eulisse <giulio.eulisse@cern.ch>
+	
+	* igprof-navigator: new web GUI for igprof-analyse sqlite
+	  output. Only requires python and sqlite executable,
+	  not py-sqlite.
+	  Can work as standalone server or as a CGI script.
+	  See documentation at the top of the script for more 
+	  information.
+
 2009-07-13  Giulio Eulisse <giulio.eulisse@cern.ch>
 	
 	* IgProfAnalyse.cc: more resilient option handling and
