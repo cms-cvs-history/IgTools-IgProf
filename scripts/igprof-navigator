@@ -485,7 +485,7 @@ def profileFilesGenerator(p):
              for pattern in ["*.sql3", "*/*/*.sql3"]]
   for g in globbed:
     for f in g:
-      relPath = f.replace(p, "").lstrip("/").rstrip(".sql3")
+      relPath = f.replace(p, "").lstrip("/").replace(".sql3", "")
       yield (scriptPath, relPath, relPath)
 
 # This is only available for the CGI version and provides an html list 

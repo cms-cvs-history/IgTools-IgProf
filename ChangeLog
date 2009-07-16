@@ -1,5 +1,9 @@
 2009-07-16  Giulio Eulisse <giulio.eulisse@cern.ch>
 	
+	* igprof-navigator: fixes a bug spot by Andreas which
+	  was stripping "." "s" "q" "l" and "3" separately 
+	  from the filename rather than ".sql3".
+
 	* igprof-navigator: new web GUI for igprof-analyse sqlite
 	  output. Only requires python and sqlite executable,
 	  not py-sqlite.
