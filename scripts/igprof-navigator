@@ -48,7 +48,8 @@ from urlparse import urlparse
 from os.path import join, normpath, exists, basename, isdir, dirname
 import traceback
 # For debugging purposes only.
-#import cgitb
+# Uncomment in case of debugging needs
+# import cgitb
 import glob
 
 def die(output):
@@ -160,58 +161,71 @@ def summary(database, out, cumulative):
     absPath = absPath.replace("/cumulative", "").replace("/self", "").replace("/1", "")
   else:
     absPath = "."
-  
+
+  if counter == "PERF_TICKS":
+    multiplier = float(tick_period)
+    countFormat = "%.2f"
+    isPerfTicks = True
+  else:
+    multiplier = 1
+    countFormat = "%d"
+    isPerfTicks = False
+
   out.write("<html>")
   out.write(CSS)
-  out.write("<body><h1>Counter: %s, first 1000 entries</h1><table>\n" % counter)
+  out.write("<body><h1>Counter: %s, first 1000 entries</h1>\n" % counter)
   if cumulative:
     summaryType = "Cumulative"
-    out.write("<a href='%s/self'>Sort by self cost</a><br/>" % absPath)
+    out.write("""<h2>Sorted by cumulatative cost</h2><br/>
+                 <a href='%s/self'>(Sort by self cost)</a><br/>""" % absPath)
   else:
     summaryType = "Self"
-    out.write("<a href='%s/cumulative'>Sort by cumulative cost</a><br/>" % absPath)
+    out.write("""<h2>Sorted by self cost</h2><br/>
+                 <a href='%s/cumulative'>Sort by cumulative cost</a><br/>""" % absPath)
   
-  out.write("""<tr>
+  out.write("""<table><tr>
                <th>Rank</th>
                <th>Total %% </th>
                <th>%s </th>
-               <th>Calls</th>
-               <th class='sn'>Symbol name</th>
-               </tr>""" % summaryType)
+            """ % summaryType)
+  if not isPerfTicks:
+    out.write("""<th>Calls</th>""")
+  out.write("""<th class='sn'>Symbol name</th>
+               </tr>""")
   
   error, output = doQuery(self_query, database)
   if error:
     die(output)
-  
-  multiplier = 1.0
-  
-  if counter == "PERF_TICKS":
-    multiplier = tick_period
 
   for l in output.split("\n"):
     rank, name, count, calls = l.split("@@@")
     name = cgi.escape(name)
     path = join(absPath, str(rank))
-    percent = round(100*(float(count) / float(total_count)))
+    percent = 100*(float(count) / float(total_count))
     pct = locale.format("%.2f", percent, 2)
-    count = locale.format("%d", int(int(count) * multiplier), True)
+    count = locale.format(countFormat, int(count) * multiplier, True)
     calls = locale.format("%d", int(calls), True)
     out.write("""<tr>
                   <td><a href="%s">%s</a></td>
                   <td>%s</td>
-                  <td>%s</td>
-                  <td>%s</td>
-                  <td class="s"><a href="%s">%s</a></td>
-                 </tr>\n""" % (path, rank, pct, count, calls, path, name))
+                  <td>%s</td>""" % (path, rank, pct, count) )
+    if not isPerfTicks:
+      out.write("""<td>%s</td>""" % calls)
+    out.write("""<td class="s"><a href="%s">%s</a></td>
+                 </tr>\n""" % (path, name))
     
   out.write("</table></body></html>")
 
+def column(value, isInt):
+  if isInt:
+    return "<td>%s</td>" % format("%d", int(value), True)
+  return "<td>%s</td>" % format("%.2f", float(value), True)
+
 # Helper method which formats a number of numeric columns with thousands 
 # separator and so on.
-def intColumns(*args):
-  return "".join(["<td>%s</td>" % format("%d", int(x), True)
-                  for x in args])
-  
+def prepareColumns(*args):
+  return "".join([column(x, t) for (x, t, e) in args if e])
+
 
 # Produces the web page which contains callers / callee information for
 # the method of rank "rank".
@@ -269,6 +283,11 @@ def flatProfile(database, out, rank):
   error, output = doQuery(parent_query, database)
   if error:
     die(output)
+  if counter == "PERF_TICKS":
+    isPerfTicks = True
+  else:
+    isPerfTicks = False
+  
   out.write("<html>")
   out.write(CSS)
   out.write("""<body><h1>Counter: %s</h1>
@@ -282,31 +301,36 @@ def flatProfile(database, out, rank):
                <tr>
                <th rowspan="2">Rank</th>
                <th rowspan="2">% total</th>
-               <th colspan="2">Counts</th>
-               <th colspan="2">Calls</th>
-               <th colspan="2">Paths</th>
+               <th colspan="2">Counts</th>""")
+  if not isPerfTicks:
+    out.write("""<th colspan="2">Calls</th>""")
+  out.write("""<th colspan="2">Paths</th>
                <th rowspan="2" class="sn">Symbol name</th>
                </tr>
-               <tr class="moreinfo">
-               <th>to / from<br/>this</th>
-               <th>Total</th>
-               <th>to / from<br/>this</th>
+               <tr class="moreinfo">""")
+  if not isPerfTicks:
+    out.write("""<th>to / from<br/>this</th>
+                 <th>Total</th>""")
+  out.write("""<th>to / from<br/>this</th>
                <th>Total</th>
                <th>Including<br/>child / parent</th>
                <th>Total</th>
                </tr>
                """)
   out.write("<tbody class='parents'>")
+  
+  tick_period = float(tick_period)
+
   for l in output.split("\n"):
     (rank, name, to_child_counts, cumulative_counts,
      to_child_calls, total_calls,
      to_child_paths, total_paths,
      cumulative_count) = l.split("@@@")
+
+    if isPerfTicks:
+      to_child_counts = int(to_child_counts) * tick_period
+      cumulative_counts = int(cumulative_counts) * tick_period
     
-
-    if counter == "PERF_TICKS":
-      to_child_count = to_child_count * tick_period
-
     pct = 100*(float(cumulative_counts) / float(total_count))
     pct = format("%.2f", pct, True)
     name = cgi.escape(name)
@@ -317,9 +341,12 @@ def flatProfile(database, out, rank):
                  %s
                  <td class="s"><a href="./%s">%s</a></td>
                  </tr>\n""" % (pct, 
-                               intColumns(to_child_counts, cumulative_counts,
-                                          to_child_calls, total_calls,
-                                          to_child_paths, total_paths), 
+                               prepareColumns((to_child_counts, not isPerfTicks, True),
+                                              (cumulative_counts, not isPerfTicks, True),
+                                              (to_child_calls, True, not isPerfTicks),
+                                              (total_calls, True, not isPerfTicks),
+                                              (to_child_paths, True, True),
+                                              (total_paths, True, True)), 
                                rank, name))
 
   out.write("</tbody>")
@@ -334,9 +361,9 @@ def flatProfile(database, out, rank):
 
   name = cgi.escape(name)
   
-  if counter == "PERF_TICKS":
-    self_count = self_count * tick_period
-    cumulative_count = self_count * tick_period
+  if isPerfTicks:
+    self_count = int(self_count) * tick_period
+    kids = int(kids) * tick_period
   
   pct = round(100*(float(cumulative_count) / float(total_count)), 2)
   pct = format("%.2f", pct, True)
@@ -348,9 +375,12 @@ def flatProfile(database, out, rank):
                %s
                <td class="s">%s</td>
                </tr>""" % (rank, pct, 
-                           intColumns(self_count, kids, 
-                                      self_calls, total_calls,
-                                      self_paths, total_paths), name))
+                           prepareColumns((self_count, not isPerfTicks, True),
+                                          (kids, not isPerfTicks, True), 
+                                          (self_calls, True, not isPerfTicks),
+                                          (total_calls, True, not isPerfTicks),
+                                          (self_paths, True, True), 
+                                          (total_paths, True, True)), name))
   out.write("</tbody>")
   
   error, output = doQuery(child_query, database)
@@ -367,17 +397,21 @@ def flatProfile(database, out, rank):
      from_parent_paths, total_paths, 
      cumulative_count) = l.split("@@@")
     name = cgi.escape(name)
-    if counter == "PERF_TICKS":
-      from_parent_counts = from_parent_counts * tick_period
+    if isPerfTicks:
+      from_parent_counts = int(from_parent_counts) * tick_period
+      cumulative_counts = int(cumulative_counts) * tick_period 
     pct = round(100*(float(cumulative_counts) / float(total_count)), 2)
     pct = format("%.2f", pct, True)
     out.write("""<tr class="childrow"><td></td><td>%s</td>
                  %s
                  <td class="s"><a href="./%s">%s</a></td>
                  </tr>""" % (pct, 
-                             intColumns(from_parent_counts, cumulative_counts,
-                                        from_parent_calls, total_calls,
-                                        from_parent_paths, total_paths),
+                             prepareColumns((from_parent_counts, not isPerfTicks, True), 
+                                            (cumulative_counts, not isPerfTicks, True),
+                                            (from_parent_calls, True, not isPerfTicks),
+                                            (total_calls, True, not isPerfTicks),
+                                            (from_parent_paths, True, True),
+                                            (total_paths, True, True)),
                              rank, name))
   out.write("</tbody>")
   out.write("""</table><a href="./cumulative">Back to summary</a>
@@ -539,7 +573,8 @@ def cgiReply():
 # time (configurable, between 1m and 1h). This is done to avoid hanging
 # processes on lxplus.
 if __name__ == "__main__":
-  #cgitb.enable()
+  # Uncomment in case of debugging needs
+  # cgitb.enable()
   if "LC_ALL" in os.environ:
     locale.setlocale(locale.LC_NUMERIC, os.environ["LC_ALL"])
   else:
