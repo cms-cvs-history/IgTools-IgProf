@@ -107,26 +107,65 @@ public:
       return i->second; 
     }
 
-  static void addNameToIdMapping(const std::string &name, int id, bool isTick)
+  /** Fills in the table that, given a counter name, returns the internal id for
+      that kind of counter. Notice that we need to take care of the case in 
+      which the same counter label has (legititemaly) two different ids
+      in the file, e.g.:
+  
+      V0=(PERF_TICKS), V1=(PERF_TICKS)
+  
+      this can happen in the case of performance profiling multi-threaded
+      programs.
+    */
+  static int addNameToIdMapping(const std::string &name, int id, bool isTick)
     {
-      ASSERT(id < 31);
-      if (((s_isMaxMask & (1 << id)) != 0) 
-          && (countersByName().find(name) != countersByName().end()))
+      if (id > 31)
       {
-        // FIXME: for the moment we do not remap id's to match those of
-        //        files which have already been read.
-        ASSERT(countersByName()[name] == id);
-        return; 
+        std::cerr << "Too many counters in profile file.\n"
+                     "Only 30 different kind of counters supported."
+                  << std::endl;
+        exit(1);
       }
-    
+      // If the counter was already in the file, we map its id to the actual
+      // id already used for that kind of counter.
+      //
+      // If not:
+      // * we associate the name to a new counter id.
+      // * we associate the counter id above to the one appearing in the file.
+      // * we set wether or not it's a "_MAX" counter.
+      // * we check whether it is the "key counter (i.e. the one reported)
+      //   and we check whether or not it is a tick counter.
+      ASSERT(id >= 0);
+      if (Counter::fileIdToId().size() < (unsigned int) id+1)
+        Counter::fileIdToId().resize(id+1, -1);
+      
+      IdCache::iterator i = countersByName().find(name);
+      if (i != countersByName().end())
+      {
+        Counter::fileIdToId()[id] = i->second;
+        return i->second;
+      }
+
       if (name.find("_MAX") != std::string::npos)
         s_isMaxMask |= 1 << id;
       countersByName().insert(Counter::IdCache::value_type(name, id));
+      Counter::fileIdToId()[id] = id;
       if (isTick)
         s_ticksCounterId = id;
       if (s_keyName == name)
         s_keyValue = id;
+      return id;
     }
+  
+  /** Maps the id of the counter as found in a file to the internal id specific
+      to that kind of counter. 
+    */
+  static int mapFileIdToId(int fileId)
+  {
+    ASSERT(fileId >= 0);
+    ASSERT((unsigned int) fileId < Counter::fileIdToId().size());
+    return Counter::fileIdToId()[fileId];
+  }
 
   static int isMax(const std::string &name)
     {
@@ -213,7 +252,7 @@ public:
 
   static bool isKey(int id)
     {
-      return s_keyValue == id;
+      return s_keyValue == fileIdToId()[id];
     }
   
   static void setKeyName(const std::string& name)
@@ -232,6 +271,14 @@ public:
   StorageType &ccnt() { return m_cumulativeCounts; }
   StorageType &cfreq() { return m_cumulativeFreqs; }
 private:
+  typedef std::vector<int> FileIdToId;
+
+  static FileIdToId &fileIdToId(void)
+    {
+      static FileIdToId s_fileIdToId;
+      return s_fileIdToId; 
+    }
+  
   static IdCache s_countersByName;
   static int s_lastAdded;
   static int s_isMaxMask;

@@ -2295,6 +2295,7 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
     // Read the counter information.
     while (true)
     {
+      int fileId;
       int ctrid;
       int64_t ctrval;
       int64_t ctrfreq;
@@ -2306,11 +2307,11 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
       if (line.size() == pos())
         break; 
       else if (line.size() >= pos()+2
-               && parseCounterVal(line.c_str(), pos, ctrid, ctrfreq, ctrvalNormal, ctrvalPeak))
+               && parseCounterVal(line.c_str(), pos, fileId, ctrfreq, ctrvalNormal, ctrvalPeak))
       {
         // FIXME: should really do:
         // $ctrname = $ctrbyid{$1} || die;
-
+        ctrid = Counter::mapFileIdToId(fileId);
         ctrval = m_config->normalValue() ? ctrvalNormal : ctrvalPeak;
       }
       else if (line.size() >= pos()+2
@@ -2320,10 +2321,10 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
         // die if exists $ctrbyid{$1};
         std::string ctrname = match.matchString(line, 2);
         IntConverter getIntMatch(line, &match);
-        ctrid = getIntMatch(1);
-        Counter::addNameToIdMapping(ctrname, ctrid,
-                                    (ctrname == "PERF_TICKS" 
-                                     && ! m_config->callgrind()));
+        fileId = getIntMatch(1);
+        ctrid = Counter::addNameToIdMapping(ctrname, fileId,
+                                            (ctrname == "PERF_TICKS" 
+                                             && ! m_config->callgrind()));
         ctrfreq = getIntMatch(3);
         ctrval = m_config->normalValue() ? getIntMatch(4)
                  : getIntMatch(6);
@@ -2346,7 +2347,7 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
       ASSERT(counter->id() == ctrid);
       ASSERT(counter == Counter::getCounterInRing(child->COUNTERS, ctrid));
       ASSERT(counter);
-    
+
       if (m_config->hasKey() && ! Counter::isKey(ctrid)) 
         continue;
 
