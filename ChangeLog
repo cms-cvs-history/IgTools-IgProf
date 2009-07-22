@@ -1,3 +1,9 @@
+2009-07-22  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* igprof-regression-tests: helper script that runs 
+	  a series of regression tests against files on the
+	  IB server.
+
 2009-07-17  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* igprof-navigator: fully working PERF_TICKS mode. Calls
