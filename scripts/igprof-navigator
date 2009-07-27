@@ -57,6 +57,27 @@ def die(output):
   print output
   exit(1)
 
+# Emulate rsplit in python 2.3
+def rsplit24 (string, splitter, *amounts):
+    return string.rsplit (splitter, *amounts)
+
+def rsplit23 (string, splitter, *amounts):
+    if not splitter in string:
+        return [string]
+    splitResults = string.split (splitter)
+    if amounts:
+        res = splitter.join (splitResults[:-amounts[0]])
+        resultList = []
+        resultList.append (res)
+        for t in splitResults[-amounts[0]:]:
+            resultList.append (t)
+        return resultList
+rsplit = rsplit24
+
+if not hasattr (str, "rsplit"):
+    rsplit = rsplit23
+
+
 # Helper method which acutually does the sqlite query.
 # Notice that on slc4 (i.e. lxplus), there is no sqlite available, so we rely
 # on my personal copy of it.
@@ -522,11 +543,128 @@ def profileFilesGenerator(p):
       relPath = f.replace(p, "").lstrip("/").replace(".sql3", "")
       yield (scriptPath, relPath, relPath)
 
+# Sort the table of globbed files with the following order:
+# * by date
+# * by release
+# * by architecture
+# * by dataset
+# * by step
+# * by counter
+# * by number of events
+def tableSorter(a, b):
+  for comp in ["date", "release", "arch", "dataset", "step", "counter", "events"]:
+    if cmp(a[comp], b[comp]):
+      if comp in ["date"]:
+        return cmp(b[comp], a[comp])
+      else:
+        return cmp(a[comp], b[comp])
+  return 0
+
 # This is only available for the CGI version and provides an html list 
 # containing all the files that can be browsed.
 def printGlobbedListing(p):
-  print "".join(["""<li><a href="%s/%s/">%s</li>""" % x
-                 for x in profileFilesGenerator(p)])
+  standaloneFiles = []
+  managedFiles = []
+  
+  counters = {"IgProfMemTotal": "MEM_TOTAL", "IgProfperf": "PERF_TICKS"}
+  
+  for ref, p, f in profileFilesGenerator(p):
+    fileInfo = dict()
+    if not "/" in f:
+      standaloneFiles += (ref, p, f)
+      continue
+    arch, release, DB = f.split("/", 2)
+    fileInfo["name"], fileInfo["arch"]  = p, arch
+    fileInfo["href"] = "%s/%s" % (ref, p)
+    fileInfo["release"], fileInfo["date"] = rsplit(release, "_", 1)
+    if not "_" in DB:
+      fileInfo["counter"] = "PERF_TICKS"
+      fileInfo["events"] = rsplit(DB, ".", 1)[1]
+      fileInfo["dataset"] = "Unknown"
+      fileInfo["step"] = "Unknown"
+    else:
+      fileInfo["dataset"], rest = DB.split("__", 1)
+      fileInfo["step"], rest = rsplit(rest, "_", 1)
+      if "." in rest:
+        fileInfo["counter"] = counters[rsplit(rest, ".", 1)[0]]
+        fileInfo["events"] = rsplit(rest, ".", 1)[1]
+      else:
+        fileInfo["counter"] = counters[rest]
+        fileInfo["events"] = "MAX"
+    managedFiles.append(fileInfo)
+  
+  managedFiles.sort(tableSorter)
+  c = managedFiles[0]
+
+  def dateHeader(d):
+    print """<h1>%s</h1>""" % d
+
+  def tableHeader(r, a, d):
+    print """<table cellspacing="0px"><tr>
+             <th colspan="5">%s %s %s</th>
+             </tr>
+             <tr>
+             <th>Step</th>
+             <th>MEM_LIVE</th>
+             <th>MEM_MAX</th>
+             <th>MEM_TOTAL</th>
+             <th>PERF_TICKS</th>
+             </tr>
+          """ % (r, a, d)
+          
+  def stepHeader(s):
+    print "<tr><td>%s</td><td>" % s
+  
+  print """<html>
+  <style>
+table {
+  border: 1px;
+  border-style: solid;
+  width: 800px;
+  margin-bottom: 30px;
+  color: #c6d1e2;
+}
+th {
+  background-color: #f0f3fc;
+  font-family: sans-serif;
+}
+td, th {
+  padding-left: 10px;
+  padding-right: 10px;
+  padding-bottom: 4px;
+  padding-top: 4px;
+  color: black;
+}
+  </style>
+  <body>"""
+  dateHeader(c["date"])
+  tableHeader(c["release"], c["arch"], c["dataset"])
+  stepHeader(c["step"])
+  counterId = {"PERF_TICKS": 3, 
+               "MEM_TOTAL": 2,
+               "MEM_MAX": 1,
+               "MEM_LIVE": 0}
+  previousCounter = 0
+  for i in managedFiles:
+    if c["step"] != i["step"]:
+      previousCounter = 0
+      print """</td></tr>"""
+    if c["release"] != i["release"] or c["arch"] != i["arch"] or c["dataset"] != i["dataset"]:
+      print """</table>"""
+    if c["date"] != i["date"]:
+      dateHeader(i["date"])
+    if c["release"] != i["release"] or c["arch"] != i["arch"] or c["dataset"] != i["dataset"]:
+      tableHeader(i["release"], i["arch"], i["dataset"])
+    if c["step"] != i["step"]:
+      stepHeader(i["step"])
+    counterDiff = counterId[i["counter"]] - previousCounter
+    previousCounter = counterId[i["counter"]]
+    for x in xrange(0, counterDiff):
+      print "</td><td>"
+    print """<a href="%(href)s/">%(events)s</a>""" % i
+    c = i
+  
+  print "</tr></table></body><html>"
 
 # Produces a list of possible database paths.
 # The only two possibilities for a url are "<script>/<database-path>"
