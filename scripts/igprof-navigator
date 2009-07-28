@@ -600,7 +600,11 @@ def printGlobbedListing(p):
     print """<h1>%s</h1>""" % d
 
   def tableHeader(r, a, d):
-    print """<table cellspacing="0px"><tr>
+    display=""
+    if d == "Unknown":
+      display="style='display: none;'"
+    print """<table cellspacing="0px" %s>
+             <tr>
              <th colspan="5">%s %s %s</th>
              </tr>
              <tr>
@@ -610,10 +614,10 @@ def printGlobbedListing(p):
              <th>MEM_TOTAL</th>
              <th>PERF_TICKS</th>
              </tr>
-          """ % (r, a, d)
+          """ % (display, r, a, d)
           
   def stepHeader(s):
-    print "<tr><td>%s</td><td>" % s
+    print "<tr><td style='border:0px;'>%s</td><td>" % s
   
   print """<html>
   <style>
@@ -635,6 +639,13 @@ td, th {
   padding-top: 4px;
   color: black;
 }
+
+td {
+border-left: 1px;
+border-color: #c6d1e2;
+border-style: dashed;
+}
+
   </style>
   <body>"""
   dateHeader(c["date"])
