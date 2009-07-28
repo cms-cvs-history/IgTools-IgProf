@@ -197,7 +197,8 @@ def summary(database, out, cumulative):
   out.write(CSS)
   dummy, arch, ib, f = rsplit(absPath, "/", 3)
   out.write("""<body>
-               <h1>%s - %s, %s</h1>
+               <h1>%s - %s, %s</h1><a href="../">
+                Back to profiles index</a>
                <h2>Counter: %s, first 1000 entries</h2>\n""" % (f.split("__")[0], ib, arch, counter))
   if cumulative:
     summaryType = "Cumulative"
