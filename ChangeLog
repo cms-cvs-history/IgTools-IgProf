@@ -1,5 +1,11 @@
 2009-07-27  Giulio Eulisse <giulio.eulisse@cern.ch>
 
+	* igprof-navigator: correctly shows the percentage of total also
+	  for the PERF_TICK reports.
+
+	* igprof-navigator: various clean ups to the look and feel of the
+	  main page.
+
 	* igprof-navigator: Do not print verbose error messages when
 	  quering the DB fails.
 	

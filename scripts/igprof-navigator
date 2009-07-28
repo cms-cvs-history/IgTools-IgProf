@@ -192,7 +192,8 @@ def summary(database, out, cumulative):
     countFormat = "%d"
     isPerfTicks = False
 
-  out.write("<html>")
+  out.write("""<html>
+  <meta name="keywords" content="CMSSW, profiling, igprof" />""")
   out.write(CSS)
   out.write("<body><h1>Counter: %s, first 1000 entries</h1>\n" % counter)
   if cumulative:
@@ -306,6 +307,7 @@ def flatProfile(database, out, rank):
     die(output)
   if counter == "PERF_TICKS":
     isPerfTicks = True
+    total_count = int(total_count) * float(tick_period)
   else:
     isPerfTicks = False
   
@@ -378,13 +380,13 @@ def flatProfile(database, out, rank):
   
   (rank, name, self_count, cumulative_count, kids, self_calls, total_calls,
    self_paths, total_paths) = output.split("@@@")
-   
-
+  
   name = cgi.escape(name)
   
   if isPerfTicks:
     self_count = int(self_count) * tick_period
     kids = int(kids) * tick_period
+    cumulative_count = int(cumulative_count) * tick_period
   
   pct = round(100*(float(cumulative_count) / float(total_count)), 2)
   pct = format("%.2f", pct, True)
@@ -420,7 +422,7 @@ def flatProfile(database, out, rank):
     name = cgi.escape(name)
     if isPerfTicks:
       from_parent_counts = int(from_parent_counts) * tick_period
-      cumulative_counts = int(cumulative_counts) * tick_period 
+      cumulative_counts = int(cumulative_counts) * tick_period
     pct = round(100*(float(cumulative_counts) / float(total_count)), 2)
     pct = format("%.2f", pct, True)
     out.write("""<tr class="childrow"><td></td><td>%s</td>
@@ -557,7 +559,15 @@ def tableSorter(a, b):
       if comp in ["date"]:
         return cmp(b[comp], a[comp])
       else:
-        return cmp(a[comp], b[comp])
+        try: 
+          x = int(a[comp])
+        except:
+          x = a[comp]
+        try:
+          y = int(b[comp])
+        except:
+          y = b[comp]
+        return cmp(x, y)
   return 0
 
 # This is only available for the CGI version and provides an html list 
@@ -597,7 +607,7 @@ def printGlobbedListing(p):
   c = managedFiles[0]
 
   def dateHeader(d):
-    print """<h1>%s</h1>""" % d
+    print """<h2>%s</h2>""" % d
 
   def tableHeader(r, a, d):
     display=""
@@ -617,14 +627,17 @@ def printGlobbedListing(p):
           """ % (display, r, a, d)
           
   def stepHeader(s):
-    print "<tr><td style='border:0px;'>%s</td><td>" % s
+    print "<tr><td style='border:0px;white-space:nowrap;'>%s</td><td>" % s.replace(",", ", ")
   
   print """<html>
+  <meta name="keywords" content="CMS, CMSSW, profiling, igprof, software performance, high energy physics" />
   <style>
+body {
+font-family: sans-serif;
+}
 table {
   border: 1px;
   border-style: solid;
-  width: 800px;
   margin-bottom: 30px;
   color: #c6d1e2;
 }
@@ -633,8 +646,8 @@ th {
   font-family: sans-serif;
 }
 td, th {
-  padding-left: 10px;
-  padding-right: 10px;
+  padding-left: 20px;
+  padding-right: 20px;
   padding-bottom: 4px;
   padding-top: 4px;
   color: black;
@@ -647,7 +660,10 @@ border-style: dashed;
 }
 
   </style>
-  <body>"""
+  <body>
+  <h1>CMSSW Integration Build - IgProf results</h1>
+  <a href="https://twiki.cern.ch/twiki/bin/view/CMS/IgProf">More information about igprof.</a>
+  """
   dateHeader(c["date"])
   tableHeader(c["release"], c["arch"], c["dataset"])
   stepHeader(c["step"])
@@ -675,7 +691,9 @@ border-style: dashed;
     print """<a href="%(href)s/">%(events)s</a>""" % i
     c = i
   
-  print "</tr></table></body><html>"
+  print """</tr></table>
+           For more information about this pages, please ask Giulio Eulisse or Lassi Tuura (both at CERN).
+           </body><html>"""
 
 # Produces a list of possible database paths.
 # The only two possibilities for a url are "<script>/<database-path>"
