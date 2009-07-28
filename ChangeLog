@@ -1,5 +1,7 @@
 2009-07-27  Giulio Eulisse <giulio.eulisse@cern.ch>
 
+	* igprof-navigator: improved header for the summary.
+
 	* igprof-navigator: correctly shows the percentage of total also
 	  for the PERF_TICK reports.
 
