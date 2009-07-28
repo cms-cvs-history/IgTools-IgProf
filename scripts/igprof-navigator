@@ -45,7 +45,7 @@ import cgi
 import socket
 import thread
 from urlparse import urlparse
-from os.path import join, normpath, exists, basename, isdir, dirname
+from os.path import join, normpath, exists, basename, isdir, dirname, getsize
 import traceback
 # For debugging purposes only.
 # Uncomment in case of debugging needs
@@ -53,8 +53,8 @@ import traceback
 import glob
 
 def die(output):
-  print "Error!"
-  print output
+  print "Internal Error!"
+#  print output
   exit(1)
 
 # Emulate rsplit in python 2.3
@@ -539,7 +539,7 @@ def profileFilesGenerator(p):
   globbed = [glob.glob(join(p, pattern)) 
              for pattern in ["*.sql3", "*/*/*.sql3"]]
   for g in globbed:
-    for f in g:
+    for f in [h for h in g if getsize(h)]:
       relPath = f.replace(p, "").lstrip("/").replace(".sql3", "")
       yield (scriptPath, relPath, relPath)
 
@@ -590,7 +590,7 @@ def printGlobbedListing(p):
         fileInfo["events"] = rsplit(rest, ".", 1)[1]
       else:
         fileInfo["counter"] = counters[rest]
-        fileInfo["events"] = "MAX"
+        fileInfo["events"] = "End of run"
     managedFiles.append(fileInfo)
   
   managedFiles.sort(tableSorter)
