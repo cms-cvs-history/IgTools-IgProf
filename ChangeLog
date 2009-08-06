@@ -1,4 +1,16 @@
+2009-08-07  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* igprof-navigator: fixes a bug where dates were not taken into 
+	  account when splitting results in multiple tables. 
+
+	* igprof-navigator: cosmetic fixes. 
+
 2009-07-27  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* igprof-navigator: fixes a bug where dates were not taken into
+	  account when splitting results in multiple tables.
+
+	* 
 
 	* igprof-navigator: link back to the index added to the summary page.
 

@@ -550,7 +550,7 @@ def profileFilesGenerator(p):
       yield (scriptPath, relPath, relPath)
 
 # Sort the table of globbed files with the following order:
-# * by date
+# * by date (reverse)
 # * by release
 # * by architecture
 # * by dataset
@@ -560,10 +560,10 @@ def profileFilesGenerator(p):
 def tableSorter(a, b):
   for comp in ["date", "release", "arch", "dataset", "step", "counter", "events"]:
     if cmp(a[comp], b[comp]):
-      if comp in ["date"]:
+      if comp == "date":
         return cmp(b[comp], a[comp])
       else:
-        try: 
+        try:
           x = int(a[comp])
         except:
           x = a[comp]
@@ -680,16 +680,18 @@ border-style: dashed;
     if c["step"] != i["step"]:
       previousCounter = 0
       print """</td></tr>"""
-    if c["release"] != i["release"] or c["arch"] != i["arch"] or c["dataset"] != i["dataset"]:
+    
+    if c["release"] != i["release"] or c["arch"] != i["arch"] or c["dataset"] != i["dataset"] or c["date"] != i["date"]:
       print """</table>"""
     if c["date"] != i["date"]:
       dateHeader(i["date"])
-    if c["release"] != i["release"] or c["arch"] != i["arch"] or c["dataset"] != i["dataset"]:
+    if c["release"] != i["release"] or c["arch"] != i["arch"] or c["dataset"] != i["dataset"] or c["date"] != i["date"]:
       tableHeader(i["release"], i["arch"], i["dataset"])
     if c["step"] != i["step"]:
       stepHeader(i["step"])
     counterDiff = counterId[i["counter"]] - previousCounter
     previousCounter = counterId[i["counter"]]
+    
     for x in xrange(0, counterDiff):
       print "</td><td>"
     print """<a href="%(href)s/">%(events)s</a>""" % i
