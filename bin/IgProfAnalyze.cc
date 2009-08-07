@@ -265,10 +265,20 @@ public:
   void setKey(const std::string &value) { m_key = value; };
   bool hasKey(void) { return ! m_key.empty(); }
   std::string key(void) { return m_key; }
+  /** Returns the internal id for the counter that was 
+      requested, either explicitly or implicitly, by the user.
+    */
   int keyId(void) 
     {
       int id = Counter::getIdForCounterName(m_key);
-      ASSERT(id != -1);
+      if (id == -1)
+      {
+        std::cerr << "Sorry, it looks like the counter you have requested, "
+                  << m_key << ", is not available in the selected file.\n";
+        std::cerr << "Maybe you are looking at the wrong kind of profile?"
+                  << std::endl;
+        exit(1);
+      }
       return id;
     }
 
@@ -1483,9 +1493,7 @@ class Top10BuilderFilter : public IgProfFilter
 public:
   Top10BuilderFilter(Configuration *config)
   {
-    int id = Counter::getIdForCounterName(config->key());
-    ASSERT(id != -1);
-    m_keyId = id;
+    m_keyId = config->keyId(); 
     memset(m_topTenValues, 0, 10 * sizeof(int64_t));
   }
 
@@ -1559,9 +1567,7 @@ public:
   TreeMapBuilderFilter(ProfileInfo *prof, Configuration *config)
     :m_prof(prof), m_zeroCounter(-1), m_flatMap(new FlatInfoMap), m_firstInfo(0) 
     {
-      int id = Counter::getIdForCounterName(config->key());
-      ASSERT(id != -1);
-      m_keyId = id;
+      m_keyId = config->keyId();
       ASSERT(m_zeroCounter.ccnt() == 0);
       ASSERT(m_zeroCounter.cfreq() == 0);
       ASSERT(m_zeroCounter.cnt() == 0);

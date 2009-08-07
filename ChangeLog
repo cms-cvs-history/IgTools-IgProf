@@ -1,10 +1,15 @@
-2009-08-08  Giulio Eulisse <giulio.eulisse@cern.ch>
+2009-08-07  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* ChangeLog: correct dates for the last two entries.
+
+	* IgProfAnalyse.cc: gracefully exits if the wrong counter name is
+	  passed by the user. Thanks to Andreas for reporting the bug.
 
 	* igprof-navigator: support for IgProfMemLive and IgProfMemMax named
 	  files added until some decision is actually made on the naming
 	  convention. 
 
-2009-08-07  Giulio Eulisse <giulio.eulisse@cern.ch>
+2009-08-06  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* igprof-navigator: fixes a bug where dates were not taken into 
 	  account when splitting results in multiple tables. 
