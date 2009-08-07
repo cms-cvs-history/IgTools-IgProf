@@ -1,3 +1,9 @@
+2009-08-08  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* igprof-navigator: support for IgProfMemLive and IgProfMemMax named
+	  files added until some decision is actually made on the naming
+	  convention. 
+
 2009-08-07  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* igprof-navigator: fixes a bug where dates were not taken into 

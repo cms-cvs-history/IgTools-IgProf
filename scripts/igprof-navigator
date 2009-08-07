@@ -49,7 +49,7 @@ from os.path import join, normpath, exists, basename, isdir, dirname, getsize
 import traceback
 # For debugging purposes only.
 # Uncomment in case of debugging needs
-# import cgitb
+import cgitb
 import glob
 
 def die(output):
@@ -580,7 +580,12 @@ def printGlobbedListing(p):
   standaloneFiles = []
   managedFiles = []
   
-  counters = {"IgProfMemTotal": "MEM_TOTAL", "IgProfperf": "PERF_TICKS"}
+  # FIXME: remapping is needed until there is agreement on how to call the 
+  #        various options.
+  counters = {"IgProfMemTotal": "MEM_TOTAL", 
+              "IgProfperf": "PERF_TICKS", 
+              "IgProfMemLive": "MEM_LIVE",
+              "IgProfMemMax": "MEM_MAX"}
   
   for ref, p, f in profileFilesGenerator(p):
     fileInfo = dict()
@@ -747,7 +752,7 @@ def cgiReply():
 # processes on lxplus.
 if __name__ == "__main__":
   # Uncomment in case of debugging needs
-  # cgitb.enable()
+  cgitb.enable()
   if "LC_ALL" in os.environ:
     locale.setlocale(locale.LC_NUMERIC, os.environ["LC_ALL"])
   else:
