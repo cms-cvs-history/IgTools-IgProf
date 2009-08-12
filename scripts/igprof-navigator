@@ -47,9 +47,11 @@ import thread
 from urlparse import urlparse
 from os.path import join, normpath, exists, basename, isdir, dirname, getsize
 import traceback
+debug=False
 # For debugging purposes only.
 # Uncomment in case of debugging needs
-import cgitb
+if debug:
+  import cgitb
 import glob
 
 def die(output):
@@ -596,20 +598,26 @@ def printGlobbedListing(p):
     fileInfo["name"], fileInfo["arch"]  = p, arch
     fileInfo["href"] = "%s/%s" % (ref, p)
     fileInfo["release"], fileInfo["date"] = rsplit(release, "_", 1)
-    if not "_" in DB:
-      fileInfo["counter"] = "PERF_TICKS"
-      fileInfo["events"] = rsplit(DB, ".", 1)[1]
-      fileInfo["dataset"] = "Unknown"
-      fileInfo["step"] = "Unknown"
+    if DB.startswith("IgProf"):
+      continue
+    
+    reportType = ""
+    if "_merged" in DB:
+      if not debug: continue
+      reportType = "(Merged By Library)"
+      DB = DB.replace("_merged", "")
+    elif "_diff25" in DB:
+      if not debug: continue
+      reportType = "(Diff to 25)"
+      DB = DB.replace("_diff25", "")
+    fileInfo["dataset"], rest = DB.split("__", 1)
+    fileInfo["step"], rest = rsplit(rest, "_", 1)
+    if "." in rest:
+      fileInfo["counter"] = counters[rsplit(rest, ".", 1)[0]]
+      fileInfo["events"] = rsplit(rest, ".", 1)[1] + reportType
     else:
-      fileInfo["dataset"], rest = DB.split("__", 1)
-      fileInfo["step"], rest = rsplit(rest, "_", 1)
-      if "." in rest:
-        fileInfo["counter"] = counters[rsplit(rest, ".", 1)[0]]
-        fileInfo["events"] = rsplit(rest, ".", 1)[1]
-      else:
-        fileInfo["counter"] = counters[rest]
-        fileInfo["events"] = "End of run"
+      fileInfo["counter"] = counters[rest]
+      fileInfo["events"] = "End of run"
     managedFiles.append(fileInfo)
   
   managedFiles.sort(tableSorter)
@@ -752,7 +760,8 @@ def cgiReply():
 # processes on lxplus.
 if __name__ == "__main__":
   # Uncomment in case of debugging needs
-  cgitb.enable()
+  if debug:
+    cgitb.enable()
   if "LC_ALL" in os.environ:
     locale.setlocale(locale.LC_NUMERIC, os.environ["LC_ALL"])
   else:
