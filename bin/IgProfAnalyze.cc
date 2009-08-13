@@ -3162,7 +3162,8 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
     selfSortedTable.push_back(*i);
  
   stable_sort(selfSortedTable.begin(), selfSortedTable.end(), SortRowBySelf());
-   
+  bool diffMode = m_config->diffMode();
+ 
   if (m_config->outputType() == Configuration::TEXT)
   {
     bool showcalls = m_config->showCalls();
@@ -3184,7 +3185,6 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
     std::string basefmt = isPerfTicks ? "%.2f" : "%s";
     FractionPrinter valfmt(maxval);
     FractionPrinter cntfmt(maxcnt);
-    bool diffMode = m_config->diffMode();
     HeaderPrinter hp(showpaths, showcalls, maxval, maxcnt, diffMode);
 
     if (diffMode) 
@@ -3227,7 +3227,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
          i++)
     {
       MainGProfRow &row = **i;
-      row.printPercentageString(diffMode, "7.2f  ");
+      row.printPercentageString(diffMode, "%7.2f  ");
 
       if (isPerfTicks && ! m_config->callgrind())
         printf("%*s  ", maxval, thousands(static_cast<double>(row.SELF) * tickPeriod, 0, 2).c_str());
@@ -3429,21 +3429,24 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
                   "self_calls INTEGER,\n"
                   "total_calls INTEGER,\n"
                   "self_paths INTEGER,\n"
-                  "total_paths INTEGER\n"
+                  "total_paths INTEGER,\n"
+                  "pct REAL\n"
                   ");\n\n"
                   "CREATE TABLE children (\n"
                   "self_id INT CONSTRAINT self_exist REFERENCES mainrows(id),\n"
                   "parent_id INT CONSTRAINT parent_exists REFERENCES mainrows(id),\n"
                   "from_parent_count INTEGER,\n" 
                   "from_parent_calls INTEGER,\n"
-                  "from_parent_paths INTEGER\n"
+                  "from_parent_paths INTEGER,\n"
+                  "pct REAL\n"
                   ");\n\n"
                   "CREATE TABLE parents (\n"
                   "self_id INT CONSTRAINT self_exists REFERENCES mainrows(id),\n"
                   "child_id INT CONSTRAINT child_exists REFERENCES mainrows(id),\n"
                   "to_child_count INTEGER,\n"
                   "to_child_calls INTEGER,\n"
-                  "to_child_paths INTEGER\n"
+                  "to_child_paths INTEGER,\n"
+                  "pct REAL\n"
                   ");\n\n\nBEGIN EXCLUSIVE TRANSACTION;\n"
                   "INSERT INTO summary (counter, total_count, total_freq, tick_period) VALUES(\"")
               << m_config->key () << "\", " << totals << ", " << totfreq << ", " << m_config->tickPeriod() << ");\n\n";
@@ -3458,20 +3461,24 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
                 << "INSERT OR IGNORE INTO symbols (id, name, filename_id) VALUES (" 
                 << mainRow.symbolId() << ", \"" << mainRow.name() << "\", " 
                 << mainRow.fileId() << ");\n"
-                << "INSERT INTO mainrows (id, symbol_id, self_count, cumulative_count, kids, self_calls, total_calls, self_paths, total_paths) VALUES ("
+                << "INSERT INTO mainrows (id, symbol_id, self_count, cumulative_count, kids, self_calls, total_calls, self_paths, total_paths, pct) VALUES ("
                 << mainRow.rank() << ", " << mainRow.symbolId() << ", " 
                 << mainRow.SELF << ", " << mainRow.CUM << ", " << mainRow.KIDS << ", " 
                 << mainRow.SELF_ALL[1] << ", " << mainRow.CUM_ALL[1] << ", " 
-                << mainRow.SELF_ALL[2] << ", " << mainRow.CUM_ALL[2] << ");\n";
+                << mainRow.SELF_ALL[2] << ", " << mainRow.CUM_ALL[2] << ", ";
+      mainRow.printPercentageString(diffMode, "%7.2f", "-101");
+      std::cout << ");\n";
 
       for (MainGProfRow::Callers::const_iterator c = mainRow.CALLERS.begin();
            c != mainRow.CALLERS.end();
            c++)
       {
         OtherGProfRow &row = **c;
-        std::cout << "INSERT INTO parents (self_id, child_id, to_child_count, to_child_calls, to_child_paths) VALUES ("
+        std::cout << "INSERT INTO parents (self_id, child_id, to_child_count, to_child_calls, to_child_paths, pct) VALUES ("
                   << row.rank() << ", " << mainRow.rank() << ", "
-                  << row.SELF_COUNTS << ", " << row.SELF_CALLS << ", " << row.SELF_PATHS << ");\n";
+                  << row.SELF_COUNTS << ", " << row.SELF_CALLS << ", " << row.SELF_PATHS << ", ";
+        row.printPercentageString(diffMode, "%7.2f", "-101");
+        std::cout << ");\n";
       }
 
       for (MainGProfRow::Calls::const_iterator c = mainRow.CALLS.begin();
@@ -3479,10 +3486,11 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
            c++)
       {
         OtherGProfRow &row = **c;
-        std::cout << "INSERT INTO children(self_id, parent_id, from_parent_count, from_parent_calls, from_parent_paths) VALUES("
+        std::cout << "INSERT INTO children(self_id, parent_id, from_parent_count, from_parent_calls, from_parent_paths, pct) VALUES("
                   << row.rank() << ", " << mainRow.rank() << ", "
-                  << row.SELF_COUNTS << ", "<< row.SELF_CALLS << ", " << row.SELF_PATHS << ");\n";
-
+                  << row.SELF_COUNTS << ", "<< row.SELF_CALLS << ", " << row.SELF_PATHS << ", ";
+        row.printPercentageString(diffMode, "%7.2f", "-101");
+        std::cout << ");\n";
       }
     }
     std::cout << "END TRANSACTION;\n" << std::endl;

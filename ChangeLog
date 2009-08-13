@@ -1,5 +1,9 @@
 2009-08-13  Giulio Eulisse <giulio.eulisse@cern.ch>
 
+	* IgProfAnalyse.cc: SQLITE output schema now contains percentage
+	  information to avoid having to have the percentage logic in the 
+	  web browing GUI.
+
 	* IgProfAnalyse.cc: Helper method for printing out percentages added.
 	 
 2009-08-07  Giulio Eulisse <giulio.eulisse@cern.ch>
