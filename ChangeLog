@@ -1,5 +1,7 @@
 2009-08-13  Giulio Eulisse <giulio.eulisse@cern.ch>
 
+	* igprof-navigator: print out summary header only if possible.
+
 	* igprof-navigator: Print out some debug information if internal variable 
 	  "debug" is True.
 

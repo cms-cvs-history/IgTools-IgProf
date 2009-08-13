@@ -198,11 +198,12 @@ def summary(database, out, cumulative):
   out.write("""<html>
   <meta name="keywords" content="CMSSW, profiling, igprof" />""")
   out.write(CSS)
-  dummy, arch, ib, f = rsplit(absPath, "/", 3)
-  out.write("""<body>
-               <h1>%s - %s, %s</h1><a href="../">
-                Back to profiles index</a>
-               <h2>Counter: %s, first 1000 entries</h2>\n""" % (f.split("__")[0], ib, arch, counter))
+  if absPath != ".":
+    dummy, arch, ib, f = rsplit(absPath, "/", 3)
+    out.write("""<body>
+                 <h1>%s - %s, %s</h1><a href="../">
+                  Back to profiles index</a>
+                 <h2>Counter: %s, first 1000 entries</h2>\n""" % (f.split("__")[0], ib, arch, counter))
   if cumulative:
     summaryType = "Cumulative"
     out.write("""<h2>Sorted by cumulatative cost</h2><br/>
