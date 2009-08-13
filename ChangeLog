@@ -6,6 +6,11 @@
 
 	* IgProfAnalyse.cc: Helper method for printing out percentages added.
 	 
+2009-08-12  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* igprof-navigator: supports _merged and _diff25 suffix in debug
+	  mode. Ignores them in non debug mode.
+
 2009-08-07  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* ChangeLog: correct dates for the last two entries.
