@@ -118,6 +118,7 @@ td {
   text-align: right;
   margin: 0px;
   border-width: 0px;
+  white-space: nowrap;
 }
 
 td.s {
@@ -277,7 +278,8 @@ def flatProfile(database, out, rank):
                          p.to_child_count, myself.cumulative_count,
                          p.to_child_calls, myself.total_calls,
                          p.to_child_paths, myself.total_paths,
-                         mr.cumulative_count
+                         mr.cumulative_count,
+                         p.pct
                   FROM parents p
                   INNER JOIN mainrows mr ON mr.id = p.child_id
                   INNER JOIN mainrows myself ON myself.id = p.self_id
@@ -290,7 +292,8 @@ def flatProfile(database, out, rank):
                        mr.self_count, mr.cumulative_count,
                        mr.kids,
                        mr.self_calls, mr.total_calls,
-                       mr.self_paths, mr.total_paths 
+                       mr.self_paths, mr.total_paths,
+                       mr.pct
                 FROM mainrows mr
                 INNER JOIN symbols sym ON sym.id = mr.symbol_id
                 WHERE mr.id = %s;
@@ -300,7 +303,8 @@ def flatProfile(database, out, rank):
                         c.from_parent_count, myself.cumulative_count,
                         c.from_parent_calls, myself.total_calls,
                         c.from_parent_paths, myself.total_paths,
-                        mr.cumulative_count
+                        mr.cumulative_count,
+                        c.pct
                  FROM children c
                  INNER JOIN mainrows mr ON mr.id = c.parent_id
                  INNER JOIN mainrows myself ON myself.id = c.self_id
@@ -356,14 +360,15 @@ def flatProfile(database, out, rank):
     (rank, name, to_child_counts, cumulative_counts,
      to_child_calls, total_calls,
      to_child_paths, total_paths,
-     cumulative_count) = l.split("@@@")
+     cumulative_count, percent) = l.split("@@@")
 
     if isPerfTicks:
       to_child_counts = int(to_child_counts) * tick_period
       cumulative_counts = int(cumulative_counts) * tick_period
     
-    pct = 100*(float(cumulative_counts) / float(total_count))
-    pct = format("%.2f", pct, True)
+    percent = format("%.2f", float(percent), True)
+    if percent == "-101.00":
+      percent = "new"
     name = cgi.escape(name)
     
     out.write("""<tr class="parentrow">
@@ -371,7 +376,7 @@ def flatProfile(database, out, rank):
                  <td class="num">%s</td>
                  %s
                  <td class="s"><a href="./%s">%s</a></td>
-                 </tr>\n""" % (pct, 
+                 </tr>\n""" % (percent, 
                                prepareColumns((to_child_counts, not isPerfTicks, True),
                                               (cumulative_counts, not isPerfTicks, True),
                                               (to_child_calls, True, not isPerfTicks),
@@ -387,7 +392,7 @@ def flatProfile(database, out, rank):
     die(output)
   
   (rank, name, self_count, cumulative_count, kids, self_calls, total_calls,
-   self_paths, total_paths) = output.split("@@@")
+   self_paths, total_paths, percent) = output.split("@@@")
   
   name = cgi.escape(name)
   
@@ -396,16 +401,16 @@ def flatProfile(database, out, rank):
     kids = int(kids) * tick_period
     cumulative_count = int(cumulative_count) * tick_period
   
-  pct = round(100*(float(cumulative_count) / float(total_count)), 2)
-  pct = format("%.2f", pct, True)
-
+  percent = format("%.2f", float(percent), True)
+  if percent == "-101.00":
+    percent = "new"
   out.write("<tbody class='mainrow'>")
   out.write("""<tr class="mainrow">
                <td class="s">[%s]</td>
                <td>%s</td>
                %s
                <td class="s">%s</td>
-               </tr>""" % (rank, pct, 
+               </tr>""" % (rank, percent,
                            prepareColumns((self_count, not isPerfTicks, True),
                                           (kids, not isPerfTicks, True), 
                                           (self_calls, True, not isPerfTicks),
@@ -426,17 +431,18 @@ def flatProfile(database, out, rank):
      from_parent_counts, cumulative_counts, 
      from_parent_calls, total_calls,
      from_parent_paths, total_paths, 
-     cumulative_count) = l.split("@@@")
+     cumulative_count, percent) = l.split("@@@")
     name = cgi.escape(name)
     if isPerfTicks:
       from_parent_counts = int(from_parent_counts) * tick_period
       cumulative_counts = int(cumulative_counts) * tick_period
-    pct = round(100*(float(cumulative_counts) / float(total_count)), 2)
-    pct = format("%.2f", pct, True)
+    percent = format("%.2f", float(percent), True)
+    if percent == "-101.00":
+      percent = "new"
     out.write("""<tr class="childrow"><td></td><td>%s</td>
                  %s
                  <td class="s"><a href="./%s">%s</a></td>
-                 </tr>""" % (pct, 
+                 </tr>""" % (percent, 
                              prepareColumns((from_parent_counts, not isPerfTicks, True), 
                                             (cumulative_counts, not isPerfTicks, True),
                                             (from_parent_calls, True, not isPerfTicks),

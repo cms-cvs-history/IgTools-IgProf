@@ -1,5 +1,9 @@
 2009-08-13  Giulio Eulisse <giulio.eulisse@cern.ch>
 
+	* igprof-navigator: Initial support for diff output.
+	  * Read percentages from database, rather than calculate them on the fly.
+	  * Supports negative percentages.
+
 	* igprof-navigator: print out summary header only if possible.
 
 	* igprof-navigator: Print out some debug information if internal variable 
