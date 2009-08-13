@@ -1,5 +1,8 @@
 2009-08-13  Giulio Eulisse <giulio.eulisse@cern.ch>
 
+	* igprof-navigator: Print out some debug information if internal variable 
+	  "debug" is True.
+
 	* IgProfAnalyse.cc: SQLITE output schema now contains percentage
 	  information to avoid having to have the percentage logic in the 
 	  web browing GUI.

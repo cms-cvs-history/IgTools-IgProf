@@ -56,7 +56,8 @@ import glob
 
 def die(output):
   print "Internal Error!"
-#  print output
+  if debug:
+    print output
   exit(1)
 
 # Emulate rsplit in python 2.3
@@ -499,7 +500,12 @@ class SimpleServerHandler(BaseHTTPRequestHandler):
         self.send_error(*error)
         return
     except Exception, e:
-      self.send_error(500, 'Internal server error')
+      if debug:
+        self.wfile.write("<pre>")
+        self.wfile.write(traceback.format_exc())
+        self.wfile.write("</pre>")
+      else:
+        self.send_error(500, 'Internal server error')
 
 # Standalone server class which has a timeout on the socket and makes the
 # whole application to die by raising the equivalent of a <Ctrl-C>
