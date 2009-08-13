@@ -1,3 +1,7 @@
+2009-08-13  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* IgProfAnalyse.cc: Helper method for printing out percentages added.
+	 
 2009-08-07  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* ChangeLog: correct dates for the last two entries.

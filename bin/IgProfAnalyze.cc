@@ -2627,6 +2627,15 @@ public:
     {
       return(intptr_t)(m_info->SYMBOL->FILE);
     } 
+
+  void printPercentageString(bool diffMode, const char *numeric = "%7.1f  ", const char *overflow = "    new  ")
+    {
+      if (diffMode && PCT == FLT_MAX)
+        printf(overflow);
+      else
+        printf(numeric, PCT);
+    }
+
 private:
   FlatInfo *m_info;
 };
@@ -3188,10 +3197,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
          i++)
     {
       MainGProfRow &row = **i;
-      if (diffMode && row.PCT == FLT_MAX)
-        printf("    new  ");
-      else
-        printf("%7.1f  ", row.PCT);
+      row.printPercentageString(diffMode);
       
       if (isPerfTicks && ! m_config->callgrind())
         printf("%*s  ", maxval, thousands(static_cast<double>(row.CUM) * tickPeriod, 0, 2).c_str());
@@ -3221,10 +3227,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
          i++)
     {
       MainGProfRow &row = **i;
-      if (diffMode && row.SELF_PCT == FLT_MAX)
-        printf("    new  ");
-      else
-        printf("%7.2f  ", row.SELF_PCT);
+      row.printPercentageString(diffMode, "7.2f  ");
 
       if (isPerfTicks && ! m_config->callgrind())
         printf("%*s  ", maxval, thousands(static_cast<double>(row.SELF) * tickPeriod, 0, 2).c_str());
@@ -3291,10 +3294,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
         OtherGProfRow &row = **c;
         std::cout << std::string(8, ' ');
 
-        if (diffMode && row.PCT == FLT_MAX)
-          printf("    new  ");
-        else
-          printf("%7.1f  ", row.PCT);
+        row.printPercentageString(diffMode);
 
         ASSERT(maxval);
         std::cout << std::string(maxval, '.') << "  ";
@@ -3327,10 +3327,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
       char rankBuffer[256];
       sprintf(rankBuffer, "[%d]", mainRow.rank());
       printf("%-8s", rankBuffer);
-      if (diffMode && mainRow.PCT == FLT_MAX)
-        printf("    new  ");
-      else
-        printf("%7.1f  ", mainRow.PCT);
+      mainRow.printPercentageString(diffMode);
 
       if (isPerfTicks && ! m_config->callgrind()) 
       {
@@ -3368,10 +3365,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
       {
         OtherGProfRow &row = **c;
         std::cout << std::string(8, ' ');
-        if (diffMode && row.PCT == FLT_MAX)
-          printf("    new  ");
-        else
-          printf("%7.1f  ", row.PCT);
+        row.printPercentageString(diffMode);
         
         std::cout << std::string(maxval, '.') << "  ";
         
