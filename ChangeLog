@@ -1,3 +1,8 @@
+2009-08-19  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* igprof-navigator: more fixes for the diff output. Ignore empty
+	  queries.
+
 2009-08-13  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* igprof-navigator: Initial support for diff output.

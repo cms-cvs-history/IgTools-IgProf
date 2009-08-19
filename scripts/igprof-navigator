@@ -229,6 +229,8 @@ def summary(database, out, cumulative):
     die(output)
 
   for l in output.split("\n"):
+    if not l:
+      continue
     rank, name, count, calls = l.split("@@@")
     name = cgi.escape(name)
     path = join(absPath, str(rank))
@@ -357,6 +359,8 @@ def flatProfile(database, out, rank):
   tick_period = float(tick_period)
 
   for l in output.split("\n"):
+    if not l:
+      continue
     (rank, name, to_child_counts, cumulative_counts,
      to_child_calls, total_calls,
      to_child_paths, total_paths,
