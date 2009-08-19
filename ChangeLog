@@ -1,5 +1,9 @@
 2009-08-19  Giulio Eulisse <giulio.eulisse@cern.ch>
 
+	* igprof-navigator: enable merged and diff reports in non debug mode,
+	  since they are stable enough (diff has still one non fatal problem
+	  left).
+
 	* igprof-navigator: more fixes for the diff output. Ignore empty
 	  queries.
 

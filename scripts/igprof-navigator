@@ -47,7 +47,7 @@ import thread
 from urlparse import urlparse
 from os.path import join, normpath, exists, basename, isdir, dirname, getsize
 import traceback
-debug=False
+debug=True
 # For debugging purposes only.
 # Uncomment in case of debugging needs
 if debug:
@@ -620,11 +620,9 @@ def printGlobbedListing(p):
     
     reportType = ""
     if "_merged" in DB:
-      if not debug: continue
       reportType = "(Merged By Library)"
       DB = DB.replace("_merged", "")
     elif "_diff25" in DB:
-      if not debug: continue
       reportType = "(Diff to 25)"
       DB = DB.replace("_diff25", "")
     fileInfo["dataset"], rest = DB.split("__", 1)
