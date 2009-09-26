@@ -6,6 +6,7 @@
 #include <cstring>
 #include <cstdio>
 #include <pthread.h>
+#include <malloc.h>
 
 // -------------------------------------------------------------------
 // Traps for this profiler module
@@ -33,12 +34,17 @@ IGPROF_DUAL_HOOK(1, void, dofree, _main, _libc,
 		 "free", 0, "libc.so.6")
 
 // Data for this profiler module
+static const int		OVERHEAD_NONE   = 0; // Memory use without malloc overheads
+static const int		OVERHEAD_WITH   = 1; // Memory use including malloc overheads
+static const int		OVERHEAD_DELTA  = 2; // Memory use malloc overhead only
+
 static IgProfTrace::CounterDef	s_ct_total	= { "MEM_TOTAL",    IgProfTrace::TICK, -1 };
 static IgProfTrace::CounterDef	s_ct_largest	= { "MEM_MAX",      IgProfTrace::MAX, -1 };
 static IgProfTrace::CounterDef	s_ct_live	= { "MEM_LIVE",     IgProfTrace::TICK_PEAK, -1 };
 static bool			s_count_total	= 0;
 static bool			s_count_largest	= 0;
 static bool			s_count_live	= 0;
+static int			s_overhead      = OVERHEAD_NONE;
 static bool			s_initialized	= false;
 static int			s_moduleid	= -1;
 
@@ -51,6 +57,18 @@ add(void *ptr, size_t size)
   IgProfTrace *buf = IgProf::buffer(s_moduleid);
   if (! buf)
     return;
+
+  if (s_overhead != OVERHEAD_NONE)
+  {
+    size_t actual = malloc_usable_size(ptr);
+    if (s_overhead == OVERHEAD_DELTA)
+    {
+      if ((size = actual - size) == 0)
+	return;
+    }
+    else
+      size = actual;
+  }
 
   void			*addresses [IgProfTrace::MAX_DEPTH];
   int			depth = IgHookTrace::stacktrace(addresses, IgProfTrace::MAX_DEPTH);
@@ -157,6 +175,21 @@ initialize(void)
 	  options += 4;
 	  opts = true;
 	}
+	else if (! strncmp(options, ":overhead=none", 14))
+	{
+	  s_overhead = OVERHEAD_NONE;
+	  options += 14;
+	}
+	else if (! strncmp(options, ":overhead=include", 17))
+	{
+	  s_overhead = OVERHEAD_WITH;
+	  options += 17;
+	}
+	else if (! strncmp(options, ":overhead=delta", 15))
+	{
+	  s_overhead = OVERHEAD_DELTA;
+	  options += 15;
+	}
 	else
 	  break;
       }
@@ -189,6 +222,10 @@ initialize(void)
     if (s_count_live)
       IgProf::debug("Memory: enabling live counting\n");
   }
+  IgProf::debug("Memory: reporting %sallocation overhead%s\n",
+		(s_overhead == OVERHEAD_NONE ? "memory use without "
+		 : s_overhead == OVERHEAD_WITH ? "memory use with " : ""),
+	        (s_overhead == OVERHEAD_DELTA ? " only" : ""));
 
   IgHook::hook(domalloc_hook_main.raw);
   IgHook::hook(docalloc_hook_main.raw);

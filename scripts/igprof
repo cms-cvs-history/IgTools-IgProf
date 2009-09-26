@@ -14,6 +14,7 @@ usage() {
   echo -e "-D, --dump-flag FILE       \tuse FILE as a hint to dump the profile data"
   echo -e "-T, --tmpdir DIR           \tuse DIR for temporary profile data files"
   echo -e "-mp, --memory-profiler     \tstart the memory profiler"
+  echo -e "-mo, --memory-overhead X   \treport memory overhead ('none', 'include', 'delta')"
   echo -e "-pp, --performance-profiler\tstart the performance profile (default)"
   echo -e "-pr, --real-time           \tmeasure real time in performance profiler"
   echo -e "-pu, --user-time           \tmeasure user time in performance profiler"
@@ -58,6 +59,16 @@ while [ "$#" != 0 ]; do
     -mp | --memory-profiler )
       [ -z "$MEM" ] && MEM=mem
       MEM="$MEM:total:largest:live"; shift;;
+
+    -mo | --memory-overhead )
+      [ -z "$MEM" ] && MEM=mem
+      case "$2" in
+        none | include | delta )
+          MEM="$MEM:overhead=$2"; shift; shift;;
+        * )
+	  echo "$0: unrecognised -mo value '$2', expected 'none', 'include' or 'delta'"
+	  exit 1 ;;
+      esac ;;
 
     -fd | --file-descriptor )
       [ -z "$FD" ] && FD=fd

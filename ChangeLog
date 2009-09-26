@@ -1,3 +1,8 @@
+2009-09-26  Lassi A. Tuura  <lat@iki.fi>
+
+	* IgProfMem.cc, igprof: Add new option to report overhead in
+	memory allocations: requested size vs. actually allocated size.
+
 2009-08-19  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* igprof-navigator: enable merged and diff reports in non debug mode,
