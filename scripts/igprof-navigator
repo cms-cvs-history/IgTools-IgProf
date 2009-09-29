@@ -619,12 +619,15 @@ def printGlobbedListing(p):
       continue
     
     reportType = ""
+    diffRe = re.compile(".*_diff([0-9]+).*")
+    match = diffRe.match(DB)
     if "_merged" in DB:
       reportType = "(Merged By Library)"
       DB = DB.replace("_merged", "")
-    elif "_diff25" in DB:
-      reportType = "(Diff to 25)"
-      DB = DB.replace("_diff25", "")
+    elif match:
+      diffBaseline = int(match.group(1))
+      reportType = "(Diff to %s)" % diffBaseline
+      DB = DB.replace("_diff%s" % diffBaseline, "")
     fileInfo["dataset"], rest = DB.split("__", 1)
     fileInfo["step"], rest = rsplit(rest, "_", 1)
     if "." in rest:
