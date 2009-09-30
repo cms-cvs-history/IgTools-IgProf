@@ -1,3 +1,8 @@
+2009-09-30  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* IgProfAnalyse.cc: print a syntax error if the igprof file is
+	  malformed.
+
 2009-09-29  Giulio Eulisse <giulio.eulisse@cern.ch>
 	
 	* igprof-navigator: better way of handling the differential outputs.

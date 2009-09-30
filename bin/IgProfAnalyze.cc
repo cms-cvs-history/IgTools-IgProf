@@ -1285,9 +1285,9 @@ public:
       }
       else
       {
-        ASSERT(false);
-        printSyntaxError(line, file->NAME, lineCount, pos());
-        exit(1);
+        std::string fn = file ? file->NAME : "Unknown";
+        printSyntaxError(line, fn.c_str(), lineCount, pos());
+        exit (1);
       }
 
       pos(match.matchEnd());
