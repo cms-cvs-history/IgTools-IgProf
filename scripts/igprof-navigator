@@ -505,7 +505,8 @@ class SimpleServerHandler(BaseHTTPRequestHandler):
       self.end_headers()
       parts = urlparse(self.path)
 
-      rank = basename(parts.path)
+      print parts
+      rank = basename(parts[2])
       error = buildReply(rank, self.__class__.database, self.wfile)
       if error:
         self.send_error(*error)
