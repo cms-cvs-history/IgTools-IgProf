@@ -30,7 +30,7 @@ while (<STDIN>)
     {
       if (m!^ .* / [\d'.]+\s+($func)! && $p !~ /^($exclude)/)
       {
-        s/(\d)'(\d\d\d)/$1$2/g;
+	s/(?<=\d)'(?=\d\d\d)//g;
         my @c = split(/\s+/);
         $tot += $c[5] if ! $seen{$c[$#c]};
         $seen{$c[$#c]} = 1;

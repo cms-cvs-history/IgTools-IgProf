@@ -1,3 +1,7 @@
+2009-10-11  Lassi A. Tuura  <lat@iki.fi>
+
+	* scripts/igprof-func: Eliminate all apostrophes, not just one.
+
 2009-09-30  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* IgProfAnalyse.cc: print a syntax error if the igprof file is
