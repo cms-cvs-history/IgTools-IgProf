@@ -2628,17 +2628,35 @@ public:
       return(intptr_t)(m_info->SYMBOL->FILE);
     } 
 
-  void printPercentageString(bool diffMode, const char *numeric = "%7.1f  ", const char *overflow = "    new  ")
-    {
-      if (diffMode && PCT == FLT_MAX)
-        printf(overflow);
-      else
-        printf(numeric, PCT);
-    }
-
 private:
   FlatInfo *m_info;
 };
+
+/** Helper functor to print percentage numbers
+    in different way, depending on whether we are in 
+    diff mode or not.
+    
+    @a mode true in case we are in diff mode, 
+            false otherwise.
+*/
+class PercentagePrinter
+{
+public:
+  PercentagePrinter(bool mode)
+  :m_mode(mode)
+  {}
+
+  void operator()(float value, const char *numeric = "%7.1f  ", const char *overflow = "    new  ")
+  {
+    if (m_mode && value == FLT_MAX)
+      printf(overflow);
+    else
+      printf(numeric, value);
+  }
+private:
+  bool m_mode;
+};
+
 
 class OtherGProfRow : public GProfRow
 {
@@ -3163,7 +3181,8 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
  
   stable_sort(selfSortedTable.begin(), selfSortedTable.end(), SortRowBySelf());
   bool diffMode = m_config->diffMode();
- 
+  PercentagePrinter printPercentage(diffMode);
+
   if (m_config->outputType() == Configuration::TEXT)
   {
     bool showcalls = m_config->showCalls();
@@ -3185,6 +3204,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
     std::string basefmt = isPerfTicks ? "%.2f" : "%s";
     FractionPrinter valfmt(maxval);
     FractionPrinter cntfmt(maxcnt);
+
     HeaderPrinter hp(showpaths, showcalls, maxval, maxcnt, diffMode);
 
     if (diffMode) 
@@ -3197,7 +3217,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
          i++)
     {
       MainGProfRow &row = **i;
-      row.printPercentageString(diffMode);
+      printPercentage(row.PCT);
       
       if (isPerfTicks && ! m_config->callgrind())
         printf("%*s  ", maxval, thousands(static_cast<double>(row.CUM) * tickPeriod, 0, 2).c_str());
@@ -3227,7 +3247,8 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
          i++)
     {
       MainGProfRow &row = **i;
-      row.printPercentageString(diffMode, "%7.2f  ");
+
+      printPercentage(row.SELF_PCT, "%7.2f  ");
 
       if (isPerfTicks && ! m_config->callgrind())
         printf("%*s  ", maxval, thousands(static_cast<double>(row.SELF) * tickPeriod, 0, 2).c_str());
@@ -3294,7 +3315,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
         OtherGProfRow &row = **c;
         std::cout << std::string(8, ' ');
 
-        row.printPercentageString(diffMode);
+        printPercentage(row.PCT);
 
         ASSERT(maxval);
         std::cout << std::string(maxval, '.') << "  ";
@@ -3327,7 +3348,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
       char rankBuffer[256];
       sprintf(rankBuffer, "[%d]", mainRow.rank());
       printf("%-8s", rankBuffer);
-      mainRow.printPercentageString(diffMode);
+      printPercentage(mainRow.PCT);
 
       if (isPerfTicks && ! m_config->callgrind()) 
       {
@@ -3365,7 +3386,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
       {
         OtherGProfRow &row = **c;
         std::cout << std::string(8, ' ');
-        row.printPercentageString(diffMode);
+        printPercentage(row.PCT);
         
         std::cout << std::string(maxval, '.') << "  ";
         
@@ -3466,7 +3487,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
                 << mainRow.SELF << ", " << mainRow.CUM << ", " << mainRow.KIDS << ", " 
                 << mainRow.SELF_ALL[1] << ", " << mainRow.CUM_ALL[1] << ", " 
                 << mainRow.SELF_ALL[2] << ", " << mainRow.CUM_ALL[2] << ", ";
-      mainRow.printPercentageString(diffMode, "%7.2f", "-101");
+      printPercentage(mainRow.PCT, "%7.2f", "-101");
       std::cout << ");\n";
 
       for (MainGProfRow::Callers::const_iterator c = mainRow.CALLERS.begin();
@@ -3477,7 +3498,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
         std::cout << "INSERT INTO parents (self_id, child_id, to_child_count, to_child_calls, to_child_paths, pct) VALUES ("
                   << row.rank() << ", " << mainRow.rank() << ", "
                   << row.SELF_COUNTS << ", " << row.SELF_CALLS << ", " << row.SELF_PATHS << ", ";
-        row.printPercentageString(diffMode, "%7.2f", "-101");
+        printPercentage(row.PCT, "%7.2f", "-101");
         std::cout << ");\n";
       }
 
@@ -3489,7 +3510,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
         std::cout << "INSERT INTO children(self_id, parent_id, from_parent_count, from_parent_calls, from_parent_paths, pct) VALUES("
                   << row.rank() << ", " << mainRow.rank() << ", "
                   << row.SELF_COUNTS << ", "<< row.SELF_CALLS << ", " << row.SELF_PATHS << ", ";
-        row.printPercentageString(diffMode, "%7.2f", "-101");
+        printPercentage(row.PCT, "%7.2f", "-101");
         std::cout << ");\n";
       }
     }

@@ -1,3 +1,8 @@
+2009-10-12  Giulio Eulisse <giulio.eulisse@cern.ch>
+	
+	* bin/IgProfAnalyse.cc: actually print out the correct number
+	  for "Self" percentage. Clean up the way we print percentages.
+
 2009-10-12  Lassi A. Tuura  <lat@iki.fi>
 
 	* src/IgProfTrace.cc: Silence some GCC 4.x printf() warnings.
