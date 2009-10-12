@@ -172,13 +172,23 @@ static int
 dopthread_sigmask(IgHook::SafeData<igprof_dopthread_sigmask_t> &hook,
 		  int how, sigset_t *newmask,  sigset_t *oldmask)
 {
+  struct sigaction cursig;
+  struct itimerval curtimer;
   if (newmask
       && (how == SIG_BLOCK || how == SIG_SETMASK)
-      && sigismember(newmask, s_signal))
+      && sigismember(newmask, s_signal)
+      && sigaction(s_signal, 0, &cursig) == 0
+      && cursig.sa_handler
+      && getitimer(s_itimer, &curtimer) == 0
+      && (curtimer.it_interval.tv_sec || curtimer.it_interval.tv_usec))
   {
     IgProf::debug("pthread_sigmask(): prevented profiling signal"
-		  " %d from being blocked in thread 0x%lx\n",
-		  s_signal, (unsigned long) pthread_self());
+		  " %d from being blocked in thread 0x%lx"
+		  " [handler 0x%lx, interval %.0f us]\n",
+		  s_signal, (unsigned long) pthread_self(),
+		  (unsigned long) cursig.sa_handler,
+		  1e6 * curtimer.it_interval.tv_sec
+		   + curtimer.it_interval.tv_usec);
     sigdelset(newmask, s_signal);
   }
 

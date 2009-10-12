@@ -31,7 +31,7 @@ struct IgProfWrappedArg { void *(*start_routine)(void *); void *arg; };
 struct IgProfTraceAlloc { IgProfTrace *buf; bool perthread; };
 struct IgProfDumpInfo { int depth; int nsyms; int nlibs; int nctrs;
 			const char *tofile; FILE *output;
-			IgProfSymCache *symcache; };
+			IgProfSymCache *symcache; int blocksig; };
 class IgProfExitDump { public: ~IgProfExitDump(void); };
 typedef std::list<void (*) (void)> IgProfCallList;
 typedef std::list<IgProfTraceAlloc *> IgProfBufList;
@@ -190,6 +190,18 @@ static void *
 dumpAllProfiles(void *arg)
 {
   IgProfDumpInfo *info = (IgProfDumpInfo *) arg;
+  if (info->blocksig)
+  {
+    itimerval stopped = { { 0, 0 }, { 0, 0 } };
+    setitimer(ITIMER_PROF, &stopped, 0);
+    setitimer(ITIMER_VIRTUAL, &stopped, 0);
+    setitimer(ITIMER_REAL, &stopped, 0);
+
+    sigset_t everything;
+    sigfillset(&everything);
+    pthread_sigmask(SIG_BLOCK, &everything, 0);
+  }
+
   char outname[MAX_FNAME];
   const char *tofile = info->tofile;
   if (! tofile || ! tofile[0])
@@ -268,7 +280,7 @@ asyncDumpThread(void *)
     if (! (++dodump % 32) && ! stat(s_dumpflag, &st))
     {
       unlink(s_dumpflag);
-      IgProfDumpInfo info = { 0, 0, 0, 0, s_outname, 0, 0 };
+      IgProfDumpInfo info = { 0, 0, 0, 0, s_outname, 0, 0, 1 };
       dumpAllProfiles(&info);
       dodump = 0;
     }
@@ -284,7 +296,7 @@ extern "C" void
 igprof_dump_now(const char *tofile)
 {
   pthread_t tid;
-  IgProfDumpInfo info = { 0, 0, 0, 0, tofile, 0, 0 };
+  IgProfDumpInfo info = { 0, 0, 0, 0, tofile, 0, 0, 1 };
   pthread_create(&tid, 0, &dumpAllProfiles, &info);
   pthread_join(tid, 0);
 }
@@ -747,7 +759,7 @@ dokill(IgHook::SafeData<igprof_dokill_t> &hook, pid_t pid, int sig)
     if (enabled)
     {
       IgProf::debug("kill(%d,%d) called, dumping state\n", (int) pid, sig);
-      IgProfDumpInfo info = { 0, 0, 0, 0, s_outname, 0, 0 };
+      IgProfDumpInfo info = { 0, 0, 0, 0, s_outname, 0, 0, 0 };
       dumpAllProfiles(&info);
     }
     IgProf::enable(true);
@@ -767,7 +779,7 @@ IgProfExitDump::~IgProfExitDump (void)
   s_enabled = 0;
   s_quitting = 1;
   IgProf::exitThread(true);
-  IgProfDumpInfo info = { 0, 0, 0, 0, s_outname, 0, 0 };
+  IgProfDumpInfo info = { 0, 0, 0, 0, s_outname, 0, 0, 0 };
   dumpAllProfiles(&info);
   IgProf::debug("igprof quitting\n");
   s_initialized = false; // signal local data is unsafe to use

@@ -1,3 +1,11 @@
+2009-10-12  Lassi A. Tuura  <lat@iki.fi>
+
+	* src/IgProf.cc: Prevent profiling in the auxiliary thread which
+	is used to dump profiles; it tends to go into busy loop on RHEL5.
+	* src/IgProfPerf.cc: Do not prevent blocking profiling signals in
+	threads which do not have a profiling timer running. Report the
+	signal handler and profiling interval in the debug output.
+
 2009-10-11  Lassi A. Tuura  <lat@iki.fi>
 
 	* scripts/igprof-func: Eliminate all apostrophes, not just one.
