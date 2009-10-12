@@ -1,4 +1,7 @@
 2009-10-12  Lassi Tuura  <lat@iki.fi>
+	
+	* bin/IgProfAnalyze.cc (RemoveIgProfFilter): Remove the entire
+	tree under IgProf/IgHook, not just the IgProf/Hook part.
 
 	* src/IgProfSymCache.cc: Disable rounding to symbols.  When
 	dynamic symbol information is inaccurate, e.g. for symbols with
