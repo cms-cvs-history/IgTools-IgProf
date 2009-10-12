@@ -1,3 +1,12 @@
+2009-10-12  Lassi Tuura  <lat@iki.fi>
+
+	* src/IgProfSymCache.cc: Disable rounding to symbols.  When
+	dynamic symbol information is inaccurate, e.g. for symbols with
+	only local visibility, rounding to symbols on output reduce
+	profile data accuracy: multiple unrelated symbols are collapsed
+	together and igprof-analyse will no longer be able to separate
+	them from each other.
+
 2009-10-12  Giulio Eulisse <giulio.eulisse@cern.ch>
 	
 	* bin/IgProfAnalyse.cc: actually print out the correct number

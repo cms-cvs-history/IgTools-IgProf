@@ -48,15 +48,12 @@ IgProfSymCache::roundAddressToSymbol(void *address)
     sclink = &cached->next;
   }
 
-  // If we didn't find it, convert the call address to a symbol
-  // address.  Then look up the symbol in the symbol table, and
-  // if not present add to the symbol cache, symbol table and
-  // the library hashes.
+  // Look up the symbol for this call address.  If not present
+  // add to the symbol cache, symbol table and library hashes.
+  Symbol     *s;
   const char *binary;
   Symbol     sym = { 0, address, 0, 0, 0, 0, -1 };
-  Symbol     *s;
-  if (IgHookTrace::symbol(address, sym.name, binary, sym.symoffset, sym.binoffset))
-    sym.address = symaddr = (void *) ((uintptr_t) address - sym.symoffset);
+  IgHookTrace::symbol(address, sym.name, binary, sym.symoffset, sym.binoffset);
 
   // Hook up the cache entry to sort order in the hash list.
   SymCache *next = *sclink;
