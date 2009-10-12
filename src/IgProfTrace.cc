@@ -1,7 +1,9 @@
+#define __STDC_FORMAT_MACROS 1
 #include "IgTools/IgProf/src/IgProfTrace.h"
 #include "IgTools/IgHook/interface/IgHookTrace.h"
 #include <memory.h>
 #include <stdio.h>
+#include <inttypes.h>
 
 static IgProfTrace::Counter FREED;
 static const unsigned int RESOURCE_HASH = 1024*1024;
@@ -178,7 +180,7 @@ IgProfTrace::acquireResource(Record &rec, Counter *ctr)
   if (findResource(rec, rlink, res, ctr->def))
   {
     IgProf::debug("New %s resource 0x%lx of %ju bytes was never freed in %p\n",
-		  ctr->def->name, rec.resource, res->size, this);
+		  ctr->def->name, rec.resource, res->size, (void *)this);
 #if IGPROF_DEBUG
     int depth = 0;
     for (Stack *s = ctr->frame; s; s = s->parent)
@@ -399,19 +401,21 @@ IgProfTrace::debugDumpStack(Stack *s, int depth)
 {
   INDENT(2*depth);
   fprintf(stderr, "STACK %d frame=%p addr=%p next=%p kids=%p\n",
-	  depth, s, s->address, s->sibling, s->children);
+	  depth, (void *)s, (void *)s->address,
+	  (void *)s->sibling, (void *)s->children);
 
   for (Counter *c = s->counters; c; c = c->next)
   {
     INDENT(2*depth+1);
     fprintf(stderr, "COUNTER ctr=%p %s %ju %ju %ju\n",
-	    c, c->def->name, c->ticks, c->value, c->peak);
+	    (void *)c, c->def->name, c->ticks, c->value, c->peak);
 
     for (Resource *r = c->resources; r; r = r->nextlive)
     {
       INDENT(2*depth+2);
       fprintf(stderr, "RESOURCE res=%p (prev=%p next=%p) %ju %ju\n",
-	      r, r->prevlive, r->nextlive, r->resource, r->size);
+	      (void *)r, (void *)r->prevlive, (void *)r->nextlive,
+	      (uintmax_t)r->resource, r->size);
     }
   }
 
@@ -422,9 +426,9 @@ IgProfTrace::debugDumpStack(Stack *s, int depth)
 void
 IgProfTrace::debugDump(void)
 {
-  fprintf (stderr, "TRACE BUFFER %p:\n", this);
-  fprintf (stderr, " RESTABLE:  %p\n", restable_);
-  fprintf (stderr, " CALLCACHE: %p\n", callcache_);
+  fprintf (stderr, "TRACE BUFFER %p:\n", (void *)this);
+  fprintf (stderr, " RESTABLE:  %p\n", (void *)restable_);
+  fprintf (stderr, " CALLCACHE: %p\n", (void *)callcache_);
 
   debugDumpStack(stack_, 0);
   // debugDumpResources();

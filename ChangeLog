@@ -1,5 +1,7 @@
 2009-10-12  Lassi A. Tuura  <lat@iki.fi>
 
+	* src/IgProfTrace.cc: Silence some GCC 4.x printf() warnings.
+
 	* src/IgProf.cc: Prevent profiling in the auxiliary thread which
 	is used to dump profiles; it tends to go into busy loop on RHEL5.
 	* src/IgProfPerf.cc: Do not prevent blocking profiling signals in
