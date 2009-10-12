@@ -3,6 +3,10 @@
 	* bin/IgProfAnalyse.cc: actually print out the correct number
 	  for "Self" percentage. Clean up the way we print percentages.
 
+	* bin/IgProfAnalyse.h: fixes a problem with the diff output when
+	  -r option was not specified. The actual problem was that only
+	  the counts for the baseline were added.
+
 2009-10-12  Lassi A. Tuura  <lat@iki.fi>
 
 	* src/IgProfTrace.cc: Silence some GCC 4.x printf() warnings.

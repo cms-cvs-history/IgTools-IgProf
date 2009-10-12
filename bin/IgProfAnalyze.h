@@ -152,6 +152,8 @@ public:
       Counter::fileIdToId()[id] = id;
       if (isTick)
         s_ticksCounterId = id;
+      if (s_keyName.empty())
+        s_keyName = name;
       if (s_keyName == name)
         s_keyValue = id;
       return id;
