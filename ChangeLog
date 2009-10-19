@@ -1,3 +1,9 @@
+2009-10-19  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* scripts/igprof-symbol-sizes: new script to extract symbol
+	  size information for a given set of libraries which 
+	  can then be processed using igprof-analyse.
+
 2009-10-12  Lassi Tuura  <lat@iki.fi>
 	
 	* bin/IgProfAnalyze.cc (RemoveIgProfFilter): Remove the entire
