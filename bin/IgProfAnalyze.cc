@@ -1034,7 +1034,8 @@ protected:
 class RemoveIgProfFilter : public IgProfFilter
 {
 public:
-  virtual void pre(NodeInfo *parent, NodeInfo *node)
+  virtual void post(NodeInfo *parent,
+                    NodeInfo *node)
     {
       if (!parent)
         return;
@@ -1044,12 +1045,14 @@ public:
       ASSERT(node->originalSymbol()->FILE);
  
       if (strstr(node->originalSymbol()->FILE->NAME.c_str(), "IgProf.")
-	  || strstr(node->originalSymbol()->FILE->NAME.c_str(), "IgHook."))
-        parent->removeChild(node);
+          || strstr(node->originalSymbol()->FILE->NAME.c_str(), "IgHook."))
+      {
+        mergeToNode(parent, node);
+      }
     }
   
   virtual std::string name(void) const { return "igprof remover"; }
-  virtual enum FilterType type(void) const { return PRE; }
+  virtual enum FilterType type(void) const { return POST; }
 };
 
 class RemoveStdFilter : public IgProfFilter

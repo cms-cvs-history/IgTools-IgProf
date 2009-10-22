@@ -1,3 +1,10 @@
+2009-10-22  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* bin/IgProfAnalyze.cc (RemoveIgProfFilter): Revert 
+	  to previous behavior i.e. just remove the IgProf/Hook part.
+	  Introduced behavior could have resulted in massive parts of
+	  genuine profile information dropped.
+
 2009-10-19  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* scripts/igprof-symbol-sizes: new script to extract symbol
