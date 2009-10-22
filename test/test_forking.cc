@@ -9,9 +9,10 @@ void
 a (void)
 {
     std::cerr << "a () called by thread " << getpid () << std::endl;
+    double e;
     for  (int i = 0; i < 1000000; i++)
     {
-	exp(1);	
+	e = exp(1);	
     }    
 }
 
@@ -22,9 +23,10 @@ b (void *)
     for (int j  = 0; j < 10; j++)
     {
 	std::cerr << "thread " << getpid ()<< " still alive" << std::endl;
+        double e;
 	for  (int i = 0; i < 10000000; i++)
 	{
-	    exp(1);
+	    e = exp(1);
 	}
     }
     return 0;

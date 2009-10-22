@@ -5,6 +5,10 @@
 	  Introduced behavior could have resulted in massive parts of
 	  genuine profile information dropped.
 
+	* test/test_forking.cc: silence a gcc 4.3.2 warning complaining
+	  about usefulness of calculating exp(1) and not doing
+	  anything with the result.
+
 2009-10-19  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* scripts/igprof-symbol-sizes: new script to extract symbol
