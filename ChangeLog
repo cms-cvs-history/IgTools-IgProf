@@ -1,3 +1,15 @@
+2009-11-04  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* bin/IgProfAnalyze.cc: when run in --sqlite mode, 
+	  generate an insert-optimized set of SQL statements so that 
+	  we scale up to create big (hundreds of megabytes)
+	  database as well. This is required to handle the 
+	  amount of data produced by the igprof-symbol-analysis
+	  tool.
+
+	* igprof-navigator: support for the new optimized 
+	  schema.
+
 2009-10-22  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* bin/IgProfAnalyze.cc (RemoveIgProfFilter): Revert 

@@ -175,7 +175,7 @@ def summary(database, out, cumulative):
   count, freq = cumulative and ("cumulative_count", "total_calls") or ("self_count", "self_calls")
   self_query="""SELECT mr.id, sym.name, mr.%s, mr.%s 
                 FROM mainrows mr
-                INNER JOIN symbols sym ON sym.id = mr.symbol_id
+                INNER JOIN symbols sym ON sym.id in (mr.symbol_id)
                 ORDER BY mr.%s DESC
                 LIMIT 1000;""" % (count, freq, count) 
   counter, total_count, total_freq, tick_period = getSummaryInfo(database)
@@ -283,9 +283,9 @@ def flatProfile(database, out, rank):
                          mr.cumulative_count,
                          p.pct
                   FROM parents p
-                  INNER JOIN mainrows mr ON mr.id = p.child_id
-                  INNER JOIN mainrows myself ON myself.id = p.self_id
-                  INNER JOIN symbols sym ON sym.id = myself.symbol_id
+                  INNER JOIN mainrows mr ON mr.id IN (p.child_id)
+                  INNER JOIN mainrows myself ON myself.id IN (p.self_id)
+                  INNER JOIN symbols sym ON sym.id IN (myself.symbol_id)
                   WHERE p.child_id = %s
                   ORDER BY p.to_child_count;
                   """ % rank
@@ -297,7 +297,7 @@ def flatProfile(database, out, rank):
                        mr.self_paths, mr.total_paths,
                        mr.pct
                 FROM mainrows mr
-                INNER JOIN symbols sym ON sym.id = mr.symbol_id
+                INNER JOIN symbols sym ON sym.id IN (mr.symbol_id)
                 WHERE mr.id = %s;
                 """ % rank
   
@@ -308,9 +308,9 @@ def flatProfile(database, out, rank):
                         mr.cumulative_count,
                         c.pct
                  FROM children c
-                 INNER JOIN mainrows mr ON mr.id = c.parent_id
-                 INNER JOIN mainrows myself ON myself.id = c.self_id
-                 INNER JOIN symbols sym ON sym.id = myself.symbol_id
+                 INNER JOIN mainrows mr ON mr.id IN (c.parent_id)
+                 INNER JOIN mainrows myself ON myself.id IN (c.self_id)
+                 INNER JOIN symbols sym ON sym.id IN (myself.symbol_id)
                  WHERE c.parent_id = %s
                  ORDER BY c.from_parent_count DESC;
                  """ % rank
@@ -505,7 +505,6 @@ class SimpleServerHandler(BaseHTTPRequestHandler):
       self.end_headers()
       parts = urlparse(self.path)
 
-      print parts
       rank = basename(parts[2])
       error = buildReply(rank, self.__class__.database, self.wfile)
       if error:

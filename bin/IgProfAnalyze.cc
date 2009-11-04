@@ -3420,7 +3420,9 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
   }
   else if (m_config->outputType() == Configuration::SQLITE)
   {
-    std::cout << ("DROP TABLE IF EXISTS files;\n"
+    std::cout << ("PRAGMA journal_mode=OFF;\n"
+                  "PRAGMA count_changes=OFF;\n"
+                  "DROP TABLE IF EXISTS files;\n"
                   "DROP TABLE IF EXISTS symbols;\n"
                   "DROP TABLE IF EXISTS mainrows;\n"
                   "DROP TABLE IF EXISTS children;\n"
@@ -3433,17 +3435,17 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
                   "tick_period REAL\n"
                   ");\n\n"
                   "CREATE TABLE files (\n"
-                  "id INTEGER PRIMARY KEY,\n"
+                  "id,\n"
                   "name TEXT\n"
                   ");\n\n"
                   "CREATE TABLE symbols (\n" 
-                  "id INTEGER PRIMARY KEY,\n"
+                  "id,\n"
                   "name TEXT,\n"
-                  "filename_id INT CONSTRAINT file_id_exists REFERENCES files(id)\n"
+                  "filename_id INTEGER CONSTRAINT file_id_exists REFERENCES files(id)\n"
                   ");\n\n"
                   "CREATE TABLE mainrows (\n"
                   "id INTEGER PRIMARY KEY,\n"
-                  "symbol_id INT CONSTRAINT symbol_id_exists REFERENCES symbol(id),\n"
+                  "symbol_id INTEGER CONSTRAINT symbol_id_exists REFERENCES symbols(id),\n"
                   "self_count INTEGER,\n"
                   "cumulative_count INTEGER,\n"
                   "kids INTEGER,\n"
@@ -3454,52 +3456,71 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
                   "pct REAL\n"
                   ");\n\n"
                   "CREATE TABLE children (\n"
-                  "self_id INT CONSTRAINT self_exist REFERENCES mainrows(id),\n"
-                  "parent_id INT CONSTRAINT parent_exists REFERENCES mainrows(id),\n"
+                  "self_id INTEGER CONSTRAINT self_exists REFERENCES mainrows(id),\n"
+                  "parent_id INTEGER CONSTRAINT parent_exists REFERENCES mainrows(id),\n"
                   "from_parent_count INTEGER,\n" 
                   "from_parent_calls INTEGER,\n"
                   "from_parent_paths INTEGER,\n"
                   "pct REAL\n"
                   ");\n\n"
                   "CREATE TABLE parents (\n"
-                  "self_id INT CONSTRAINT self_exists REFERENCES mainrows(id),\n"
-                  "child_id INT CONSTRAINT child_exists REFERENCES mainrows(id),\n"
+                  "self_id INTEGER CONSTRAINT self_exists REFERENCES mainrows(id),\n"
+                  "child_id INTEGER CONSTRAINT child_exists REFERENCES mainrows(id),\n"
                   "to_child_count INTEGER,\n"
                   "to_child_calls INTEGER,\n"
                   "to_child_paths INTEGER,\n"
                   "pct REAL\n"
-                  ");\n\n\nBEGIN EXCLUSIVE TRANSACTION;\n"
+                  ");\nPRAGMA synchronous=OFF;\n\nBEGIN TRANSACTION;\n"
                   "INSERT INTO summary (counter, total_count, total_freq, tick_period) VALUES(\"")
               << m_config->key () << "\", " << totals << ", " << totfreq << ", " << m_config->tickPeriod() << ");\n\n";
-                 
+                
+    unsigned int insertCount = 0;
+    std::set<int> filesDone;  
+    std::set<int> symbolsDone;
+  
     for (FinalTable::const_iterator i = table.begin();
          i != table.end();
          i++)
     {
       MainGProfRow &mainRow = **i;
-      std::cout << "INSERT OR IGNORE INTO files (id, name) VALUES (" 
-                << mainRow.fileId() << ", \"" << mainRow.filename() << "\");\n"
-                << "INSERT OR IGNORE INTO symbols (id, name, filename_id) VALUES (" 
-                << mainRow.symbolId() << ", \"" << mainRow.name() << "\", " 
-                << mainRow.fileId() << ");\n"
-                << "INSERT INTO mainrows (id, symbol_id, self_count, cumulative_count, kids, self_calls, total_calls, self_paths, total_paths, pct) VALUES ("
+
+      if (filesDone.find(mainRow.fileId()) == filesDone.end())
+      {
+        filesDone.insert(mainRow.fileId());
+        std::cout << "INSERT INTO files VALUES ("
+                  << mainRow.fileId() << ", \"" << mainRow.filename() << "\");\n";
+      }
+
+      if (symbolsDone.find(mainRow.symbolId()) == symbolsDone.end())
+      {  
+        symbolsDone.insert(mainRow.symbolId());
+        std::cout << "INSERT INTO symbols VALUES ("
+                  << mainRow.symbolId() << ", \"" << mainRow.name() << "\", "
+                  << mainRow.fileId() << ");\n";
+      }
+
+      std::cout << "INSERT INTO mainrows VALUES ("
                 << mainRow.rank() << ", " << mainRow.symbolId() << ", " 
                 << mainRow.SELF << ", " << mainRow.CUM << ", " << mainRow.KIDS << ", " 
                 << mainRow.SELF_ALL[1] << ", " << mainRow.CUM_ALL[1] << ", " 
                 << mainRow.SELF_ALL[2] << ", " << mainRow.CUM_ALL[2] << ", ";
       printPercentage(mainRow.PCT, "%7.2f", "-101");
       std::cout << ");\n";
+      if ((++insertCount % 100000) == 0)
+        std::cout << "END TRANSACTION;\nBEGIN TRANSACTION;\n";
 
       for (MainGProfRow::Callers::const_iterator c = mainRow.CALLERS.begin();
            c != mainRow.CALLERS.end();
            c++)
       {
         OtherGProfRow &row = **c;
-        std::cout << "INSERT INTO parents (self_id, child_id, to_child_count, to_child_calls, to_child_paths, pct) VALUES ("
+        std::cout << "INSERT INTO parents VALUES ("
                   << row.rank() << ", " << mainRow.rank() << ", "
                   << row.SELF_COUNTS << ", " << row.SELF_CALLS << ", " << row.SELF_PATHS << ", ";
         printPercentage(row.PCT, "%7.2f", "-101");
         std::cout << ");\n";
+        if ((++insertCount % 100000) == 0)
+          std::cout << "END TRANSACTION;\nBEGIN TRANSACTION;\n";
       }
 
       for (MainGProfRow::Calls::const_iterator c = mainRow.CALLS.begin();
@@ -3507,14 +3528,21 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
            c++)
       {
         OtherGProfRow &row = **c;
-        std::cout << "INSERT INTO children(self_id, parent_id, from_parent_count, from_parent_calls, from_parent_paths, pct) VALUES("
+        std::cout << "INSERT INTO children VALUES("
                   << row.rank() << ", " << mainRow.rank() << ", "
                   << row.SELF_COUNTS << ", "<< row.SELF_CALLS << ", " << row.SELF_PATHS << ", ";
         printPercentage(row.PCT, "%7.2f", "-101");
         std::cout << ");\n";
+        if ((++insertCount % 100000) == 0)
+          std::cout << "END TRANSACTION;\nBEGIN TRANSACTION;\n";
       }
     }
-    std::cout << "END TRANSACTION;\n" << std::endl;
+    std::cout << "END TRANSACTION;\n"
+                 "CREATE UNIQUE INDEX fileIndex ON files (id);\n"
+                 "CREATE UNIQUE INDEX symbolsIndex ON symbols (id);\n" 
+                 "CREATE INDEX selfCountIndex ON mainrows(self_count);\n"
+                 "CREATE INDEX totalCountIndex ON mainrows(cumulative_count);\n"
+              << std::endl;
   }
   else
   {
