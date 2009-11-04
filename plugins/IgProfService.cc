@@ -18,6 +18,7 @@
 #include <string>
 #include <dlfcn.h>
 #include <cstdio>
+#include <cstring>
 
 using namespace edm::service;
 
