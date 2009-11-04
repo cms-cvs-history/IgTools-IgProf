@@ -11,6 +11,7 @@
 #include <string>
 #include <dlfcn.h>
 #include <cstdio>
+#include <cstring>
 
 class IgProfModule : public edm::EDAnalyzer
 {
