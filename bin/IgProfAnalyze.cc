@@ -11,6 +11,7 @@
 #include <classlib/iotools/BufferInputStream.h>
 #include <classlib/iotools/IOChannelOutputStream.h>
 #include <iostream>
+#include <fstream>
 #include <cstdarg>
 #include <cstring>
 #include <cstdlib>
@@ -367,6 +368,22 @@ public:
         || minAverageValue > 0
         || maxAverageValue > 0;
     }
+
+  void setAllocationsDump(const std::string &filename)
+    {
+      m_allocationsDump = new std::fstream;
+      m_allocationsDump->open(filename.c_str(), std::ios_base::out|std::ios_base::trunc);
+      if (m_allocationsDump->fail())
+      {
+        delete m_allocationsDump;
+        m_allocationsDump = 0;
+      }
+    }
+
+  std::fstream *allocationsDump(void)
+    {
+      return m_allocationsDump;
+    }
 private:
   Filters m_filters;
   std::string m_key;
@@ -386,6 +403,7 @@ private:
   RegexpFilter *m_regexpFilter;
   std::string m_baseline;
   bool m_diffMode;
+  std::fstream *m_allocationsDump;
 public:
   int64_t minCountValue;
   int64_t maxCountValue;
@@ -413,6 +431,7 @@ Configuration::Configuration()
    m_tickPeriod(0.01),
    m_regexpFilter(0),
    m_diffMode(false),
+   m_allocationsDump(0),
    minCountValue(-1),
    maxCountValue(-1),
    minCallsValue(-1),
@@ -2340,8 +2359,17 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
       else if (line.size() >= pos()+3
                && parseLeak(line.c_str(), pos, leakAddress, leakSize))
       {
-        //# FIXME: Ignore leak descriptors for now
-        continue;
+        // Allocations get dumped only when --dump-allocations flag
+        // is passed in the command line. For the moment
+        // I only print out a list of the node pointer (which is
+        // a unique id for the call path) the symbol pointer (which
+        // most likely it's always malloc, at this point given that 
+        // no filtering actually happened) and then the 
+        // address / size of the allocation. This way
+        // one should at least be able to connect different allocation
+        // to different callpath.
+        if (m_config->allocationsDump())
+          *(m_config->allocationsDump()) << child << "," << sym << ":0x"<< std::hex << leakAddress << "," << std::dec << leakSize << std::endl;
       }
       else
       {
@@ -2379,6 +2407,7 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
     else
       m_config->setKey((*(Counter::countersByName().begin())).first);
   }
+  m_config->allocationsDump()->close();
 }
 
 template <class T>
@@ -3776,6 +3805,8 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
       m_config->maxAverageValue = parseOptionToInt(*(++arg), "--max-average-value / -Ma");
     else if (is("--min-average-value", "-ma") && left(arg))
       m_config->minAverageValue = parseOptionToInt(*(++arg), "--min-average-value / -ma");
+    else if (is("--dump-allocations"))
+      m_config->setAllocationsDump(*(++arg));
     else if (is("--"))
     {
       while (left(arg) - 1)

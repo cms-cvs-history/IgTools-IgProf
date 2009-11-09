@@ -1,3 +1,20 @@
+2009-11-09  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* bin/IgProfAnalyse.cc: initial implementation of
+	  --dump-allocations <filename> option which 
+	  dumps into a file called `filename' the list 
+	  of all the live allocations found in the dump.
+	  The format of the output file is:
+	  <node-id>,<symbol-id>:<allocation-ptr>,<size>
+	  where <node-id> is a unique identifier for 
+	  the callpath, symbol-id is an identifier for
+	  the method doing the allocation, while allocation
+	  ptr and size are a description of the allocation.
+	  Notice that for the moment <symbol-id> is
+	  not very meaningful, this refers to the original
+	  symbol found in the igprof output, not the 
+	  one that gets calculated with the -g option. 
+
 2009-11-04  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* bin/IgProfAnalyze.cc: when run in --sqlite mode, 
