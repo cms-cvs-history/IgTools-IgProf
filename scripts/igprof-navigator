@@ -574,10 +574,12 @@ def profileFilesGenerator(p):
 # * by architecture
 # * by dataset
 # * by step
+# * by pileup
+# * by global tag
 # * by counter
 # * by number of events
 def tableSorter(a, b):
-  for comp in ["date", "release", "arch", "dataset", "step", "counter", "events"]:
+  for comp in ["date", "release", "arch", "dataset", "step", "pileup", "gtag", "counter", "events"]:
     if cmp(a[comp], b[comp]):
       if comp == "date":
         return cmp(b[comp], a[comp])
@@ -593,49 +595,62 @@ def tableSorter(a, b):
         return cmp(x, y)
   return 0
 
+
 # This is only available for the CGI version and provides an html list 
 # containing all the files that can be browsed.
 def printGlobbedListing(p):
+  counterId = {"PERF_TICKS": 3, 
+               "MEM_TOTAL": 2,
+               "MEM_MAX": 1,
+               "MEM_LIVE": 0}
+
   standaloneFiles = []
   managedFiles = []
   
-  # FIXME: remapping is needed until there is agreement on how to call the 
-  #        various options.
-  counters = {"IgProfMemTotal": "MEM_TOTAL", 
-              "IgProfperf": "PERF_TICKS", 
-              "IgProfMemLive": "MEM_LIVE",
-              "IgProfMemMax": "MEM_MAX"}
+  IBMatcher = re.compile("(.*)_(20[0-9][0-9]-[0-9][0-9]-[0-9][0-9])")
   
   for ref, p, f in profileFilesGenerator(p):
     fileInfo = dict()
     if not "/" in f:
       standaloneFiles += (ref, p, f)
       continue
-    arch, release, DB = f.split("/", 2)
-    fileInfo["name"], fileInfo["arch"]  = p, arch
-    fileInfo["href"] = "%s/%s" % (ref, p)
-    fileInfo["release"], fileInfo["date"] = rsplit(release, "_", 1)
-    if DB.startswith("IgProf"):
+    
+    # Skip files that do not match the agreed structure where each field
+    # is separated by ___
+    try:
+      arch, release, DB = f.split("/", 2)
+      fileInfo["name"], fileInfo["arch"]  = p, arch
+      fileInfo["href"] = "%s/%s" % (ref, p)
+      match = IBMatcher.match(release)
+      if match:
+        fileInfo["release"], fileInfo["date"] = match.groups()
+      else:
+        fileInfo["release"] = release; fileInfo["date"] = "0000-Misc"
+      dataset, step, pileup, gtag, t, counter, events = DB.split("___")
+      if not counter in counterId.iterkeys():
+        continue
+      fileInfo["dataset"] = dataset
+      fileInfo["step"] = step
+      fileInfo["pileup"] = pileup
+      fileInfo["gtag"] = gtag
+      fileInfo["type"] = t
+      fileInfo["counter"] = counter
+      fileInfo["events"] = events
+    except ValueError, e:
       continue
     
-    reportType = ""
-    diffRe = re.compile(".*_diff([0-9]+).*")
-    match = diffRe.match(DB)
-    if "_merged" in DB:
-      reportType = "(Merged By Library)"
-      DB = DB.replace("_merged", "")
-    elif match:
-      diffBaseline = int(match.group(1))
-      reportType = "(Diff to %s)" % diffBaseline
-      DB = DB.replace("_diff%s" % diffBaseline, "")
-    fileInfo["dataset"], rest = DB.split("__", 1)
-    fileInfo["step"], rest = rsplit(rest, "_", 1)
-    if "." in rest:
-      fileInfo["counter"] = counters[rsplit(rest, ".", 1)[0]]
-      fileInfo["events"] = rsplit(rest, ".", 1)[1] + reportType
+    if "_merged" in fileInfo["events"]:
+      fileInfo["events"] = fileInfo["events"].split("_merged")[0]
+      fileInfo["reportType"] = "(Merged By Library)"
+    elif "_diff_" in fileInfo["events"]:
+      fileInfo["events"], diffBaseline = fileInfo["events"].split("_diff_", 2)
+      fileInfo["reportType"] = "(Diff to %s)" % diffBaseline
+    elif "_EndOfJob" in fileInfo["events"]:
+      fileInfo["events"] = fileInfo["events"].split("_EndOfJob")[0]
+      fileInfo["reportType"] = "(End of Run)"
     else:
-      fileInfo["counter"] = counters[rest]
-      fileInfo["events"] = "End of run"
+      fileInfo["reportType"] = ""
+
     managedFiles.append(fileInfo)
   
   managedFiles.sort(tableSorter)
@@ -644,13 +659,14 @@ def printGlobbedListing(p):
   def dateHeader(d):
     print """<h2>%s</h2>""" % d
 
-  def tableHeader(r, a, d):
-    display=""
-    if d == "Unknown":
+  def tableHeader(*titles):
+    title = " ".join(titles)
+    display = ""
+    if titles[0] == "Unknown":
       display="style='display: none;'"
     print """<table cellspacing="0px" %s>
              <tr>
-             <th colspan="5">%s %s %s</th>
+             <th colspan="5">%s</th>
              </tr>
              <tr>
              <th>Step</th>
@@ -659,10 +675,11 @@ def printGlobbedListing(p):
              <th>MEM_TOTAL</th>
              <th>PERF_TICKS</th>
              </tr>
-          """ % (display, r, a, d)
+          """ % (display, title)
           
-  def stepHeader(s):
-    print "<tr><td style='border:0px;white-space:nowrap;'>%s</td><td>" % s.replace(",", ", ")
+  def stepHeader(s, pileup, gtag):
+    string = "%s<br/>(%s, %s)" % (s.replace(",", ", "), pileup, gtag)
+    print "<tr><td style='border:0px;white-space:nowrap;'>%s</td><td>" % string
   
   print """<html>
   <meta name="keywords" content="CMS, CMSSW, profiling, igprof, software performance, high energy physics" />
@@ -701,11 +718,7 @@ border-style: dashed;
   """
   dateHeader(c["date"])
   tableHeader(c["release"], c["arch"], c["dataset"])
-  stepHeader(c["step"])
-  counterId = {"PERF_TICKS": 3, 
-               "MEM_TOTAL": 2,
-               "MEM_MAX": 1,
-               "MEM_LIVE": 0}
+  stepHeader(c["step"],c["pileup"], c["gtag"])
   previousCounter = 0
   for i in managedFiles:
     if c["step"] != i["step"]:
@@ -718,14 +731,14 @@ border-style: dashed;
       dateHeader(i["date"])
     if c["release"] != i["release"] or c["arch"] != i["arch"] or c["dataset"] != i["dataset"] or c["date"] != i["date"]:
       tableHeader(i["release"], i["arch"], i["dataset"])
-    if c["step"] != i["step"]:
-      stepHeader(i["step"])
+    if c["step"] != i["step"] or c["pileup"] != i["pileup"] or c["gtag"] != i["gtag"]:
+      stepHeader(i["step"], i["pileup"], i["gtag"])
     counterDiff = counterId[i["counter"]] - previousCounter
     previousCounter = counterId[i["counter"]]
     
     for x in xrange(0, counterDiff):
       print "</td><td>"
-    print """<a href="%(href)s/">%(events)s</a>""" % i
+    print """<a href="%(href)s/">%(events)s %(reportType)s</a><br/>""" % i
     c = i
   
   print """</tr></table>

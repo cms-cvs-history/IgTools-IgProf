@@ -1,3 +1,9 @@
+2009-11-10  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* scripts/igprof-navigator: improved support for the
+	  new naming schema, grouping PileUp and Global Tag 
+	  information.
+
 2009-11-09  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* bin/IgProfAnalyse.cc: initial implementation of
