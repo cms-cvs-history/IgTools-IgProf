@@ -1,3 +1,9 @@
+2009-11-11  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* bin/IgProfAnalyse.cc: do not close the allocation
+	  dump file if no --dump-allocations options was 
+	  passed.
+
 2009-11-10  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* scripts/igprof-navigator: improved support for the

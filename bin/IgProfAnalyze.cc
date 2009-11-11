@@ -2407,7 +2407,8 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
     else
       m_config->setKey((*(Counter::countersByName().begin())).first);
   }
-  m_config->allocationsDump()->close();
+  if (m_config->allocationsDump())
+    m_config->allocationsDump()->close();
 }
 
 template <class T>
