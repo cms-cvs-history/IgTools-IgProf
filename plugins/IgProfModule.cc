@@ -25,8 +25,17 @@ public:
       nlumi_(0),
       nfile_(0)
     {
+      // Removing the __extension__ gives a warning which
+      // is acknowledged as a language problem in the C++ Standard Core 
+      // Language Defect Report
+      //
+      // http://www.open-std.org/jtc1/sc22/wg21/docs/cwg_defects.html#195
+      //
+      // since the suggested decision seems to be that the syntax should
+      // actually be "Conditionally-Supported Behavior" in some 
+      // future C++ standard I simply silence the warning.
       if (void *sym = dlsym(0, "igprof_dump_now"))
-        dump_ = (void(*)(const char *)) sym;
+        dump_ = __extension__ (void(*)(const char *)) sym;
       else
 	edm::LogWarning("IgProfModule")
 	  << "IgProfModule requested but application is not"

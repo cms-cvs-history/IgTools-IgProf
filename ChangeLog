@@ -1,3 +1,11 @@
+2009-11-13  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* bin/IgProf.cc, plugins/IgProfModule.cc, plugins/IgProfService.cc
+	  src/IgProfTrace.cc, test/test_instrumentation.cc: silencing
+	  warnings which seem to be correct / conditionally supported
+	  in future version of the standard and therefore currently 
+	  there as gcc extension.
+
 2009-11-11  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* bin/IgProfAnalyse.cc: do not close the allocation

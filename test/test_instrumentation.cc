@@ -26,7 +26,16 @@ public:
 	 m_start (0),
 	 m_currentSize (0)
 	{
-	    m_func = (probeFunc *) dlsym (0, "_Z20totalAllocatedMemoryv");
+            // Removing the __extension__ gives a warning which
+            // is acknowledged as a language problem in the C++ Standard Core 
+            // Language Defect Report
+            //
+            // http://www.open-std.org/jtc1/sc22/wg21/docs/cwg_defects.html#195
+            //
+            // since the suggested decision seems to be that the syntax should
+            // actually be "Conditionally-Supported Behavior" in some 
+            // future C++ standard I simply silence the warning.
+	    m_func = __extension__ (probeFunc *) dlsym (0, "_Z20totalAllocatedMemoryv");
 	    if ( m_func != 0)
 		m_profilerRunning = true;	    
 	}

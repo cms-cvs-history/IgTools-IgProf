@@ -407,12 +407,14 @@ IgProfTrace::debugDumpStack(Stack *s, int depth)
   for (Counter *c = s->counters; c; c = c->next)
   {
     INDENT(2*depth+1);
+    __extension__
     fprintf(stderr, "COUNTER ctr=%p %s %ju %ju %ju\n",
 	    (void *)c, c->def->name, c->ticks, c->value, c->peak);
 
     for (Resource *r = c->resources; r; r = r->nextlive)
     {
       INDENT(2*depth+2);
+      __extension__
       fprintf(stderr, "RESOURCE res=%p (prev=%p next=%p) %ju %ju\n",
 	      (void *)r, (void *)r->prevlive, (void *)r->nextlive,
 	      (uintmax_t)r->resource, r->size);
