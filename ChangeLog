@@ -1,3 +1,10 @@
+2009-11-14  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* bin/IgProfAnalyse.cc: fixes a regression introduced by 
+	  wrong leak parsing. Notice that This will replaced soon
+	  by rewritten code which does the dumping in a filter 
+	  rather than while reading the profile.
+
 2009-11-13  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* bin/IgProf.cc, plugins/IgProfModule.cc, plugins/IgProfService.cc

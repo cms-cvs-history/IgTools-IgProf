@@ -2370,6 +2370,7 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
         // to different callpath.
         if (m_config->allocationsDump())
           *(m_config->allocationsDump()) << child << "," << sym << ":0x"<< std::hex << leakAddress << "," << std::dec << leakSize << std::endl;
+        continue;
       }
       else
       {
