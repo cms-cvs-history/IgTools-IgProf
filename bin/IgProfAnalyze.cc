@@ -297,9 +297,6 @@ public:
   void setDoDemangle(bool value) { m_doDemangle = value;}
   bool doDemangle(void) { return m_doDemangle; }
 
-  void setUseGdb(bool value) { m_useGdb = value;}
-  bool useGdb(void) { return m_useGdb; }
-
   void setShowPaths(bool value)  { m_showPaths = value;}
   bool showPaths(void) { return m_showPaths; }
 
@@ -392,7 +389,6 @@ private:
   bool m_showLib;
   int m_callgrind;
   bool m_doDemangle;
-  bool m_useGdb;
   bool m_showPaths;
   int m_showCalls;
   bool m_verbose;
@@ -413,6 +409,7 @@ public:
   int64_t maxAverageValue;
   bool    top10;
   bool    tree;
+  bool    useGdb;
 };
 
 Configuration::Configuration()
@@ -422,7 +419,6 @@ Configuration::Configuration()
    m_showLib(false),
    m_callgrind(-1),
    m_doDemangle(false),
-   m_useGdb(false),
    m_showPaths(false),
    m_showCalls(-1),
    m_verbose(false),
@@ -2248,7 +2244,7 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
   lat::RegexpMatch match;
 
   Counter::setKeyName(m_config->key());
-  SymbolInfoFactory symbolsFactory(&prof, m_config->useGdb());
+  SymbolInfoFactory symbolsFactory(&prof, m_config->useGdb);
   
   while (! reader.eof())
   {
@@ -3039,10 +3035,10 @@ IgProfAnalyzerApplication::tree(ProfileInfo &prof)
   for (FlatVector::const_iterator i = sorted.begin(); i != sorted.end(); i++)
     (*i)->setRank(rank++);
 
-  if (m_config->doDemangle() || m_config->useGdb())
+  if (m_config->doDemangle() || m_config->useGdb)
   {
     verboseMessage("Resolving symbols");
-    symremap(prof, sorted, m_config->useGdb(), m_config->doDemangle());
+    symremap(prof, sorted, m_config->useGdb, m_config->doDemangle());
   }
 
   // Actually producing the tree.
@@ -3085,10 +3081,10 @@ IgProfAnalyzerApplication::top10(ProfileInfo &prof)
   for (FlatVector::const_iterator i = sorted.begin(); i != sorted.end(); i++)
     (*i)->setRank(rank++);
 
-  if (m_config->doDemangle() || m_config->useGdb())
+  if (m_config->doDemangle() || m_config->useGdb)
   {
     verboseMessage("Resolving symbols");
-    symremap(prof, sorted, m_config->useGdb(), m_config->doDemangle());
+    symremap(prof, sorted, m_config->useGdb, m_config->doDemangle());
   }
 
   if (sorted.empty()) {
@@ -3152,10 +3148,10 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
   for (FlatVector::const_iterator i = sorted.begin(); i != sorted.end(); i++)
     (*i)->setRank(rank++);
   
-  if (m_config->doDemangle() || m_config->useGdb())
+  if (m_config->doDemangle() || m_config->useGdb)
   {
     verboseMessage("Resolving symbols");
-    symremap(prof, sorted, m_config->useGdb(), m_config->doDemangle());
+    symremap(prof, sorted, m_config->useGdb, m_config->doDemangle());
   }
  
   if (sorted.empty()) {
@@ -3748,7 +3744,7 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
     else if (is("--demangle", "-d"))
       m_config->setDoDemangle(true);
     else if (is("--gdb", "-g"))
-      m_config->setUseGdb(true);
+      m_config->useGdb = true;
     else if (is("--paths", "-p"))
       m_config->setShowPaths(true);
     else if (is("--calls", "-c"))

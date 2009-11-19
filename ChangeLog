@@ -1,3 +1,9 @@
+2009-11-19  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* bin/IgProfAnalyse.cc: simplifies the way useGdb 
+	  configuration option is handled by removing trivial
+	  getter / setter.
+
 2009-11-14  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* bin/IgProfAnalyse.cc: fixes a regression introduced by 
