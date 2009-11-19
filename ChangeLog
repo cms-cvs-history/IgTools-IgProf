@@ -9,6 +9,10 @@
 	  stacktraces so that we can highlight them on the 
 	  map.
 
+	* bin/IgProfAnalyse.cc: simplify the tree walking
+	  / filtering class removing the unneeded templation
+	  and filter type hierarchy.
+
 2009-11-14  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* bin/IgProfAnalyse.cc: fixes a regression introduced by 

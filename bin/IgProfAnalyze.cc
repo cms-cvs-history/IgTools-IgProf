@@ -654,7 +654,7 @@ printSyntaxError(const std::string &text,
             << std::endl;
 }
 
-class FilterBase
+class IgProfFilter
 {
 public:
   enum FilterType
@@ -664,31 +664,20 @@ public:
     BOTH = 3          
   };                      
     
-  virtual ~FilterBase(void) {}
-  virtual std::string name(void) const = 0;
-  virtual enum FilterType type(void) const = 0;
-};
-
-template <class T>
-class Filter : public FilterBase
-{
-public:
-  virtual void pre(T *parent, T *node) {};
-  virtual void post(T *parent, T *node) {};
-};
-
-class IgProfFilter : public Filter<NodeInfo> 
-{
-public:
   IgProfFilter(void)
     : m_prof(0) {}
-  
+
+  virtual ~IgProfFilter(void) {}
   virtual void init(ProfileInfo *prof) { m_prof = prof; }
+  virtual std::string name(void) const = 0;
+  virtual enum FilterType type(void) const = 0;
+  virtual void pre(NodeInfo *parent, NodeInfo *node) {};
+  virtual void post(NodeInfo *parent, NodeInfo *node) {};
 protected:
   ProfileInfo::Syms &syms(void) { return m_prof->syms(); }
-  ProfileInfo::Nodes &nodes(void) { return m_prof->nodes(); } 
+  ProfileInfo::Nodes &nodes(void) { return m_prof->nodes(); }
 private:
-  ProfileInfo  *m_prof;
+  ProfileInfo *m_prof;
 };
 
 class AddCumulativeInfoFilter : public IgProfFilter 
@@ -2447,56 +2436,14 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
   }
 }
 
-template <class T>
-class StackItem
+struct StackItem
 {
-public:
-  typedef T Node;
-  StackItem(Node *parent, Node *pre, Node *post)
-    : m_parent(parent),
-      m_pre(pre),
-      m_post(post)
-    {}
-  Node *parent(void) { return m_parent; }
-  Node *prev(void) { return m_pre; }
-  Node *post(void) { return m_post; }
-private:
-  Node *m_parent;
-  Node *m_pre;
-  Node *m_post;
+  NodeInfo *parent;
+  NodeInfo *pre;
+  NodeInfo *post;
 };
 
-template <class T>
-class StackManipulator
-{
-public:
-  typedef StackItem<T> Item;
-  typedef typename Item::Node Node;
-  typedef typename Node::Iterator NodesIterator;
-  typedef typename std::list<Item> Container;
-  
-  StackManipulator(Container *stack, T *first)
-    : m_stack(stack) {
-    m_stack->push_back(Item(0, first, 0));
-  }
-  
-  void addChildrenToStack(Node *node)
-    {
-      ASSERT(node);
-      for (NodesIterator i = node->begin(); 
-           i != node->end(); i++)
-        m_stack->push_back(Item(node, *i, 0));
-    }
-  
-  void addToStack(Node *parent, Node *prev)
-    { m_stack->push_back(Item(parent, 0, prev)); }
-
-private:
-  Container *m_stack;
-};
-
-template <class T>
-void walk(T *first, Filter<T> *filter=0)
+void walk(NodeInfo *first, IgProfFilter *filter=0)
 {
   // TODO: Apply more than one filter at the time.
   //     This method applies one filter at the time. Is it worth to do
@@ -2504,29 +2451,45 @@ void walk(T *first, Filter<T> *filter=0)
   //     as well...
   ASSERT(filter);
   ASSERT(first);
-  typedef StackManipulator<T> Manipulator;
-  typedef typename Manipulator::Container Stack;
-  typedef typename Manipulator::Item Item;
-  typedef typename Manipulator::Node Node;
-
-  Stack stack; 
-  Manipulator manipulator(&stack, first);
+  std::vector<StackItem> stack;
+  stack.reserve(1000);
+  stack.resize(1);
+  StackItem &firstItem = stack.back();
+  firstItem.parent = 0;
+  firstItem.pre = first;
+  firstItem.post = 0;
 
   while (!stack.empty())
   {
-    Item item = stack.back(); stack.pop_back();
-    Node *node = item.prev();
-    Node *parent = item.parent();
-    if (node)
+    StackItem &item = stack.back();
+    NodeInfo *parent = item.parent, *pre = item.pre, *post = item.post;
+    stack.resize(stack.size()-1);
+    if (pre)
     {
-      if ( filter->type() & FilterBase::PRE)
-        filter->pre(parent, node);
-      if ( filter->type() & FilterBase::POST)
-        manipulator.addToStack(parent, node);
-      manipulator.addChildrenToStack(node);
+      if ( filter->type() & IgProfFilter::PRE)
+        filter->pre(parent, pre);
+      if (filter->type() & IgProfFilter::POST)
+      {
+        stack.resize(stack.size() + 1);
+        StackItem &newItem = stack.back();
+        newItem.parent = parent;
+        newItem.pre = 0;
+        newItem.post = pre; 
+      }
+      // Add all the children of pre as items in the stack.
+      for (size_t ci = 0, ce = pre->CHILDREN.size(); ci != ce; ++ci)
+      {
+        stack.resize(stack.size() + 1);
+        ASSERT(pre);
+        NodeInfo *child = pre->CHILDREN[ci];
+        StackItem &newItem = stack.back();
+        newItem.parent = pre;
+        newItem.pre = child; 
+        newItem.post = 0;
+      }
     }
     else
-      filter->post(parent, item.post());
+      filter->post(parent, post);
   }
 }
 
@@ -2555,7 +2518,7 @@ IgProfAnalyzerApplication::prepdata(ProfileInfo& prof)
   {
     (*i)->init(&prof);
     verboseMessage("Applying filter", (*i)->name().c_str());
-    walk<NodeInfo>(prof.spontaneous(), *i);
+    walk(prof.spontaneous(), *i);
   }
 
   if (m_config->mergeLibraries())
@@ -2565,19 +2528,19 @@ IgProfAnalyzerApplication::prepdata(ProfileInfo& prof)
     verboseMessage("Merge nodes belonging to the same library.");
 
     UseFileNamesFilter *filter = new UseFileNamesFilter;
-    walk<NodeInfo>(prof.spontaneous(), filter);
+    walk(prof.spontaneous(), filter);
     //    walk<NodeInfo>(prof.spontaneous(), new PrintTreeFilter);
   }
 
   if (m_config->regexpFilter())
   {
     verboseMessage("Merge nodes using user-provided regular expression.");
-    walk<NodeInfo>(prof.spontaneous(), m_config->regexpFilter());
+    walk(prof.spontaneous(), m_config->regexpFilter());
   }
 
   verboseMessage("Summing counters");
   IgProfFilter *sumFilter = new AddCumulativeInfoFilter();
-  walk<NodeInfo>(prof.spontaneous(), sumFilter);
+  walk(prof.spontaneous(), sumFilter);
   walk(prof.spontaneous(), new CheckTreeConsistencyFilter());
 }
 
