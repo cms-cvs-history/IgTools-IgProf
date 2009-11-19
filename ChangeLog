@@ -4,6 +4,11 @@
 	  configuration option is handled by removing trivial
 	  getter / setter.
 
+	* bin/IgProfAnalyse.cc: add a proper filter to dump
+	  heap map information. This also adds the top ten
+	  stacktraces so that we can highlight them on the 
+	  map.
+
 2009-11-14  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* bin/IgProfAnalyse.cc: fixes a regression introduced by 

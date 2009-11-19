@@ -92,14 +92,27 @@ private:
   int RANK;
 };
 
+/** Structure which holds information about a given
+    live allocation. This is used to hold
+    information about the LK elements found in the 
+    report.
+ */
+struct Allocation
+{
+  uintptr_t address;  // The address of the allocation
+  uint64_t  size;     // The size of the allocation 
+};
+
 class NodeInfo
 {
 public:
   typedef std::vector<NodeInfo *> Nodes;
+  typedef std::vector<Allocation> Allocations;
   typedef Nodes::iterator Iterator;
     
   Nodes CHILDREN;
   Counter *COUNTERS;
+  Allocations allocations;
   
   NodeInfo(SymbolInfo *symbol)
     : COUNTERS(0), SYMBOL(symbol), m_reportSymbol(0) {};
@@ -366,21 +379,6 @@ public:
         || maxAverageValue > 0;
     }
 
-  void setAllocationsDump(const std::string &filename)
-    {
-      m_allocationsDump = new std::fstream;
-      m_allocationsDump->open(filename.c_str(), std::ios_base::out|std::ios_base::trunc);
-      if (m_allocationsDump->fail())
-      {
-        delete m_allocationsDump;
-        m_allocationsDump = 0;
-      }
-    }
-
-  std::fstream *allocationsDump(void)
-    {
-      return m_allocationsDump;
-    }
 private:
   Filters m_filters;
   std::string m_key;
@@ -399,7 +397,6 @@ private:
   RegexpFilter *m_regexpFilter;
   std::string m_baseline;
   bool m_diffMode;
-  std::fstream *m_allocationsDump;
 public:
   int64_t minCountValue;
   int64_t maxCountValue;
@@ -410,6 +407,7 @@ public:
   bool    top10;
   bool    tree;
   bool    useGdb;
+  bool    dumpAllocations;
 };
 
 Configuration::Configuration()
@@ -427,7 +425,6 @@ Configuration::Configuration()
    m_tickPeriod(0.01),
    m_regexpFilter(0),
    m_diffMode(false),
-   m_allocationsDump(0),
    minCountValue(-1),
    maxCountValue(-1),
    minCallsValue(-1),
@@ -540,6 +537,7 @@ public:
   void callgrind(ProfileInfo &prof);
   void top10(ProfileInfo &prof);
   void tree(ProfileInfo &prof);
+  void dumpAllocations(ProfileInfo &prof);
   void prepdata(ProfileInfo &prof);
 private:
   void verboseMessage(const char *msg, const char *arg = 0);
@@ -827,6 +825,16 @@ private:
 // Finally if node is among the children of parent, remove it from them.
 void mergeToNode(NodeInfo *parent, NodeInfo *node)
 {
+  // We iterate on all the children of node. [1]
+  // * If parent does not have any children with the same name, we simply add it
+  //   to the list of children. [2]
+  // * If parent already has a children with the same symbol name
+  //   we merge the counters and call mergeToNode for every one of the 
+  //   children. [3]
+  // Finally if node is among the children of parent we copy all
+  // its allocations to it and remove the node from the children list. [4]
+  
+  // [1]
   for (size_t i = 0, e = node->CHILDREN.size(); i != e; i++)
   {
     NodeInfo *nodeChild = node->CHILDREN[i];
@@ -860,6 +868,8 @@ void mergeToNode(NodeInfo *parent, NodeInfo *node)
 
   if (node == parent->getChildrenBySymbol(node->symbol()))
   {
+    parent->allocations.insert(parent->allocations.end(), node->allocations.begin(), node->allocations.end());
+
     NodeInfo::Nodes::iterator new_end = std::remove_if(parent->CHILDREN.begin(),
                                                        parent->CHILDREN.end(),
                                                        std::bind2nd(std::equal_to<NodeInfo *>(), node));
@@ -906,7 +916,38 @@ void mergeCountersToNode(NodeInfo *source, NodeInfo *dest)
   } while (sourceCounter != initialCounter);
 }
 
+/** Filter which dumps per node allocation information
+    in a file.
+ */
+class DumpAllocationsFilter : public IgProfFilter
+{
+public:
+  DumpAllocationsFilter(std::ostream &out)
+  :m_out(out)
+  {
+  }
 
+  /** While traversing down the tree, print out all the
+      allocations and keep track of the symbols that we
+      find.
+    */
+  virtual void pre(NodeInfo *parent, NodeInfo *node)
+  {
+    for (size_t i = 0, e = node->allocations.size(); i != e; ++i)
+    {
+      Allocation &a = node->allocations[i];
+      m_out << node << "," << node->symbol() << "," 
+            << std::hex << a.address << "," << a.size << "\n";
+    }
+  }
+
+  virtual std::string name() const { return "Dump Allocations"; }
+  virtual FilterType type() const { return PRE; }
+private:
+  typedef std::set<SymbolInfo *> Symbols;
+  std::ostream            &m_out;
+  Symbols                 m_symbols;
+};
 
 class CollapsingFilter : public IgProfFilter
 {
@@ -2353,20 +2394,20 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
         match.reset();
       }
       else if (line.size() >= pos()+3
-               && parseLeak(line.c_str(), pos, leakAddress, leakSize))
+               && parseLeak(line.c_str(), pos, leakAddress, leakSize)
+               && m_config->dumpAllocations)
       {
-        // Allocations get dumped only when --dump-allocations flag
-        // is passed in the command line. For the moment
-        // I only print out a list of the node pointer (which is
-        // a unique id for the call path) the symbol pointer (which
-        // most likely it's always malloc, at this point given that 
-        // no filtering actually happened) and then the 
-        // address / size of the allocation. This way
-        // one should at least be able to connect different allocation
-        // to different callpath.
-        if (m_config->allocationsDump())
-          *(m_config->allocationsDump()) << child << "," << sym << ":0x"<< std::hex << leakAddress << "," << std::dec << leakSize << std::endl;
-        continue;
+        // Allocations get handled only when --dump-allocations flag
+        // is passed in the command line. 
+        // Here we simply attach the allocation information to the
+        // node. They will be printed out by a special filter later on.
+        // Notice that allocation information needs to be merged in
+        // just like counters do in the case of filtering
+        // and reorganization of the calltree. 
+        child->allocations.resize(child->allocations.size() + 1);
+        Allocation &a = child->allocations.back(); 
+        a.address = leakAddress;
+        a.size = leakSize;
       }
       else
       {
@@ -2404,8 +2445,6 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
     else
       m_config->setKey((*(Counter::countersByName().begin())).first);
   }
-  if (m_config->allocationsDump())
-    m_config->allocationsDump()->close();
 }
 
 template <class T>
@@ -3047,6 +3086,71 @@ IgProfAnalyzerApplication::tree(ProfileInfo &prof)
 }
 
 void
+IgProfAnalyzerApplication::dumpAllocations(ProfileInfo &prof)
+{
+  prepdata(prof);
+
+  // FIXME: make sure that symremap can be called even without 
+  //        passing a flatMap.
+  verboseMessage("Building call tree map");
+  TreeMapBuilderFilter *callTreeBuilder = new TreeMapBuilderFilter(&prof, m_config);
+  walk(prof.spontaneous(), callTreeBuilder);
+  // Sorting flat entries
+  verboseMessage("Sorting");
+  int rank = 1;
+  typedef std::vector <FlatInfo *> FlatVector;
+  FlatVector sorted;
+  FlatInfoMap *flatMap = callTreeBuilder->flatMap();
+
+  if (flatMap->empty())
+  {
+    std::cerr << "Could not find any information to print." << std::endl;
+    exit(1);
+  }
+
+  for (FlatInfoMap::const_iterator i = flatMap->begin();
+       i != flatMap->end();
+       i++)
+    sorted.push_back(i->second);
+
+  sort(sorted.begin(), sorted.end(), FlatInfoComparator(m_config->keyId(),
+                                                        m_config->ordering()));
+
+
+  for (FlatVector::const_iterator i = sorted.begin(); i != sorted.end(); i++)
+    (*i)->setRank(rank++);
+
+  if (m_config->doDemangle() || m_config->useGdb)
+  {
+    verboseMessage("Resolving symbols");
+    symremap(prof, sorted, m_config->useGdb, m_config->doDemangle());
+  }
+
+  // Produce the allocations map information.
+  DumpAllocationsFilter dumper(std::cout);
+  walk(prof.spontaneous(), &dumper);
+
+  // Dump the symbol information for the first 10 entries.
+
+  // Actually building the top 10.
+  verboseMessage("Building top 10");
+  Top10BuilderFilter *topTenFilter = new Top10BuilderFilter(m_config);
+  walk(prof.spontaneous(), topTenFilter);
+
+  for (size_t i = 0; i != 10; i++)
+  {
+    int64_t value;
+    std::vector<NodeInfo *> &nodes = topTenFilter->stackTrace(i, value);
+    if (!value)
+      break;
+
+    int j = 0;
+    for(std::vector<NodeInfo *>::reverse_iterator ni = nodes.rbegin(), ne = nodes.rend(); ni != ne; ++ni)
+      std::cout << "@("<< i << "," << j++ << ")" << *ni << ":" << (*ni)->symbol()->NAME << "\n";
+  }
+}
+
+void
 IgProfAnalyzerApplication::top10(ProfileInfo &prof)
 {
   prepdata(prof);
@@ -3636,6 +3740,8 @@ IgProfAnalyzerApplication::run(void)
     top10(*prof);
   else if (m_config->tree)
     tree(*prof);
+  else if (m_config->dumpAllocations)
+    dumpAllocations(*prof);
   else
     analyse(*prof, baselineBuilder);
 }
@@ -3804,7 +3910,7 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
     else if (is("--min-average-value", "-ma") && left(arg))
       m_config->minAverageValue = parseOptionToInt(*(++arg), "--min-average-value / -ma");
     else if (is("--dump-allocations"))
-      m_config->setAllocationsDump(*(++arg));
+      m_config->dumpAllocations = true;
     else if (is("--"))
     {
       while (left(arg) - 1)
