@@ -16,6 +16,10 @@
 	* bin/IgProfAnalyse.cc: fixes a regression when
 	  --dump-allocations option is not passed in.
 
+	* bin/IgProfAnalyse.cc: simplify a few parts that
+	  were using lat::StringOps without any particular
+	  reason.
+
 2009-11-14  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* bin/IgProfAnalyse.cc: fixes a regression introduced by 

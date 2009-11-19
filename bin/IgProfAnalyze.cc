@@ -617,7 +617,7 @@ symlookup(FileInfo *file, int fileoff, const std::string& symname, bool useGdb)
   // * If any of the above match, it simply 
   ASSERT(file);
   std::string result = symname;
-  if ((lat::StringOps::find(symname, "@?") == 0) && (file->NAME != "") && (fileoff > 0))
+  if ((symname.size() > 1 && symname[0] == '@' && symname[1] == '?') && file->NAME.size() && (fileoff > 0))
   {
     char buffer[1024];
     if (file->NAME == "<dynamically generated>" )
@@ -1867,7 +1867,7 @@ void symremap(ProfileInfo &prof, std::vector<FlatInfo *> infos, bool usegdb, boo
       ASSERT(file);
       prof.symcache().insert(sym);
       
-      if (!lat::StringOps::contains(fileInfo->NAME, "<dynamically")) 
+      if (memcmp(fileInfo->NAME.c_str(), "<dynamically", 12)) 
       {
         if (fileInfo != prevfile)
         {
@@ -2243,11 +2243,20 @@ void
 printAvailableCounters(const Counter::IdCache &cache)
 {
   typedef Counter::IdCache::const_iterator iterator;
-  lat::StringList tempList;
+  std::vector<std::string> tmpList;
   for (iterator i = cache.begin(); i != cache.end(); i++)
-    tempList.push_back((*i).first);
-  std::cerr << "No profile counter selected for reporting, please select one of: "
-            << lat::StringOps::join(tempList, std::string(",")) << std::endl;
+    tmpList.push_back(i->first);
+
+  if (!tmpList.size())
+  {
+    std::cerr << "No counters available in specified report." << std::endl;
+    exit(1);
+  }
+
+  std::cerr << "No profile counter selected for reporting, please select one of: ";
+  for (size_t i = 0, e = tmpList.size(); i != e - 1; ++i)
+    std::cerr << tmpList[i] << ", ";
+  std::cerr << tmpList.back();
   exit(1);
 }
 
@@ -2468,7 +2477,7 @@ void walk(NodeInfo *first, IgProfFilter *filter=0)
     stack.resize(stack.size()-1);
     if (pre)
     {
-      if ( filter->type() & IgProfFilter::PRE)
+      if (filter->type() & IgProfFilter::PRE)
         filter->pre(parent, pre);
       if (filter->type() & IgProfFilter::POST)
       {
@@ -3694,7 +3703,7 @@ IgProfAnalyzerApplication::run(void)
 
   if (! m_config->isShowCallsDefined())
   {
-    if (lat::StringOps::contains(m_config->key(), "MEM_"))
+    if (!memcmp(m_config->key().c_str(), "MEM_", 4))
       m_config->setShowCalls(true);
     else
       m_config->setShowCalls(false);
@@ -3765,7 +3774,7 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
     {
       std::string key = *(++arg);
       m_config->setKey(key);
-      if (lat::StringOps::find(key, "MEM_") != -1)
+      if (!memcmp(key.c_str(), "MEM_", 4))
         m_config->addFilter(new MallocFilter());
       if (key == "MEM_LIVE")
         m_config->addFilter(new IgProfGccPoolAllocFilter());
