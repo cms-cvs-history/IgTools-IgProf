@@ -13,6 +13,9 @@
 	  / filtering class removing the unneeded templation
 	  and filter type hierarchy.
 
+	* bin/IgProfAnalyse.cc: fixes a regression when
+	  --dump-allocations option is not passed in.
+
 2009-11-14  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* bin/IgProfAnalyse.cc: fixes a regression introduced by 

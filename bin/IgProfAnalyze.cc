@@ -2383,20 +2383,22 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
         match.reset();
       }
       else if (line.size() >= pos()+3
-               && parseLeak(line.c_str(), pos, leakAddress, leakSize)
-               && m_config->dumpAllocations)
+               && parseLeak(line.c_str(), pos, leakAddress, leakSize))
       {
         // Allocations get handled only when --dump-allocations flag
-        // is passed in the command line. 
+        // is passed in the command line.
         // Here we simply attach the allocation information to the
         // node. They will be printed out by a special filter later on.
         // Notice that allocation information needs to be merged in
         // just like counters do in the case of filtering
-        // and reorganization of the calltree. 
+        // and reorganization of the calltree.
+        if (!m_config->dumpAllocations)
+          continue;
         child->allocations.resize(child->allocations.size() + 1);
         Allocation &a = child->allocations.back(); 
         a.address = leakAddress;
         a.size = leakSize;
+        continue;
       }
       else
       {
