@@ -1,3 +1,7 @@
+2009-11-24  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* bin/IgResolveSymbols.h: fixes a 64bit problem.
+
 2009-11-19  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* bin/IgProfAnalyse.cc: simplifies the way useGdb 

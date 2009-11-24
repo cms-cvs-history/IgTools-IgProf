@@ -116,7 +116,7 @@ bool skipString(const char *strptr, const char *srcbuffer, const char **dstbuffe
 class FileInfo
 {
 public:
-  typedef int Offset;
+  typedef uint64_t Offset;
 private:
   struct CacheItem {
     CacheItem(Offset offset, const std::string &name)
@@ -129,10 +129,10 @@ private:
   
   struct CacheItemComparator {
     bool operator()(const CacheItem& a, 
-                    const int &b) const
+                    const Offset &b) const
       { return a.OFFSET < b; }
       
-    bool operator()(const int& a, 
+    bool operator()(const Offset &a, 
                     const CacheItem &b) const
       { return a < b.OFFSET; }    
   };
@@ -187,7 +187,7 @@ private:
     
       std::string oldname;
       std::string suffix;
-      int vmbase = 0;
+      Offset vmbase = 0;
       bool matched = false;
 
       while (objdump.output())
@@ -216,7 +216,7 @@ private:
         if (!skipString("off", lineptr, &lineptr)) 
           continue;
         char *endptr = 0;
-        int initialBase = strtol(lineptr, &endptr, 16);
+        Offset initialBase = strtol(lineptr, &endptr, 16);
         if (lineptr == endptr) 
           continue;
         lineptr = endptr;
@@ -226,10 +226,10 @@ private:
           continue;
         if (!skipWhitespaces(lineptr, &lineptr))
           continue;
-        int finalBase = strtol(lineptr, &endptr, 16);
+        Offset finalBase = strtol(lineptr, &endptr, 16);
         if (lineptr == endptr)
           continue;
-        vmbase=finalBase - initialBase;
+        vmbase = finalBase - initialBase;
         matched = true;
         break;
       }
@@ -253,7 +253,7 @@ private:
         // If line does not match "^(\\d+)[ ]\\S[ ](\S+)$", exit.
         const char *begin = line.c_str();
         char *endptr = 0;
-        int address = strtol(begin, &endptr, 10);
+        Offset address = strtol(begin, &endptr, 10);
         if (endptr == begin) 
           continue; 
 
@@ -278,7 +278,7 @@ private:
         // The symbol is automatically saved in the FileInfo cache by offset.
         // If a symbol with the same offset is already there, the new one 
         // replaces the old one.
-        int offset = address-vmbase;
+        Offset offset = address - vmbase;
         if (m_symbolCache.size() && (m_symbolCache.back().OFFSET == offset))
           m_symbolCache.back().NAME = symbolName;
         else
