@@ -1,3 +1,22 @@
+2009-12-01  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* bin/IgProfAnalyse.cc: factorization of flat report
+	  generation code from tree analysis.
+
+	* bin/IgProfAnalyse.cc: when running in 
+	  --dump-allocations mode use an estimator of memory
+	  fragmentation rather then simply MEM_LIVE
+	  as an index.
+	  Such an estimator is:
+
+	  pagesize * number of allocations / memory used
+
+	  for every node in the tree.
+
+	  Notice that such a number is just an estimator
+	  and does not have any particular meaning when
+	  it gets summed up from children to parent.
+
 2009-11-24  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* bin/IgResolveSymbols.h: fixes a 64bit problem.

@@ -523,9 +523,11 @@ private:
 };
 
 class TreeMapBuilderFilter;
+class FlatInfo;
 
 class IgProfAnalyzerApplication
 {
+  typedef std::vector<FlatInfo *> FlatVector;
 public:
   typedef std::list <std::string> ArgsList;
 
@@ -534,6 +536,10 @@ public:
   void parseArgs(const ArgsList &args);
   void readDump(ProfileInfo &prof, const std::string& filename, StackTraceFilter *filter = 0);
   void analyse(ProfileInfo &prof, TreeMapBuilderFilter *baselineBuilder);
+  void generateFlatReport(ProfileInfo &prof, 
+                          TreeMapBuilderFilter *callTreeBuilder, 
+                          TreeMapBuilderFilter *baselineBuilder,
+                          FlatVector &sorted);
   void callgrind(ProfileInfo &prof);
   void top10(ProfileInfo &prof);
   void tree(ProfileInfo &prof);
@@ -678,6 +684,43 @@ protected:
   ProfileInfo::Nodes &nodes(void) { return m_prof->nodes(); }
 private:
   ProfileInfo *m_prof;
+};
+
+
+// A simple filter which reports the number of allocations
+// required to allocate the amount of memory that fits on
+// one page. This is a rough indication of the actual
+// fragmentation and has the advantage that the greater the number is
+// the more fragmented the memory is likely to be. 
+//
+// FIXME: a more accurate indication of fragmentation is
+//        to find out how many pages were actually touched
+//        by all the allocations done in a given node.
+//        This is much more complicated because we would
+//        have to do the binning of all the allocations
+//        to see how many of them share the same page
+//        and how many don't.
+class AllocationsPerPage : public IgProfFilter
+{
+public:
+  virtual void post(NodeInfo *parent,
+                    NodeInfo *node)
+    {
+      ASSERT(node);
+      Counter *initialCounter = node->COUNTERS;
+      if (!initialCounter) return;
+      Counter *counter = initialCounter;
+      do
+      {
+        if (counter->freq() != 0)
+        {
+          counter->cnt() = 4096 * counter->freq() / counter->cnt();
+        }
+        counter = counter->next();
+      } while (initialCounter != counter);
+    }
+  virtual std::string name(void) const { return "average allocation size"; }
+  virtual enum FilterType type(void) const { return POST; }
 };
 
 class AddCumulativeInfoFilter : public IgProfFilter 
@@ -3026,7 +3069,6 @@ IgProfAnalyzerApplication::tree(ProfileInfo &prof)
   // Sorting flat entries
   verboseMessage("Sorting");
   int rank = 1;
-  typedef std::vector <FlatInfo *> FlatVector;
   FlatVector sorted;
   FlatInfoMap *flatMap = callTreeBuilder->flatMap();
 
@@ -3062,6 +3104,11 @@ IgProfAnalyzerApplication::tree(ProfileInfo &prof)
 void
 IgProfAnalyzerApplication::dumpAllocations(ProfileInfo &prof)
 {
+  // Calculate the amount of allocations required to fill one page of
+  // memory. This is a rough indication of fragmentation.
+  AllocationsPerPage *fragmentationEvaluator = new AllocationsPerPage();
+  walk(prof.spontaneous(), fragmentationEvaluator);
+
   prepdata(prof);
 
   // FIXME: make sure that symremap can be called even without 
@@ -3069,10 +3116,10 @@ IgProfAnalyzerApplication::dumpAllocations(ProfileInfo &prof)
   verboseMessage("Building call tree map");
   TreeMapBuilderFilter *callTreeBuilder = new TreeMapBuilderFilter(&prof, m_config);
   walk(prof.spontaneous(), callTreeBuilder);
+
   // Sorting flat entries
   verboseMessage("Sorting");
   int rank = 1;
-  typedef std::vector <FlatInfo *> FlatVector;
   FlatVector sorted;
   FlatInfoMap *flatMap = callTreeBuilder->flatMap();
 
@@ -3122,6 +3169,8 @@ IgProfAnalyzerApplication::dumpAllocations(ProfileInfo &prof)
     for(std::vector<NodeInfo *>::reverse_iterator ni = nodes.rbegin(), ne = nodes.rend(); ni != ne; ++ni)
       std::cout << "@("<< i << "," << j++ << ")" << *ni << ":" << (*ni)->symbol()->NAME << "\n";
   }
+  
+  generateFlatReport(prof, callTreeBuilder, 0, sorted);
 }
 
 void
@@ -3137,7 +3186,6 @@ IgProfAnalyzerApplication::top10(ProfileInfo &prof)
   // Sorting flat entries
   verboseMessage("Sorting");
   int rank = 1;
-  typedef std::vector <FlatInfo *> FlatVector;
   FlatVector sorted;
   FlatInfoMap *flatMap = callTreeBuilder->flatMap();
 
@@ -3204,7 +3252,6 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
   // Sorting flat entries
   verboseMessage("Sorting");
   int rank = 1;
-  typedef std::vector <FlatInfo *> FlatVector;
   FlatVector sorted; 
   FlatInfoMap *flatMap = callTreeBuilder->flatMap();
 
@@ -3236,7 +3283,26 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
     std::cerr << "Could not find any sorted information to print." << std::endl;
     exit(1);
   }
+  generateFlatReport(prof, callTreeBuilder, baselineBuilder, sorted);
+}
 
+
+/** An helper function to generate a flat profile from the tree information. 
+    
+    @a callTreeBuilder which is the filter used to accumulate the tree information.
+
+    @a baselineBuilder which is the filter used to accumulate the tree information
+     of the baseline.
+
+    @a sorted vector which contains the entries of the flat map, correctly
+     ordered.
+  */
+void
+IgProfAnalyzerApplication::generateFlatReport(ProfileInfo &prof, 
+                                              TreeMapBuilderFilter *callTreeBuilder, 
+                                              TreeMapBuilderFilter *baselineBuilder,
+                                              FlatVector &sorted)
+{
   verboseMessage("Generating report");
   
   int keyId = m_config->keyId();
