@@ -50,7 +50,7 @@ public:
       atEvent_     = ps.getUntrackedParameter<std::string>("reportToFileAtEvent", atEvent_);
     }
 
-  virtual void beginJob(const edm::EventSetup &es)
+  virtual void beginJob()
     { makeDump(atBeginJob_); }
 
   virtual void endJob(void)
