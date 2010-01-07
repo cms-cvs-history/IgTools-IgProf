@@ -13,6 +13,16 @@
 	  object. This removes the need for
 	  Configuration::setRegexpFilter, Configuration::regexpFilter,
 	  Configuration::m_regexpFilter, RegexpFilter::addSubstitution.
+
+	* bin/IgProfAnalyse.cc:	Remove API to set a ProfileInfo for an
+	  IgProfFilter removed, since there is no actual need for it. 
+
+	  Remove as well IgProfFilter API to get symbols and nodes from such
+	  a ProfileInfo since it's unused.
+
+	  A few filters (MallocFilter, IgProfGccPoolAllocFilter,
+	  TreeInfoFilter) that were (not) using the above API have been
+	  cleaned up. 
 		
 2009-12-17  Giulio Eulisse <giulio.eulisse@cern.ch>
 

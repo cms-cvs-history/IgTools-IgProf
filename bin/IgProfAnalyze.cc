@@ -670,20 +670,11 @@ public:
     BOTH = 3          
   };                      
     
-  IgProfFilter(void)
-    : m_prof(0) {}
-
   virtual ~IgProfFilter(void) {}
-  virtual void init(ProfileInfo *prof) { m_prof = prof; }
   virtual std::string name(void) const = 0;
   virtual enum FilterType type(void) const = 0;
   virtual void pre(NodeInfo *parent, NodeInfo *node) {};
   virtual void post(NodeInfo *parent, NodeInfo *node) {};
-protected:
-  ProfileInfo::Syms &syms(void) { return m_prof->syms(); }
-  ProfileInfo::Nodes &nodes(void) { return m_prof->nodes(); }
-private:
-  ProfileInfo *m_prof;
 };
 
 
@@ -2015,8 +2006,8 @@ void symremap(ProfileInfo &prof, std::vector<FlatInfo *> infos, bool usegdb, boo
 class MallocFilter : public IgProfFilter
 {
 public:
-  virtual void init(ProfileInfo *prof) {
-    IgProfFilter::init(prof);
+  MallocFilter (void)
+  { 
     m_filter = "malloc", "calloc", "realloc", "memalign", "posix_memalign", 
                "valloc", "zmalloc", "zcalloc", "zrealloc", "_Znwj", 
                "_Znaj", "_Znam";
@@ -2083,16 +2074,17 @@ private:
 class IgProfGccPoolAllocFilter : public IgProfFilter
 {
 public:
-  virtual void init(ProfileInfo *prof) {
-    IgProfFilter::init(prof);
-    m_filter = "_ZNSt24__default_alloc_templateILb1ELi0EE14_S_chunk_allocEjRi",
-               "_ZNSt24__default_alloc_templateILb1ELi0EE9_S_refillEj",
-               "_ZNSt24__default_alloc_templateILb1ELi0EE8allocateEj";
-  }
+  IgProfGccPoolAllocFilter(void) 
+    {
+      m_filter = "_ZNSt24__default_alloc_templateILb1ELi0EE14_S_chunk_allocEjRi",
+                 "_ZNSt24__default_alloc_templateILb1ELi0EE9_S_refillEj",
+                 "_ZNSt24__default_alloc_templateILb1ELi0EE8allocateEj";
+    }
 
   virtual void post(NodeInfo *parent, NodeInfo *node) 
     {
-      if (! m_filter.contains(node->symbol()->NAME)) return;
+      if (! m_filter.contains(node->symbol()->NAME)) 
+        return;
       parent->removeChild(node);
     }
   virtual std::string name(void) const { return "gcc_pool_alloc"; }
@@ -2104,10 +2096,6 @@ private:
 class TreeInfoFilter : public IgProfFilter
 {
 public:
-  virtual void init(ProfileInfo *prof) {
-    IgProfFilter::init(prof);
-  }
-
   virtual void pre(NodeInfo *parent, NodeInfo *node) 
     {
       Counter *i = node->COUNTERS;
@@ -2578,7 +2566,6 @@ IgProfAnalyzerApplication::prepdata(ProfileInfo& prof)
        i != m_config->filters().end();
        i++)
   {
-    (*i)->init(&prof);
     verboseMessage("Applying filter", (*i)->name().c_str());
     walk(prof.spontaneous(), *i);
   }
