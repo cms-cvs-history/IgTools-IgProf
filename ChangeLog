@@ -1,3 +1,19 @@
+2010-01-07  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* bin/IgProfAnalyse.cc: Found out that regular expression search and
+	  replace was actually broken. This was because the regular expression
+	  gets build with "s|XXX|YYY|" rather than just XXX because of an
+	  accidentally removed line.
+	    
+	  Refactored the way the RegexpFilter works, separating the
+	  actual parsing of the search / replace statements from the
+	  creation of the regular expression objects. Now the
+	  IgProfAnalyzerApplication::parseArgs creates a vector of
+	  RegexpSpecs from which RegexpFilter builds the lat::Regexp
+	  object. This removes the need for
+	  Configuration::setRegexpFilter, Configuration::regexpFilter,
+	  Configuration::m_regexpFilter, RegexpFilter::addSubstitution.
+		
 2009-12-17  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* scripts/igprof-navigator-summary: helper script to generate
