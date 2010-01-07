@@ -23,7 +23,11 @@
 	  A few filters (MallocFilter, IgProfGccPoolAllocFilter,
 	  TreeInfoFilter) that were (not) using the above API have been
 	  cleaned up. 
-		
+
+	* bin/IgProfAnalyse.cc: Filters are now maintained in a vector in
+	  IgProfApplication the whole API to deal with them is completely
+	  removed since it was more code it was actually saving.
+
 2009-12-17  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* scripts/igprof-navigator-summary: helper script to generate

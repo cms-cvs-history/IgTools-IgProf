@@ -264,8 +264,6 @@ struct RegexpSpec
 class Configuration 
 {
 public:
-  typedef std::list<IgProfFilter *> Filters;
-
   enum OutputType {
     TEXT=0,
     XML=1,
@@ -278,13 +276,6 @@ public:
   };
   
   Configuration(void);
-
-  Filters & filters(void) {return m_filters;}
-  
-  void addFilter(IgProfFilter *filter) {
-    if (m_filtersEnabled)
-      m_filters.push_back(filter); 
-  }
 
   void setKey(const std::string &value) { m_key = value; };
   bool hasKey(void) { return ! m_key.empty(); }
@@ -351,14 +342,6 @@ public:
       return m_baseline;
     }
 
-  void disableFilters(void) 
-    { 
-      m_filtersEnabled = false; 
-      m_filters.erase(m_filters.begin(), m_filters.end());
-      // TODO: remove dummy assertion.(bbc800a) 
-      ASSERT(m_filters.empty());
-    }
-
   void setDiffMode(bool value)
     {
       m_diffMode = value;
@@ -380,7 +363,6 @@ public:
     }
 
 private:
-  Filters m_filters;
   std::string m_key;
   OutputType  m_outputType;
   Ordering  m_ordering;
@@ -391,7 +373,6 @@ private:
   int m_showCalls;
   bool m_verbose;
   bool m_normalValue;
-  bool m_filtersEnabled;
   float m_tickPeriod;
   bool m_mergeLibraries;
   std::string m_baseline;
@@ -421,7 +402,6 @@ Configuration::Configuration()
    m_showCalls(-1),
    m_verbose(false),
    m_normalValue(true),
-   m_filtersEnabled(true),
    m_tickPeriod(0.01),
    m_diffMode(false),
    minCountValue(-1),
@@ -531,6 +511,7 @@ public:
   typedef std::list <std::string> ArgsList;
 
   IgProfAnalyzerApplication(int argc, const char **argv);
+
   void run(void);
   void parseArgs(const ArgsList &args);
   void readDump(ProfileInfo &prof, const std::string& filename, StackTraceFilter *filter = 0);
@@ -549,8 +530,9 @@ private:
   Configuration *m_config;
   int m_argc;
   const char **m_argv;
-  std::vector<std::string>  m_inputFiles;
-  std::vector<RegexpSpec>   m_regexps;
+  std::vector<std::string>    m_inputFiles;
+  std::vector<RegexpSpec>     m_regexps;
+  std::vector<IgProfFilter *> m_filters;
 };
 
 
@@ -2562,12 +2544,11 @@ IgProfAnalyzerApplication::verboseMessage(const char *msg, const char *arg)
 void
 IgProfAnalyzerApplication::prepdata(ProfileInfo& prof)
 {
-  for (Configuration::Filters::const_iterator i = m_config->filters().begin();
-       i != m_config->filters().end();
-       i++)
+  for (size_t fi = 0, fe = m_filters.size(); fi != fe; ++fi)
   {
-    verboseMessage("Applying filter", (*i)->name().c_str());
-    walk(prof.spontaneous(), *i);
+    IgProfFilter *filter = m_filters[fi];
+    verboseMessage("Applying filter", filter->name().c_str());
+    walk(prof.spontaneous(), filter);
   }
 
   if (m_config->mergeLibraries())
@@ -3734,7 +3715,7 @@ IgProfAnalyzerApplication::run(void)
   for (int i = 0; i < m_argc; i++) 
     args.push_back(m_argv[i]);
   
-  m_config->addFilter(new RemoveIgProfFilter());
+  m_filters.push_back(new RemoveIgProfFilter());
 
   this->parseArgs(args);
 
@@ -3835,10 +3816,15 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
     {
       std::string key = *(++arg);
       m_config->setKey(key);
-      if (!memcmp(key.c_str(), "MEM_", 4))
-        m_config->addFilter(new MallocFilter());
-      if (key == "MEM_LIVE")
-        m_config->addFilter(new IgProfGccPoolAllocFilter());
+      // If there are filters, it means that RemoveIgProfFilter
+      // is still there, hence --no-filters was not 
+      // specified.
+      //
+      // Therefore we add some more filters,  as required.
+      if (!m_filters.empty() && !memcmp(key.c_str(), "MEM_", 4))
+        m_filters.push_back(new MallocFilter());
+      if (!m_filters.empty() && key == "MEM_LIVE")
+        m_filters.push_back(new IgProfGccPoolAllocFilter());
     }
     else if (is("--value") && left(arg) > 1)
     {
@@ -3867,7 +3853,7 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
     else if (is("--filter", "-f"))
       unsupportedOptionDeath(arg->c_str());
     else if (is("--no-filter", "-nf"))
-      m_config->disableFilters();
+      m_filters.clear();
     else if (is("--list-filters", "-lf"))
       unsupportedOptionDeath(arg->c_str());
     else if (is("--libs", "-l"))
