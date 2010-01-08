@@ -1,3 +1,43 @@
+2010-01-08  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* bin/IgProfAnalyse.cc, bin/IgProfAnalyse.h: code changed so that
+	  it is decided a priori which counter igprof-analyse will be reporting
+	  about and it will ignore all the others. This means that we can get
+	  rid of the ring buffer that was getting used to keep track of a random
+	  number of counters, therefore simplifing a lot the Counter class and
+	  removing all the loops required to navigate rings. The methods
+	  Counter::addCounterToRing, Counter::popCounterFromRing,
+	  Counter::ringSize were removed. The member variable NodeInfo::COUNTERS
+	  was renamed to COUNTER and all the related code was adapted. In
+	  particular the information about whether we are reporting about a peak
+	  counter (i.e. MEM_MAX) or a performance one (PERF_TICKS) is now
+	  maintained by IgProfAnalyzerApplication class, rather than by Counter
+	  as before. Finally COUNTER is now an instance in NodeInfo rather than
+	  a pointer.
+
+	  mergeToNode API was modified to have information whether the nodes 
+	  passed are peak or not.
+
+	  The IgProfAnalyzerApplication::setKey() method has now
+	  responsibility to set up correct default filters and decide which
+	  kind of counter we are looking at. We also now exit with an error if
+	  more than one -r option is provided. All this required a little bit
+	  of code reshuffling because  IgProfAnalyzerApplication::setKey need
+	  to know about the default filters.  
+
+	  TreeInfoFilter was removed since unused.
+
+	  TreeMapBuilderFilter has now an helper method "accumulateCounts"
+	  which removes a few duplicated lines.
+
+	  walk method was changed to use reserve + push_back(). Previous
+	  implementation used "std::vector<T>::resize(n)" which itself calls
+	  "reserve(n)" as well, making any prereservation useless.
+
+	  Fix issue when -r PERF_TICKS is passed while parsing a memory
+	  profile (or viceversa, -r MEM_TOTAL while parsing a performance
+	  profile).
+
 2010-01-07  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* bin/IgProfAnalyse.cc: Found out that regular expression search and

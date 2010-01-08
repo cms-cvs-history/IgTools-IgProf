@@ -111,11 +111,11 @@ public:
   typedef Nodes::iterator Iterator;
     
   Nodes CHILDREN;
-  Counter *COUNTERS;
+  Counter COUNTER;
   Allocations allocations;
   
   NodeInfo(SymbolInfo *symbol)
-    : COUNTERS(0), SYMBOL(symbol), m_reportSymbol(0) {};
+    : SYMBOL(symbol), m_reportSymbol(0) {};
   NodeInfo *getChildrenBySymbol(SymbolInfo *symbol)
     {
       for (Nodes::const_iterator i = CHILDREN.begin();
@@ -145,16 +145,6 @@ public:
            i != CHILDREN.end();
            i++)
         (*i)->printDebugInfo(level+1);
-    }
-  
-  Counter &counter(const std::string &name)
-    { return this->counter(Counter::getIdForCounterName(name)); }
-
-  Counter &counter(int id)
-    {
-      Counter *result = Counter::getCounterInRing(this->COUNTERS, id);
-      ASSERT(result);
-      return *result;
     }
   
   void removeChild(NodeInfo *node) {
@@ -231,8 +221,6 @@ public:
   Files & files(void) { return m_files; }
   Syms & syms(void) { return m_syms; }
   Nodes & nodes(void) { return m_nodes; }
-  CountsMap & counts(void) { return m_counts; }
-  Freqs  & freqs(void) { return m_freqs; }
   NodeInfo *spontaneous(void) { return m_spontaneous; }
   SymCacheByFile &symcacheByFile(void) { return m_symcacheFile; }
   SymCache &symcache(void) { return m_symcache; }
@@ -240,8 +228,6 @@ private:
   Files m_files;
   Syms m_syms;
   Nodes m_nodes;
-  CountsMap m_counts;
-  Freqs m_freqs;
   LeaksMap m_leaks;
   SymCacheByFile m_symcacheFile;
   SymCache m_symcache;
@@ -276,26 +262,6 @@ public:
   };
   
   Configuration(void);
-
-  void setKey(const std::string &value) { m_key = value; };
-  bool hasKey(void) { return ! m_key.empty(); }
-  std::string key(void) { return m_key; }
-  /** Returns the internal id for the counter that was 
-      requested, either explicitly or implicitly, by the user.
-    */
-  int keyId(void) 
-    {
-      int id = Counter::getIdForCounterName(m_key);
-      if (id == -1)
-      {
-        std::cerr << "Sorry, it looks like the counter you have requested, "
-                  << m_key << ", is not available in the selected file.\n";
-        std::cerr << "Maybe you are looking at the wrong kind of profile?"
-                  << std::endl;
-        exit(1);
-      }
-      return id;
-    }
 
   void setShowLib(bool value) { m_showLib = value;}
   bool showLib(void) { return m_showLib; }
@@ -392,8 +358,7 @@ public:
 };
 
 Configuration::Configuration()
-  :m_key(""),
-   m_outputType(Configuration::TEXT),
+  :m_outputType(Configuration::TEXT),
    m_ordering(Configuration::ASCENDING),
    m_showLib(false),
    m_callgrind(-1),
@@ -504,6 +469,171 @@ private:
 class TreeMapBuilderFilter;
 class FlatInfo;
 
+class IgProfFilter
+{
+public:
+  enum FilterType
+  {
+    PRE = 1,
+    POST = 2,
+    BOTH = 3
+  };
+
+  virtual ~IgProfFilter(void) {}
+  virtual std::string name(void) const = 0;
+  virtual enum FilterType type(void) const = 0;
+  virtual void pre(NodeInfo *parent, NodeInfo *node) {};
+  virtual void post(NodeInfo *parent, NodeInfo *node) {};
+};
+
+/** Merges @a node and all its children to @a parent.
+    
+    We iterate on all the children of node. 
+    If parent does not have any children with the same name, we simply add it
+    to the list of children.
+    If parent already has a children with the same symbol name
+    we merge the counters and call mergeToNode for every one of the children.
+    Finally if node is among the children of parent, remove it from them.
+
+    @a node is the node to be removed. 
+
+    @a parent is the parent of that node, which will get all the
+     children of node.
+
+    @a isMax whether or not peak value has to be taken for the counts,
+     rather than accumulating them.
+*/
+void mergeToNode(NodeInfo *parent, NodeInfo *node, bool isMax)
+{
+  // We iterate on all the children of node. [1]
+  // * If parent does not have any children with the same name, we simply add it
+  //   to the list of children. [2]
+  // * If parent already has a children with the same symbol name
+  //   we merge the counters and call mergeToNode for every one of the 
+  //   children. [3]
+  // Finally if node is among the children of parent we copy all
+  // its allocations to it and remove the node from the children list. [4]
+ 
+  // [1]
+  for (size_t i = 0, e = node->CHILDREN.size(); i != e; i++)
+  {
+    NodeInfo *nodeChild = node->CHILDREN[i];
+    ASSERT(nodeChild);
+    if (!nodeChild->symbol())
+      continue;
+    NodeInfo *parentChild = parent->getChildrenBySymbol(nodeChild->symbol());
+    if (!parentChild)
+    {
+      parent->CHILDREN.push_back(nodeChild);
+      continue;
+    }
+
+    ASSERT(parentChild != nodeChild);
+    parentChild->COUNTER.add(nodeChild->COUNTER, isMax);
+    mergeToNode(parentChild, nodeChild, isMax);
+  }
+
+  if (node == parent->getChildrenBySymbol(node->symbol()))
+  {
+    parent->allocations.insert(parent->allocations.end(), node->allocations.begin(), node->allocations.end());
+
+    NodeInfo::Nodes::iterator new_end = std::remove_if(parent->CHILDREN.begin(),
+                                                       parent->CHILDREN.end(),
+                                                       std::bind2nd(std::equal_to<NodeInfo *>(), node));
+    if (new_end != parent->CHILDREN.end())
+      parent->CHILDREN.erase(new_end, parent->CHILDREN.end());
+  }
+}
+
+class RemoveIgProfFilter : public IgProfFilter
+{
+public:
+  RemoveIgProfFilter(bool isMax)
+  : m_isMax(isMax)
+  {}
+
+  virtual void post(NodeInfo *parent,
+                    NodeInfo *node)
+    {
+      if (!parent)
+        return;
+
+      ASSERT(node);
+      ASSERT(node->originalSymbol());
+      ASSERT(node->originalSymbol()->FILE);
+
+      if (strstr(node->originalSymbol()->FILE->NAME.c_str(), "IgProf.")
+          || strstr(node->originalSymbol()->FILE->NAME.c_str(), "IgHook."))
+      {
+        mergeToNode(parent, node, m_isMax);
+      }
+    }
+
+  virtual std::string name(void) const { return "igprof remover"; }
+  virtual enum FilterType type(void) const { return POST; }
+private:
+  bool m_isMax;
+};
+
+/** Removes any malloc related symbol from the calltree
+    adding their contribution to the nearest parent.
+ */
+class MallocFilter : public IgProfFilter
+{
+public:
+  MallocFilter(bool isMax)
+  :m_isMax(isMax)
+  {
+    m_filter = "malloc", "calloc", "realloc", "memalign", "posix_memalign",
+               "valloc", "zmalloc", "zcalloc", "zrealloc", "_Znwj",
+               "_Znaj", "_Znam";
+  }
+
+  virtual void post(NodeInfo *parent, NodeInfo *node)
+    {
+      ASSERT(node);
+      ASSERT(node->symbol());
+      ASSERT(m_filter.contains(std::string("_Znaj")));
+      if (!parent)
+        return;
+
+      if (! m_filter.contains(node->symbol()->NAME))
+        return;
+
+      parent->COUNTER.add(node->COUNTER, m_isMax);
+      parent->removeChild(node);
+    }
+
+  virtual std::string name(void) const { return "malloc"; }
+  virtual enum FilterType type(void) const { return POST; }
+
+private:
+  SymbolFilter m_filter;
+  bool m_isMax;
+};
+
+class IgProfGccPoolAllocFilter : public IgProfFilter
+{
+public:
+  IgProfGccPoolAllocFilter(void)
+    {
+      m_filter = "_ZNSt24__default_alloc_templateILb1ELi0EE14_S_chunk_allocEjRi",
+                 "_ZNSt24__default_alloc_templateILb1ELi0EE9_S_refillEj",
+                 "_ZNSt24__default_alloc_templateILb1ELi0EE8allocateEj";
+    }
+
+  virtual void post(NodeInfo *parent, NodeInfo *node)
+    {
+      if (! m_filter.contains(node->symbol()->NAME))
+        return;
+      parent->removeChild(node);
+    }
+  virtual std::string name(void) const { return "gcc_pool_alloc"; }
+  virtual enum FilterType type(void) const { return POST; }
+private:
+  SymbolFilter m_filter;
+};
+
 class IgProfAnalyzerApplication
 {
   typedef std::vector<FlatInfo *> FlatVector;
@@ -525,21 +655,55 @@ public:
   void tree(ProfileInfo &prof);
   void dumpAllocations(ProfileInfo &prof);
   void prepdata(ProfileInfo &prof);
+
+  /** Sets the mnemonic name of the counter is to be used as a key.
+
+      Update the m_keyMax and m_isPerfTick to match the kind of 
+      counter specified.
+
+      It also sets up the default filters (unless --no-filter / -nf is
+      specified).
+    */
+  void setKey(const std::string &value)
+  {
+    m_key = value;
+
+    if (strstr(m_key.c_str(), "_MAX") == m_key.c_str() + m_key.size() - 4)
+      m_keyMax = true;
+    if (m_key == "PERF_TICKS")
+      m_isPerfTicks = true;
+
+    if (m_disableFilters)
+      return;
+    
+    m_filters.push_back(new RemoveIgProfFilter(m_keyMax));
+
+    if (!m_filters.empty() && !memcmp(m_key.c_str(), "MEM_", 4))
+      m_filters.push_back(new MallocFilter(m_keyMax));
+    if (!m_filters.empty() && m_key == "MEM_LIVE")
+      m_filters.push_back(new IgProfGccPoolAllocFilter());
+  }
+
 private:
   void verboseMessage(const char *msg, const char *arg = 0);
-  Configuration *m_config;
-  int m_argc;
-  const char **m_argv;
-  std::vector<std::string>    m_inputFiles;
-  std::vector<RegexpSpec>     m_regexps;
-  std::vector<IgProfFilter *> m_filters;
+  Configuration *               m_config;
+  int                           m_argc;
+  const char                    **m_argv;
+  std::vector<std::string>      m_inputFiles;
+  std::vector<RegexpSpec>       m_regexps;
+  std::vector<IgProfFilter *>   m_filters;
+  std::string                   m_key;
+  bool                          m_isPerfTicks;
+  bool                          m_keyMax;
+  bool                          m_disableFilters;
 };
 
 
 IgProfAnalyzerApplication::IgProfAnalyzerApplication(int argc, const char **argv)
   :m_config(new Configuration()),
    m_argc(argc),
-   m_argv(argv)
+   m_argv(argv),
+   m_disableFilters(false)
 {}
 
 float
@@ -642,24 +806,6 @@ printSyntaxError(const std::string &text,
             << std::endl;
 }
 
-class IgProfFilter
-{
-public:
-  enum FilterType
-  {     
-    PRE = 1,  
-    POST = 2,     
-    BOTH = 3          
-  };                      
-    
-  virtual ~IgProfFilter(void) {}
-  virtual std::string name(void) const = 0;
-  virtual enum FilterType type(void) const = 0;
-  virtual void pre(NodeInfo *parent, NodeInfo *node) {};
-  virtual void post(NodeInfo *parent, NodeInfo *node) {};
-};
-
-
 // A simple filter which reports the number of allocations
 // required to allocate the amount of memory that fits on
 // one page. This is a rough indication of the actual
@@ -680,101 +826,70 @@ public:
                     NodeInfo *node)
     {
       ASSERT(node);
-      Counter *initialCounter = node->COUNTERS;
-      if (!initialCounter) return;
-      Counter *counter = initialCounter;
-      do
-      {
-        if (counter->freq() != 0)
-        {
-          counter->cnt() = 4096 * counter->freq() / counter->cnt();
-        }
-        counter = counter->next();
-      } while (initialCounter != counter);
+      Counter &counter = node->COUNTER;
+      if (counter.freq != 0)
+        counter.cnt = 4096 * counter.freq / counter.cnt;
     }
   virtual std::string name(void) const { return "average allocation size"; }
   virtual enum FilterType type(void) const { return POST; }
 };
 
+/** This filter accumulates all the counters so that
+    parents cumulative counts / freq contain all 
+    include those of all their children.
+    
+    On the way down (pre) the filter sets all the cumulative
+    values to the counts for the node itself,
+    while on the way up (post) the counts of a child are
+    added properly to the parent. 
+  */
 class AddCumulativeInfoFilter : public IgProfFilter 
 {
 public:
+  AddCumulativeInfoFilter(bool isMax)
+    : m_isMax(isMax)
+    {}
+
   virtual void pre(NodeInfo *parent, NodeInfo *node)
     {
       ASSERT(node);
-      Counter *initialCounter = node->COUNTERS;
-      if (! initialCounter) return;
-    
-      Counter *counter= initialCounter;
-      int loopCount = 0;
-      do
-      { 
-        ASSERT(loopCount++ < 32);
-        ASSERT(counter);
-
-        counter->cfreq() = counter->freq();
-        counter->ccnt() = counter->cnt();
-        counter = counter->next();
-      } while (initialCounter != counter);
+      Counter &counter = node->COUNTER;
+      counter.cfreq = counter.freq;
+      counter.ccnt = counter.cnt;
     }
 
-  virtual void post(NodeInfo *parent,
-                    NodeInfo *node)
+  virtual void post(NodeInfo *parent, NodeInfo *node)
     {
       ASSERT(node);
-      Counter *initialCounter = node->COUNTERS;
-      if (!parent) 
-      {
+      if (!parent)
         return;
-      }
-      if (!initialCounter) return;
-      Counter *counter = initialCounter;
-      int loopCount = 0;
-      do
-      {
-        ASSERT(loopCount++ < 32);
-        ASSERT(parent);
-        ASSERT(counter);
-        Counter *parentCounter = Counter::addCounterToRing(parent->COUNTERS, counter->id());
-        ASSERT(parentCounter);
-        parentCounter->cfreq() += counter->cfreq();
-      
-        if (counter->isMax()) {
-          if (parentCounter->ccnt() < counter->ccnt()) {
-            parentCounter->ccnt() = counter->ccnt();
-          }
-        }
-        else {
-          parentCounter->ccnt() += counter->ccnt();
-        }
-        counter = counter->next();
-      } while (initialCounter != counter);
+      parent->COUNTER.accumulate(node->COUNTER, m_isMax);
     }
   virtual std::string name(void) const { return "cumulative info"; }
   virtual enum FilterType type(void) const { return BOTH; }
+
+private:
+  bool m_isMax;
 };
 
+/** Simple tree consistency class that makes sure that there
+    is only one node (the root) without parent. 
+*/
 class CheckTreeConsistencyFilter : public IgProfFilter
 {
 public:
   CheckTreeConsistencyFilter()
     :m_noParentCount(0)
     {}
+
   virtual void post(NodeInfo *parent,
                     NodeInfo *node)
     {
-      if (!parent) {
+      if (!parent) 
+      {
         m_noParentCount++;
         ASSERT(m_noParentCount == 1);
       }
-      Counter *initialCounter = node->COUNTERS;
-      if (! initialCounter) return;
-      Counter *counter= initialCounter;
-      ASSERT(counter);
-      do
-      {
-        counter = counter->next();
-      } while (initialCounter != counter);
     }
   virtual std::string name(void) const { return "Check consitency of tree"; }
   virtual enum FilterType type(void) const { return POST; }
@@ -782,36 +897,25 @@ private:
   int m_noParentCount;
 };
 
+/** Prints the whole calltree as a tree (i.e. indenting children according to their
+    level) */
 class PrintTreeFilter : public IgProfFilter
 {
 public:
   PrintTreeFilter(void)
     {}
 
-  virtual void pre(NodeInfo *parent,
-                   NodeInfo *node)
+  virtual void pre(NodeInfo *parent, NodeInfo *node)
     {
       m_parentStack.erase(std::find(m_parentStack.begin(), m_parentStack.end(), parent), m_parentStack.end());
       m_parentStack.push_back(parent);  
     
-      std::cerr << std::string(2*(m_parentStack.size()-1),' ') << node->symbol()->NAME; 
-      Counter *initialCounter = node->COUNTERS;
-      if (! initialCounter) 
-      { 
-        std::cerr << std::endl; 
-        return;
-      }
-
-      Counter *counter= initialCounter;
-      ASSERT(counter);
-      do
-      {
-        std::cerr << " C" << counter->id() << "[" << counter->cnt() << ", "
-                  << counter->freq() << ", "
-                  << counter->ccnt() << ", "
-                  << counter->cfreq() << "]";
-        counter = counter->next();
-      } while (initialCounter != counter);
+      std::cerr << std::string(2*(m_parentStack.size()-1), ' ') << node->symbol()->NAME; 
+      Counter &counter = node->COUNTER;
+      std::cerr << " C" << "[" << counter.cnt << ", "
+                << counter.freq << ", "
+                << counter.ccnt << ", "
+                << counter.cfreq << "]";
       std::cerr << std::endl;
     }
   virtual std::string name(void) const { return "Printing tree structure"; }
@@ -819,107 +923,6 @@ public:
 private:
   std::vector<NodeInfo *> m_parentStack; 
 };
-
-// node is the node to be removed. parent is the parent of
-// that node, which will get all the children of node.
-// We iterate on all the children of node. 
-// If parent does not have any children with the same name, we simply add it
-// to the list of children.
-// If parent already has a children with the same symbol name
-// we merge the counters and call mergeToNode for every one of the children.
-// Finally if node is among the children of parent, remove it from them.
-void mergeToNode(NodeInfo *parent, NodeInfo *node)
-{
-  // We iterate on all the children of node. [1]
-  // * If parent does not have any children with the same name, we simply add it
-  //   to the list of children. [2]
-  // * If parent already has a children with the same symbol name
-  //   we merge the counters and call mergeToNode for every one of the 
-  //   children. [3]
-  // Finally if node is among the children of parent we copy all
-  // its allocations to it and remove the node from the children list. [4]
-  
-  // [1]
-  for (size_t i = 0, e = node->CHILDREN.size(); i != e; i++)
-  {
-    NodeInfo *nodeChild = node->CHILDREN[i];
-    ASSERT(nodeChild);
-    if (!nodeChild->symbol())
-      continue;
-    NodeInfo *parentChild = parent->getChildrenBySymbol(nodeChild->symbol());
-    if (!parentChild)
-    {
-      parent->CHILDREN.push_back(nodeChild);
-      continue;
-    }
-
-    ASSERT(parentChild != nodeChild);
-
-    while (Counter *nodeChildCounter = Counter::popCounterFromRing(nodeChild->COUNTERS))
-    {
-      Counter *parentChildCounter = Counter::addCounterToRing(parentChild->COUNTERS,
-                                                              nodeChildCounter->id());
-      parentChildCounter->freq() += nodeChildCounter->freq();
-      if (nodeChildCounter->isMax())
-      {
-        if (parentChildCounter->cnt() < nodeChildCounter->cnt())
-          parentChildCounter->cnt() = nodeChildCounter->cnt();
-      }
-      else
-        parentChildCounter->cnt() += nodeChildCounter->cnt();
-    }
-    mergeToNode(parentChild, nodeChild);
-  }
-
-  if (node == parent->getChildrenBySymbol(node->symbol()))
-  {
-    parent->allocations.insert(parent->allocations.end(), node->allocations.begin(), node->allocations.end());
-
-    NodeInfo::Nodes::iterator new_end = std::remove_if(parent->CHILDREN.begin(),
-                                                       parent->CHILDREN.end(),
-                                                       std::bind2nd(std::equal_to<NodeInfo *>(), node));
-    if (new_end != parent->CHILDREN.end())
-      parent->CHILDREN.erase(new_end, parent->CHILDREN.end());
-  }
-}
-
-void mergeCountersToNode(NodeInfo *source, NodeInfo *dest)
-{
-  ASSERT(source);
-  ASSERT(dest);
-  int countersCount = 0;
-  if (! source->COUNTERS)
-    return;
-
-  Counter *initialCounter = source->COUNTERS;
-  ASSERT(initialCounter);
-  Counter *sourceCounter = initialCounter;
-  do
-  {
-    ++countersCount;
-    Counter *destCounter = Counter::addCounterToRing(dest->COUNTERS,
-                                                     sourceCounter->id());
-    ASSERT(countersCount < 32);
-    ASSERT(sourceCounter);
-    ASSERT(sourceCounter->freq() >= 0);
-    ASSERT(sourceCounter->cnt() >= 0);
-    destCounter->freq() += sourceCounter->freq();
-    if (destCounter->isMax()) {
-      if (destCounter->cnt() < sourceCounter->cnt())
-        destCounter->cnt() = sourceCounter->cnt();
-    }
-    else {
-      destCounter->cnt() += sourceCounter->cnt();
-    }
-    ASSERT(destCounter->cnt() >= sourceCounter->cnt());
-    ASSERT(destCounter->freq() >= sourceCounter->freq());
-    ASSERT(destCounter->ccnt() == 0);
-    ASSERT(destCounter->cfreq() == 0);
-    ASSERT(sourceCounter->ccnt() == 0);
-    ASSERT(sourceCounter->cfreq() == 0);
-    sourceCounter = sourceCounter->next();
-  } while (sourceCounter != initialCounter);
-}
 
 /** Filter which dumps per node allocation information
     in a file.
@@ -957,6 +960,10 @@ private:
 class CollapsingFilter : public IgProfFilter
 {
 public:
+  CollapsingFilter(bool isMax)
+  : m_isMax(isMax)
+  {}
+
   // On the way down add extra nodes for libraries.
   virtual void pre(NodeInfo *parent, NodeInfo *node)
     {
@@ -988,28 +995,31 @@ public:
         if (todo->symbol() == node->symbol())
         {
           todos.insert(todos.end(), todo->begin(), todo->end());
-          mergeCountersToNode(todo, node);
+          node->COUNTER.add(todo->COUNTER, m_isMax);
         }
         else if (NodeInfo *same = node->getChildrenBySymbol(todo->symbol()))
         {
           same->CHILDREN.insert(same->end(), todo->begin(), todo->end());
-          mergeCountersToNode(todo, same);
+          same->COUNTER.add(todo->COUNTER, m_isMax);
         }
         else
-        {
           node->CHILDREN.push_back(todo);  
-        }
       }
     }
   virtual enum FilterType type(void) const {return PRE; }
 protected:
   virtual void convertSymbol(NodeInfo *node) = 0;
+private:
+  bool m_isMax;
 };
 
 class UseFileNamesFilter : public CollapsingFilter 
 {
   typedef std::map<std::string, SymbolInfo *> FilenameSymbols;
 public:
+  UseFileNamesFilter(bool isMax)
+  :CollapsingFilter(isMax)
+  {}
   virtual std::string name(void) const { return "unify nodes by library."; }
   virtual enum FilterType type(void) const {return PRE; }
 protected:
@@ -1042,7 +1052,8 @@ class RegexpFilter : public CollapsingFilter
 
   typedef std::map<std::string, SymbolInfo *> CollapsedSymbols;
 public:
-  RegexpFilter(const std::vector<RegexpSpec> &specs)
+  RegexpFilter(const std::vector<RegexpSpec> &specs, bool isMax)
+  :CollapsingFilter(isMax)
   {
     for (size_t i = 0, e = specs.size(); i != e; i++)
     {
@@ -1100,34 +1111,14 @@ private:
   std::vector<Regexp> m_regexps;
 };
 
-class RemoveIgProfFilter : public IgProfFilter
-{
-public:
-  virtual void post(NodeInfo *parent,
-                    NodeInfo *node)
-    {
-      if (!parent)
-        return;
-    
-      ASSERT(node);
-      ASSERT(node->originalSymbol());
-      ASSERT(node->originalSymbol()->FILE);
- 
-      if (strstr(node->originalSymbol()->FILE->NAME.c_str(), "IgProf.")
-          || strstr(node->originalSymbol()->FILE->NAME.c_str(), "IgHook."))
-      {
-        mergeToNode(parent, node);
-      }
-    }
-  
-  virtual std::string name(void) const { return "igprof remover"; }
-  virtual enum FilterType type(void) const { return POST; }
-};
-
+/** Filter to merge use by C++ std namespace entities to parents. 
+ */
 class RemoveStdFilter : public IgProfFilter
 {
 public:
-  /// Merge use by C++ std namespace entities to parents.
+  RemoveStdFilter(bool isMax)
+  :m_isMax(isMax)
+  {}
   
   virtual void post(NodeInfo *parent,
                     NodeInfo *node)
@@ -1151,10 +1142,12 @@ public:
       std::cerr << "Symbol " << node->originalSymbol()->NAME << " is "
                 << " in " << node->originalSymbol()->FILE->NAME 
                 << ". Merging." << std::endl;
-      mergeToNode(parent, node);
+      mergeToNode(parent, node, m_isMax);
     }
   virtual std::string name(void) const { return "remove std"; }
   virtual enum FilterType type(void) const { return POST; }
+private:
+  bool m_isMax;
 };
 
 
@@ -1434,26 +1427,24 @@ class MassifTreeBuilder : public IgProfFilter
 {
 public:
   MassifTreeBuilder(Configuration *config) 
-  :m_keyId(Counter::getIdForCounterName(config->key())),
-   m_indent(0),
+  :m_indent(0),
    m_totals(0),
-   m_sorter(m_keyId, false),
-   m_reverseSorter(m_keyId, true)
+   m_sorter(false),
+   m_reverseSorter(true)
   {
-    ASSERT(m_keyId != -1);
   }
 
   virtual void pre(NodeInfo *parent, NodeInfo *node)
   {
     std::sort(node->CHILDREN.begin(), node->CHILDREN.end(), m_reverseSorter);
     
-    Counter *nodeCounter = Counter::getCounterInRing(node->COUNTERS, m_keyId);
+    Counter &nodeCounter = node->COUNTER;
     
     float pct = 0;
     if (!parent)
-      m_totals = nodeCounter->ccnt();
+      m_totals = nodeCounter.ccnt;
 
-    pct = percent(nodeCounter->ccnt(), m_totals);
+    pct = percent(nodeCounter.ccnt, m_totals);
     
     // Determine which children are above threshold.
     // Sum up the contribution of those below threshold.
@@ -1463,9 +1454,8 @@ public:
     float others = 0.; 
     for (size_t i = 0, e = node->CHILDREN.size(); i != e; i++)
     {
-      Counter *childCounter = Counter::getCounterInRing(node->CHILDREN[i]->COUNTERS, m_keyId);
-      ASSERT(childCounter);
-      float childPct = percent(childCounter->ccnt(), m_totals);
+      Counter &childCounter = node->CHILDREN[i]->COUNTER;
+      float childPct = percent(childCounter.ccnt, m_totals);
       if ((childPct < 1. && pct < 1.) || childPct < 0.1)
         others += childPct;
       else
@@ -1491,7 +1481,7 @@ public:
         std::cout << "|";
     }
 
-    if (nodeCounter)
+    if (nodeCounter.cnt)
       std::cout << "->(" << std::fixed << std::setprecision(2) << pct << ") ";
 
     if (node->symbol() && !node->symbol()->NAME.empty())
@@ -1519,9 +1509,8 @@ private:
 
   struct SortByCumulativeCount 
   {
-    SortByCumulativeCount(int keyId, bool reverse)
-    :m_keyId(keyId),
-     m_reverse(reverse)
+    SortByCumulativeCount(bool reverse)
+    :m_reverse(reverse)
     {
     }
 
@@ -1531,18 +1520,14 @@ private:
         return !m_reverse;
       if (!b)
         return m_reverse;
-      Counter *ca = Counter::getCounterInRing(a->COUNTERS, m_keyId);
-      Counter *cb = Counter::getCounterInRing(b->COUNTERS, m_keyId);
-      int64_t aVal = ca ? ca->ccnt() : 0;
-      int64_t bVal = cb ? cb->ccnt() : 0; 
+      Counter &ca = a->COUNTER;
+      Counter &cb = b->COUNTER;
 
-      return (aVal < bVal) ^ m_reverse;
+      return (ca.ccnt < cb.ccnt) ^ m_reverse;
     }
-    int                   m_keyId;
     bool                  m_reverse;
   };
 
-  int                   m_keyId;
   size_t                m_indent;
   int64_t               m_totals;
   std::vector<size_t>   m_kids;
@@ -1550,19 +1535,19 @@ private:
   SortByCumulativeCount m_reverseSorter;
 };
 
-// This filter navigates the tree, finds out which
-// are the top ten contributions for a given counter
-// and reports them together with their stacktrace.
-//
-// While parsing the tree it maintains a stacktrace
-// and if a leaf has a self counter which enters 
-// in the "top ten", it saves the stacktrace.
+/** This filter navigates the tree, finds out which
+    are the top ten contributions for a given counter
+    and reports them together with their stacktrace.
+
+    While parsing the tree it maintains a stacktrace
+    and if a leaf has a self counter which enters 
+    in the "top ten", it saves the stacktrace.
+*/
 class Top10BuilderFilter : public IgProfFilter
 {
 public:
   Top10BuilderFilter(Configuration *config)
   {
-    m_keyId = config->keyId(); 
     memset(m_topTenValues, 0, 10 * sizeof(int64_t));
   }
 
@@ -1575,24 +1560,22 @@ public:
     // If the node does not have children, compare its "self" values
     // against the topten, find the minimum of the top ten and
     // if it is smaller than the counter, replace the 
-    Counter *nodeCounter = Counter::getCounterInRing(node->COUNTERS, m_keyId);
-    if (!nodeCounter)
-      return;
+    Counter &nodeCounter = node->COUNTER;
 
     int min = -1;
     for (int i = 0; i != 10; i++)
-      if (m_topTenValues[i] < nodeCounter->cnt()
+      if (m_topTenValues[i] < nodeCounter.cnt
           && (min == -1 || m_topTenValues[i] < m_topTenValues[min]))
         min = i;
 
-    if (min != -1)
-    {                             
-      m_topTenValues[min] = nodeCounter->cnt();
-      m_topTenStackTrace[min].resize(m_currentStackTrace.size());
-      std::copy(m_currentStackTrace.begin(),
-                m_currentStackTrace.end(),
-                m_topTenStackTrace[min].begin());
-    }
+    if (min == -1)
+      return;
+
+    m_topTenValues[min] = nodeCounter.cnt;
+    m_topTenStackTrace[min].resize(m_currentStackTrace.size());
+    std::copy(m_currentStackTrace.begin(),
+              m_currentStackTrace.end(),
+              m_topTenStackTrace[min].begin());
   }
   
   virtual void post(NodeInfo */*parent*/, NodeInfo */*node*/)
@@ -1624,7 +1607,6 @@ private:
     }
   };
 
-  unsigned int              m_keyId;
   int64_t                   m_topTenValues[10];
   std::vector<NodeInfo *>   m_topTenStackTrace[10];
   std::vector<NodeInfo *>   m_currentStackTrace;
@@ -1633,14 +1615,9 @@ private:
 class TreeMapBuilderFilter : public IgProfFilter
 {
 public:
-  TreeMapBuilderFilter(ProfileInfo *prof, Configuration *config)
-    :m_prof(prof), m_zeroCounter(-1), m_flatMap(new FlatInfoMap), m_firstInfo(0) 
+  TreeMapBuilderFilter(bool isMax, ProfileInfo *prof)
+    :m_prof(prof), m_flatMap(new FlatInfoMap), m_firstInfo(0), m_isMax(isMax)
     {
-      m_keyId = config->keyId();
-      ASSERT(m_zeroCounter.ccnt() == 0);
-      ASSERT(m_zeroCounter.cfreq() == 0);
-      ASSERT(m_zeroCounter.cnt() == 0);
-      ASSERT(m_zeroCounter.freq() == 0);   
     }
  
   /** Creates the GPROF like output. 
@@ -1672,11 +1649,7 @@ public:
       if (symnode->DEPTH < 0 || int(m_seen.size()) < symnode->DEPTH)
         symnode->DEPTH = int(m_seen.size());
 
-      Counter *nodeCounter = Counter::getCounterInRing(node->COUNTERS, m_keyId);
-      if (!nodeCounter) 
-        return;
-
-      bool isMax = nodeCounter->isMax();
+      Counter &nodeCounter = node->COUNTER;
 
       if (parent)
       {
@@ -1688,43 +1661,16 @@ public:
 
         CallInfo *callInfo = parentInfo->getCallee(sym, true);
          
-        if (isMax) 
-        {
-          if (callInfo->VALUES[0] < nodeCounter->ccnt()) 
-            callInfo->VALUES[0] = nodeCounter->ccnt();
-        }
-        else
-          callInfo->VALUES[0] += nodeCounter->ccnt();
-        
-        callInfo->VALUES[1] += nodeCounter->cfreq(); 
-        callInfo->VALUES[2]++;
+        accumulateCounts(callInfo->VALUES, nodeCounter.ccnt, nodeCounter.cfreq);
       }
     
       // Do SELF_KEY
-      if (isMax) 
-      {
-        if (symnode->SELF_KEY[0] < nodeCounter->cnt()) 
-          symnode->SELF_KEY[0] = nodeCounter->cnt();
-      }
-      else
-        symnode->SELF_KEY[0] += nodeCounter->cnt();
-
-      symnode->SELF_KEY[1] += nodeCounter->freq();
-      symnode->SELF_KEY[2]++;
-    
+      accumulateCounts(symnode->SELF_KEY, nodeCounter.cnt, nodeCounter.freq);
       // Do CUM_KEY
-      if (isMax) {
-        if (symnode->CUM_KEY[0] < nodeCounter->ccnt())
-          symnode->CUM_KEY[0] = nodeCounter->ccnt();
-      }
-      else
-        symnode->CUM_KEY[0] += nodeCounter->ccnt();
-      
-      symnode->CUM_KEY[1] += nodeCounter->cfreq();
-      symnode->CUM_KEY[2]++;
+      accumulateCounts(symnode->CUM_KEY, nodeCounter.ccnt, nodeCounter.cfreq);
     }
 
-  virtual void post(NodeInfo *parent,
+  virtual void post(NodeInfo *parent, 
                     NodeInfo *node)
     {
       ASSERT(node);
@@ -1753,6 +1699,21 @@ public:
     }
 private:
   typedef std::map<std::string, SymbolInfo *>  SeenSymbols;
+
+  void accumulateCounts(int64_t *buffer, int64_t c, int64_t f)
+  {
+    // Do CUM_KEY
+    if (m_isMax)
+    {
+      if (buffer[0] < c)
+        buffer[0] = c;
+    }
+    else
+      buffer[0] += c;
+
+    buffer[1] += f;
+    buffer[2]++;
+  }
 
   SymbolInfo *symfor(NodeInfo *node) 
     {
@@ -1810,11 +1771,10 @@ private:
     }
 
   ProfileInfo *m_prof;
-  Counter m_zeroCounter;
-  int m_keyId;
   FlatInfoMap *m_flatMap;
-  FlatInfo *m_firstInfo;
+  FlatInfo    *m_firstInfo;
   SeenSymbols m_seen;
+  bool        m_isMax;
 };
 
 class TextStreamer
@@ -1985,114 +1945,6 @@ void symremap(ProfileInfo &prof, std::vector<FlatInfo *> infos, bool usegdb, boo
   }
 }
 
-class MallocFilter : public IgProfFilter
-{
-public:
-  MallocFilter (void)
-  { 
-    m_filter = "malloc", "calloc", "realloc", "memalign", "posix_memalign", 
-               "valloc", "zmalloc", "zcalloc", "zrealloc", "_Znwj", 
-               "_Znaj", "_Znam";
-  }
-  
-  virtual void post(NodeInfo *parent, NodeInfo *node)
-    {
-      ASSERT(node);
-      ASSERT(node->symbol());
-      ASSERT(m_filter.contains(std::string("_Znaj")));
-      if (!parent) {
-        return;
-      }
-      if (!node->COUNTERS) {
-        return;
-      }
-      if (! m_filter.contains(node->symbol()->NAME)) 
-      {
-        return;
-      }
-      this->addCountsToParent(parent, node);
-    }
-  
-  virtual std::string name(void) const { return "malloc"; }
-  virtual enum FilterType type(void) const { return POST; }
-  
-private:
-  void addCountsToParent(NodeInfo *parent, NodeInfo *node)
-    {
-      ASSERT(parent);
-      ASSERT(node);
-      ASSERT(m_filter.contains(node->originalSymbol()->NAME));
-      int countersCount = 0;
-      ASSERT(node->COUNTERS);
-      Counter *initialCounter = node->COUNTERS;
-      ASSERT(initialCounter);
-      Counter *childCounter = initialCounter;
-      do
-      {
-        ++countersCount;
-        Counter *parentCounter = Counter::addCounterToRing(parent->COUNTERS, 
-                                                           childCounter->id());
-        ASSERT(countersCount < 32);
-        ASSERT(parentCounter);
-        parentCounter->freq() += childCounter->freq();
-        if (parentCounter->isMax()) {
-          if (parentCounter->cnt() < childCounter->cnt()) {
-            parentCounter->cnt() = childCounter->cnt();
-          }
-        }
-        else {
-          parentCounter->cnt() += childCounter->cnt();
-        }
-        //ASSERT(parentCounter->cnt() >= childCounter->cnt());
-        //ASSERT(parentCounter->freq() >= childCounter->freq());
-        childCounter = childCounter->next();
-      } while (childCounter != initialCounter);
-
-      parent->removeChild(node);
-    }
-  SymbolFilter m_filter;
-};
-
-class IgProfGccPoolAllocFilter : public IgProfFilter
-{
-public:
-  IgProfGccPoolAllocFilter(void) 
-    {
-      m_filter = "_ZNSt24__default_alloc_templateILb1ELi0EE14_S_chunk_allocEjRi",
-                 "_ZNSt24__default_alloc_templateILb1ELi0EE9_S_refillEj",
-                 "_ZNSt24__default_alloc_templateILb1ELi0EE8allocateEj";
-    }
-
-  virtual void post(NodeInfo *parent, NodeInfo *node) 
-    {
-      if (! m_filter.contains(node->symbol()->NAME)) 
-        return;
-      parent->removeChild(node);
-    }
-  virtual std::string name(void) const { return "gcc_pool_alloc"; }
-  virtual enum FilterType type(void) const { return POST; }
-private:
-  SymbolFilter m_filter;
-};
-
-class TreeInfoFilter : public IgProfFilter
-{
-public:
-  virtual void pre(NodeInfo *parent, NodeInfo *node) 
-    {
-      Counter *i = node->COUNTERS;
-      while (i)
-      {
-        i = i->next(); 
-        if (i == node->COUNTERS) 
-          break;
-      }
-    }
-  virtual std::string name(void) const { return "tree_info_filter"; }
-  virtual enum FilterType type(void) const { return PRE; }
-private:
-  SymbolFilter m_filter;
-};
 
 // Regular expressions matching the symbol information header.
 static lat::Regexp vWithDefinitionRE("V(\\d+)=\\((.*?)\\):\\((\\d+),(\\d+)(,(\\d+))?\\)\\s*");
@@ -2177,7 +2029,7 @@ parseFunctionDef(const char *lineStart, Position &pos, unsigned int &symid)
 
 static bool
 parseCounterVal(const char *lineStart, Position &pos, 
-                int &ctrid, int64_t &ctrfreq, 
+                size_t &ctrid, int64_t &ctrfreq, 
                 int64_t &ctrvalNormal, int64_t &ctrvalPeak)
 {
   // Matches "V(\\d+):\\((\\d+),(\\d+)(,(\\d+))?\\)\\s*" and then sets the arguments accordingly. 
@@ -2261,27 +2113,6 @@ parseLeak(const char *lineStart, Position &pos, int &leakAddress, int64_t &leakS
 }
 
 void
-printAvailableCounters(const Counter::IdCache &cache)
-{
-  typedef Counter::IdCache::const_iterator iterator;
-  std::vector<std::string> tmpList;
-  for (iterator i = cache.begin(); i != cache.end(); i++)
-    tmpList.push_back(i->first);
-
-  if (!tmpList.size())
-  {
-    std::cerr << "No counters available in specified report." << std::endl;
-    exit(1);
-  }
-
-  std::cerr << "No profile counter selected for reporting, please select one of: ";
-  for (size_t i = 0, e = tmpList.size(); i != e - 1; ++i)
-    std::cerr << tmpList[i] << ", ";
-  std::cerr << tmpList.back();
-  exit(1);
-}
-
-void
 IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filename, StackTraceFilter *filter)
 {
   ProfileInfo::Nodes &nodes = prof.nodes();
@@ -2303,8 +2134,11 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
   int lineCount = 1;
   lat::RegexpMatch match;
 
-  Counter::setKeyName(m_config->key());
   SymbolInfoFactory symbolsFactory(&prof, m_config->useGdb);
+  
+  // A vector whose i-th element specifies whether or
+  // not the counter file id "i" is a key.
+  std::vector<bool> keys;
   
   while (! reader.eof())
   {
@@ -2376,8 +2210,7 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
     // Read the counter information.
     while (true)
     {
-      int fileId;
-      int ctrid;
+      size_t fileId;
       int64_t ctrval;
       int64_t ctrfreq;
       int64_t ctrvalNormal;
@@ -2387,12 +2220,17 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
       
       if (line.size() == pos())
         break; 
-      else if (line.size() >= pos()+2
-               && parseCounterVal(line.c_str(), pos, fileId, ctrfreq, ctrvalNormal, ctrvalPeak))
+
+      if (line.size() >= pos()+2
+          && parseCounterVal(line.c_str(), pos, fileId, ctrfreq, ctrvalNormal, ctrvalPeak))
       {
         // FIXME: should really do:
         // $ctrname = $ctrbyid{$1} || die;
-        ctrid = Counter::mapFileIdToId(fileId);
+        
+        // If the fileId is not among those associated
+        // to the key counter, we skip the counter.
+        if (keys[fileId] == false)
+          continue;
         ctrval = m_config->normalValue() ? ctrvalNormal : ctrvalPeak;
       }
       else if (line.size() >= pos()+2
@@ -2400,17 +2238,33 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
       {
         // FIXME: should really do:
         // die if exists $ctrbyid{$1};
+        
         std::string ctrname = match.matchString(line, 2);
         IntConverter getIntMatch(line, &match);
         fileId = getIntMatch(1);
-        ctrid = Counter::addNameToIdMapping(ctrname, fileId,
-                                            (ctrname == "PERF_TICKS" 
-                                             && ! m_config->callgrind()));
+
+        // The first counter we meet, we make it the key, unless
+        // the key was already set on command line. 
+        if (m_key.empty())
+          setKey(ctrname);
+
+        // Store information about fileId being 
+        // a key or not.
+        if (keys.size() <= fileId)
+          keys.resize(fileId + 1, false); 
+        keys[fileId] = ctrname == m_key;
+
+        // Get information from the counter and be ready to
+        // continue.  
         ctrfreq = getIntMatch(3);
         ctrval = m_config->normalValue() ? getIntMatch(4)
                  : getIntMatch(6);
         pos(match.matchEnd());
         match.reset();
+
+        // Ignore in case we don't care about the counter and continue.
+        if (!keys[fileId])
+          continue;
       }
       else if (line.size() >= pos()+3
                && parseLeak(line.c_str(), pos, leakAddress, leakSize))
@@ -2436,35 +2290,19 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
         exit(1);
       }
 
-      Counter *counter = Counter::addCounterToRing(child->COUNTERS, ctrid);
-      ASSERT(counter->id() == ctrid);
-      ASSERT(counter == Counter::getCounterInRing(child->COUNTERS, ctrid));
-      ASSERT(counter);
-
-      if (m_config->hasKey() && ! Counter::isKey(ctrid)) 
-        continue;
-
       if (filter) 
         filter->filter(sym, ctrval, ctrfreq);
 
-      counter->freq() += ctrfreq;
-      counter->cnt() += ctrval;
+      child->COUNTER.cnt += ctrval;
+      child->COUNTER.freq += ctrfreq;
     }
     lineCount++;
   }
 
-  if (!Counter::countersByName().size())
+  if (keys.empty())
   {
     std::cerr << "No counter values in profile data." << std::endl;
     exit(1);
-  }
- 
-  if (m_config->key() == "")
-  {
-    if (Counter::countersByName().size() > 1)
-      printAvailableCounters(Counter::countersByName());
-    else
-      m_config->setKey((*(Counter::countersByName().begin())).first);
   }
 }
 
@@ -2484,40 +2322,40 @@ void walk(NodeInfo *first, IgProfFilter *filter=0)
   ASSERT(filter);
   ASSERT(first);
   std::vector<StackItem> stack;
-  stack.reserve(1000);
   stack.resize(1);
   StackItem &firstItem = stack.back();
   firstItem.parent = 0;
   firstItem.pre = first;
   firstItem.post = 0;
+  stack.reserve(10000);
 
   while (!stack.empty())
   {
     StackItem &item = stack.back();
     NodeInfo *parent = item.parent, *pre = item.pre, *post = item.post;
-    stack.resize(stack.size()-1);
+    stack.pop_back();
     if (pre)
     {
       if (filter->type() & IgProfFilter::PRE)
         filter->pre(parent, pre);
       if (filter->type() & IgProfFilter::POST)
       {
-        stack.resize(stack.size() + 1);
-        StackItem &newItem = stack.back();
+        StackItem newItem;
         newItem.parent = parent;
         newItem.pre = 0;
         newItem.post = pre; 
+        stack.push_back(newItem);
       }
       // Add all the children of pre as items in the stack.
       for (size_t ci = 0, ce = pre->CHILDREN.size(); ci != ce; ++ci)
       {
-        stack.resize(stack.size() + 1);
         ASSERT(pre);
         NodeInfo *child = pre->CHILDREN[ci];
-        StackItem &newItem = stack.back();
+        StackItem newItem;
         newItem.parent = pre;
         newItem.pre = child; 
         newItem.post = 0;
+        stack.push_back(newItem);
       }
     }
     else
@@ -2556,30 +2394,26 @@ IgProfAnalyzerApplication::prepdata(ProfileInfo& prof)
     //    walk<NodeInfo>(prof.spontaneous(), new PrintTreeFilter);
 
     verboseMessage("Merge nodes belonging to the same library.");
-
-    UseFileNamesFilter *filter = new UseFileNamesFilter;
-    walk(prof.spontaneous(), filter);
+    walk(prof.spontaneous(), new UseFileNamesFilter(m_keyMax));
     //    walk<NodeInfo>(prof.spontaneous(), new PrintTreeFilter);
   }
 
   if (!m_regexps.empty())
   {
     verboseMessage("Merge nodes using user-provided regular expression.");
-    walk(prof.spontaneous(), new RegexpFilter(m_regexps));
+    walk(prof.spontaneous(), new RegexpFilter(m_regexps, m_keyMax));
   }
 
   verboseMessage("Summing counters");
-  IgProfFilter *sumFilter = new AddCumulativeInfoFilter();
-  walk(prof.spontaneous(), sumFilter);
+  walk(prof.spontaneous(), new AddCumulativeInfoFilter(m_keyMax));
   walk(prof.spontaneous(), new CheckTreeConsistencyFilter());
 }
 
 class FlatInfoComparator 
 {
 public:
-  FlatInfoComparator(int counterId, int ordering)
-    :m_counterId(counterId),
-     m_ordering(ordering)
+  FlatInfoComparator(int ordering)
+    :m_ordering(ordering)
     {}
   bool operator()(FlatInfo *a, FlatInfo *b)
     {
@@ -2609,18 +2443,17 @@ protected:
       return b->DEPTH - a->DEPTH;
     }
   
-  int m_counterId;
   int m_ordering;
 };
 
 class FlatInfoComparatorWithBaseline : public FlatInfoComparator
 {
 public:
-  FlatInfoComparatorWithBaseline(int counterId, int ordering, FlatInfoMap *map)
-    :FlatInfoComparator(counterId, ordering),
+  FlatInfoComparatorWithBaseline(int ordering, FlatInfoMap *map)
+    :FlatInfoComparator(ordering),
      m_baselineMap(map)
-    {
-    }
+    {}
+
 protected:
   virtual int64_t cmpnodekey(FlatInfo *a, FlatInfo *b)
     {
@@ -3040,7 +2873,7 @@ IgProfAnalyzerApplication::tree(ProfileInfo &prof)
   // FIXME: make sure that symremap can be called even without 
   //        passing a flatMap. 
   verboseMessage("Building call tree map");
-  TreeMapBuilderFilter *callTreeBuilder = new TreeMapBuilderFilter(&prof, m_config);
+  TreeMapBuilderFilter *callTreeBuilder = new TreeMapBuilderFilter(m_keyMax, &prof);
   walk(prof.spontaneous(), callTreeBuilder);
   // Sorting flat entries
   verboseMessage("Sorting");
@@ -3059,12 +2892,10 @@ IgProfAnalyzerApplication::tree(ProfileInfo &prof)
        i++)
     sorted.push_back(i->second);
 
-  sort(sorted.begin(), sorted.end(), FlatInfoComparator(m_config->keyId(),
-                                                        m_config->ordering()));
+  sort(sorted.begin(), sorted.end(), FlatInfoComparator(m_config->ordering()));
 
-
-  for (FlatVector::const_iterator i = sorted.begin(); i != sorted.end(); i++)
-    (*i)->setRank(rank++);
+  for (size_t i = 0, e = sorted.size(); i != e; ++i)
+    sorted[i]->setRank(rank++);
 
   if (m_config->doDemangle() || m_config->useGdb)
   {
@@ -3090,7 +2921,7 @@ IgProfAnalyzerApplication::dumpAllocations(ProfileInfo &prof)
   // FIXME: make sure that symremap can be called even without 
   //        passing a flatMap.
   verboseMessage("Building call tree map");
-  TreeMapBuilderFilter *callTreeBuilder = new TreeMapBuilderFilter(&prof, m_config);
+  TreeMapBuilderFilter *callTreeBuilder = new TreeMapBuilderFilter(m_keyMax, &prof);
   walk(prof.spontaneous(), callTreeBuilder);
 
   // Sorting flat entries
@@ -3110,12 +2941,10 @@ IgProfAnalyzerApplication::dumpAllocations(ProfileInfo &prof)
        i++)
     sorted.push_back(i->second);
 
-  sort(sorted.begin(), sorted.end(), FlatInfoComparator(m_config->keyId(),
-                                                        m_config->ordering()));
+  sort(sorted.begin(), sorted.end(), FlatInfoComparator(m_config->ordering()));
 
-
-  for (FlatVector::const_iterator i = sorted.begin(); i != sorted.end(); i++)
-    (*i)->setRank(rank++);
+  for (size_t i = 0, e = sorted.size(); i != e; ++i)
+    sorted[i]->setRank(rank++);
 
   if (m_config->doDemangle() || m_config->useGdb)
   {
@@ -3157,7 +2986,7 @@ IgProfAnalyzerApplication::top10(ProfileInfo &prof)
   // FIXME: make sure that symremap can be called even without 
   //        passing a flatMap. 
   verboseMessage("Building call tree map");
-  TreeMapBuilderFilter *callTreeBuilder = new TreeMapBuilderFilter(&prof, m_config);
+  TreeMapBuilderFilter *callTreeBuilder = new TreeMapBuilderFilter(m_keyMax, &prof);
   walk(prof.spontaneous(), callTreeBuilder);
   // Sorting flat entries
   verboseMessage("Sorting");
@@ -3176,12 +3005,10 @@ IgProfAnalyzerApplication::top10(ProfileInfo &prof)
        i++)
     sorted.push_back(i->second);
 
-  sort(sorted.begin(), sorted.end(), FlatInfoComparator(m_config->keyId(),
-                                                        m_config->ordering()));
+  sort(sorted.begin(), sorted.end(), FlatInfoComparator(m_config->ordering()));
 
-
-  for (FlatVector::const_iterator i = sorted.begin(); i != sorted.end(); i++)
-    (*i)->setRank(rank++);
+  for (size_t i = 0, e = sorted.size(); i != e; ++i)
+    sorted[i]->setRank(rank++);
 
   if (m_config->doDemangle() || m_config->useGdb)
   {
@@ -3204,7 +3031,7 @@ IgProfAnalyzerApplication::top10(ProfileInfo &prof)
     std::vector<NodeInfo *> &nodes = topTenFilter->stackTrace(i, value);
     if (!value)
       break;
-    if (m_config->key() == "PERF_TICKS")
+    if (m_isPerfTicks)
       std::cout << thousands(static_cast<double>(value) * m_config->tickPeriod(), 0, 2)
                 << " seconds)\n";
     else
@@ -3223,7 +3050,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
 {
   prepdata(prof);
   verboseMessage("Building call tree map");
-  TreeMapBuilderFilter *callTreeBuilder = new TreeMapBuilderFilter(&prof, m_config);
+  TreeMapBuilderFilter *callTreeBuilder = new TreeMapBuilderFilter(m_keyMax, &prof);
   walk(prof.spontaneous(), callTreeBuilder);
   // Sorting flat entries
   verboseMessage("Sorting");
@@ -3242,9 +3069,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
        i++)
     sorted.push_back(i->second);
 
-  sort(sorted.begin(), sorted.end(), FlatInfoComparator(m_config->keyId(),
-                                                        m_config->ordering()));
-
+  sort(sorted.begin(), sorted.end(), FlatInfoComparator(m_config->ordering()));
   
   for (FlatVector::const_iterator i = sorted.begin(); i != sorted.end(); i++)
     (*i)->setRank(rank++);
@@ -3281,10 +3106,6 @@ IgProfAnalyzerApplication::generateFlatReport(ProfileInfo &prof,
 {
   verboseMessage("Generating report");
   
-  int keyId = m_config->keyId();
-
-  bool isMax = Counter::isMax(keyId);
-  
   typedef std::vector <MainGProfRow *> CumulativeSortedTable;
   typedef CumulativeSortedTable FinalTable;
   typedef std::vector <MainGProfRow *> SelfSortedTable;
@@ -3315,7 +3136,7 @@ IgProfAnalyzerApplication::generateFlatReport(ProfileInfo &prof,
          j != info->CALLS.end();
          j++)
       builder.addCallee(*j);
-    table.push_back(builder.build(isMax)); 
+    table.push_back(builder.build(m_keyMax)); 
     builder.endEditing();
   }
 
@@ -3335,20 +3156,19 @@ IgProfAnalyzerApplication::generateFlatReport(ProfileInfo &prof,
     bool showcalls = m_config->showCalls();
     bool showpaths = m_config->showPaths();
     bool showlibs = m_config->showLib();
-    std::cout << "Counter: " << m_config->key() << std::endl;
-    bool isPerfTicks = m_config->key() == "PERF_TICKS";
+    std::cout << "Counter: " << m_key << std::endl;
     float tickPeriod = m_config->tickPeriod();
 
     int maxcnt=0;
-    if (isPerfTicks && ! m_config->callgrind())
+    if (m_isPerfTicks && ! m_config->callgrind())
       maxcnt = max(8, max(thousands(static_cast<double>(totals) * tickPeriod, 0, 2).size(), 
                           thousands(static_cast<double>(totfreq) * tickPeriod, 0, 2).size()));
     else
       maxcnt = max(8, max(thousands(totals).size(), 
                           thousands(totfreq).size()));
-    int maxval = maxcnt + (isPerfTicks ? 1 : 0);
+    int maxval = maxcnt + (m_isPerfTicks ? 1 : 0);
 
-    std::string basefmt = isPerfTicks ? "%.2f" : "%s";
+    std::string basefmt = m_isPerfTicks ? "%.2f" : "%s";
     FractionPrinter valfmt(maxval);
     FractionPrinter cntfmt(maxcnt);
 
@@ -3366,7 +3186,7 @@ IgProfAnalyzerApplication::generateFlatReport(ProfileInfo &prof,
       MainGProfRow &row = **i;
       printPercentage(row.PCT);
       
-      if (isPerfTicks && ! m_config->callgrind())
+      if (m_isPerfTicks && ! m_config->callgrind())
         printf("%*s  ", maxval, thousands(static_cast<double>(row.CUM) * tickPeriod, 0, 2).c_str());
       else
         printf("%*s  ", maxval, thousands(row.CUM).c_str());
@@ -3397,7 +3217,7 @@ IgProfAnalyzerApplication::generateFlatReport(ProfileInfo &prof,
 
       printPercentage(row.SELF_PCT, "%7.2f  ");
 
-      if (isPerfTicks && ! m_config->callgrind())
+      if (m_isPerfTicks && ! m_config->callgrind())
         printf("%*s  ", maxval, thousands(static_cast<double>(row.SELF) * tickPeriod, 0, 2).c_str());
       else
         printf("%*s  ", maxval, thousands(row.SELF).c_str());
@@ -3466,7 +3286,7 @@ IgProfAnalyzerApplication::generateFlatReport(ProfileInfo &prof,
 
         ASSERT(maxval);
         std::cout << std::string(maxval, '.') << "  ";
-        if (isPerfTicks && ! m_config->callgrind()) 
+        if (m_isPerfTicks && ! m_config->callgrind()) 
           valfmt(thousands(static_cast<double>(row.SELF_COUNTS) * tickPeriod, 0, 2), 
                  thousands(static_cast<double>(row.CHILDREN_COUNTS) * tickPeriod, 0, 2));
         else 
@@ -3497,7 +3317,7 @@ IgProfAnalyzerApplication::generateFlatReport(ProfileInfo &prof,
       printf("%-8s", rankBuffer);
       printPercentage(mainRow.PCT);
 
-      if (isPerfTicks && ! m_config->callgrind()) 
+      if (m_isPerfTicks && ! m_config->callgrind()) 
       {
         (AlignedPrinter(maxval))(thousands(static_cast<double>(mainRow.CUM) * tickPeriod, 0, 2));
         valfmt(thousands(static_cast<double>(mainRow.SELF) * tickPeriod, 0, 2),
@@ -3537,7 +3357,7 @@ IgProfAnalyzerApplication::generateFlatReport(ProfileInfo &prof,
         
         std::cout << std::string(maxval, '.') << "  ";
         
-        if (isPerfTicks && ! m_config->callgrind()) 
+        if (m_isPerfTicks && ! m_config->callgrind()) 
           valfmt(thousands(static_cast<double>(row.SELF_COUNTS) * tickPeriod, 0, 2),
                  thousands(static_cast<double>(row.CHILDREN_COUNTS) * tickPeriod, 0, 2));
         else
@@ -3619,7 +3439,7 @@ IgProfAnalyzerApplication::generateFlatReport(ProfileInfo &prof,
                   "pct REAL\n"
                   ");\nPRAGMA synchronous=OFF;\n\nBEGIN TRANSACTION;\n"
                   "INSERT INTO summary (counter, total_count, total_freq, tick_period) VALUES(\"")
-              << m_config->key () << "\", " << totals << ", " << totfreq << ", " << m_config->tickPeriod() << ");\n\n";
+              << m_key << "\", " << totals << ", " << totfreq << ", " << m_config->tickPeriod() << ");\n\n";
                 
     unsigned int insertCount = 0;
     std::set<int> filesDone;  
@@ -3715,8 +3535,6 @@ IgProfAnalyzerApplication::run(void)
   for (int i = 0; i < m_argc; i++) 
     args.push_back(m_argv[i]);
   
-  m_filters.push_back(new RemoveIgProfFilter());
-
   this->parseArgs(args);
 
   ProfileInfo *prof = new ProfileInfo;
@@ -3727,7 +3545,7 @@ IgProfAnalyzerApplication::run(void)
     std::cerr << "Reading baseline" << std::endl;
     this->readDump(*prof, m_config->baseline(), new BaseLineFilter);
     prepdata(*prof);
-    baselineBuilder = new TreeMapBuilderFilter(prof, m_config);
+    baselineBuilder = new TreeMapBuilderFilter(m_keyMax, prof);
     walk(prof->spontaneous(), baselineBuilder);
     std::cerr << std::endl;
   }
@@ -3745,11 +3563,12 @@ IgProfAnalyzerApplication::run(void)
 
   if (! m_config->isShowCallsDefined())
   {
-    if (!memcmp(m_config->key().c_str(), "MEM_", 4))
+    if (!memcmp(m_key.c_str(), "MEM_", 4))
       m_config->setShowCalls(true);
     else
       m_config->setShowCalls(false);
   }
+
   if (m_config->callgrind())
     callgrind(*prof);
   else if (m_config->top10)
@@ -3814,17 +3633,12 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
       m_config->setVerbose(true);
     else if (is("--report", "-r") && left(arg))
     {
-      std::string key = *(++arg);
-      m_config->setKey(key);
-      // If there are filters, it means that RemoveIgProfFilter
-      // is still there, hence --no-filters was not 
-      // specified.
-      //
-      // Therefore we add some more filters,  as required.
-      if (!m_filters.empty() && !memcmp(key.c_str(), "MEM_", 4))
-        m_filters.push_back(new MallocFilter());
-      if (!m_filters.empty() && key == "MEM_LIVE")
-        m_filters.push_back(new IgProfGccPoolAllocFilter());
+      if (!m_key.empty())
+      {
+        std::cerr << "Cannot specify more that one \"-ri / --report \" option." << std::endl;
+        exit(1);
+      }
+      setKey(*(++arg));
     }
     else if (is("--value") && left(arg) > 1)
     {
@@ -3853,7 +3667,7 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
     else if (is("--filter", "-f"))
       unsupportedOptionDeath(arg->c_str());
     else if (is("--no-filter", "-nf"))
-      m_filters.clear();
+      m_disableFilters = true;
     else if (is("--list-filters", "-lf"))
       unsupportedOptionDeath(arg->c_str());
     else if (is("--libs", "-l"))

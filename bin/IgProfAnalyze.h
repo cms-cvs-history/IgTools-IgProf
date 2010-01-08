@@ -55,250 +55,69 @@ private:
   lat::RegexpMatch *m_match;
 };
 
-
-class Counter
+/** This class is the payload for a node in the stacktrace
+    and holds all the information about the counter that 
+    we looking at.
+  */
+struct Counter
 {
 public:
-  typedef int64_t StorageType;
+  Counter()
+  :cnt(0), freq(0), ccnt(0), cfreq(0)
+  {}
 
-  Counter(int type, StorageType counts=0,  StorageType freqs=0)
-    : m_type(type),
-      m_next(this),
-      m_counts(counts),
-      m_freqs(freqs),
-      m_cumulativeCounts(0),
-      m_cumulativeFreqs(0)
-    {} 
-  
-  Counter(const std::string &counterName, StorageType counts=0, StorageType freqs=0)
-    {
-      Counter::Counter(getIdForCounterName(counterName), counts, freqs);
-    }
-  
-  void printDebugInfo(void)
-    {
-      std::cerr << "Id: " << m_type
-                << " Counts: " << m_counts
-                << " Freqs: " << m_freqs 
-                << " Cumulative Counts: " << m_cumulativeCounts 
-                << " Cumulative Freqs: " << m_cumulativeFreqs << std::endl;
-    }
-  
-  Counter *next(void) { return m_next; }
-  void setNext(Counter *next) { m_next = next; }
+  /** Adds the counts and freqs of @a other to this Counter.
 
-  int id(void) {return m_type; }
-  
-  bool isMax(void) { return Counter::isMax(m_type); }
-  
-  void add(Counter *counter)
-    {
-      counter->setNext(this->next());
-      this->setNext(counter);
-    }
-
-  // TODO: Create a "RingManipulator" rather than having all this static stuff
-  //     in the Counter class????
-  static int getIdForCounterName(const std::string &name) 
-    {
-      IdCache::const_iterator i = countersByName().find(name);    
-      if (i == countersByName().end())
-        return -1;
-      return i->second; 
-    }
-
-  /** Fills in the table that, given a counter name, returns the internal id for
-      that kind of counter. Notice that we need to take care of the case in 
-      which the same counter label has (legititemaly) two different ids
-      in the file, e.g.:
-  
-      V0=(PERF_TICKS), V1=(PERF_TICKS)
-  
-      this can happen in the case of performance profiling multi-threaded
-      programs.
+      @a other source counter.
+ 
+      @a isMax whether or not it needs to sum the counts
+       or take the maximum between the two.
     */
-  static int addNameToIdMapping(const std::string &name, int id, bool isTick)
-    {
-      if (id > 31)
-      {
-        std::cerr << "Too many counters in profile file.\n"
-                     "Only 30 different kind of counters supported."
-                  << std::endl;
-        exit(1);
-      }
-      // If the counter was already in the file, we map its id to the actual
-      // id already used for that kind of counter.
-      //
-      // If not:
-      // * we associate the name to a new counter id.
-      // * we associate the counter id above to the one appearing in the file.
-      // * we set wether or not it's a "_MAX" counter.
-      // * we check whether it is the "key counter (i.e. the one reported)
-      //   and we check whether or not it is a tick counter.
-      ASSERT(id >= 0);
-      if (Counter::fileIdToId().size() < (unsigned int) id+1)
-        Counter::fileIdToId().resize(id+1, -1);
-      
-      IdCache::iterator i = countersByName().find(name);
-      if (i != countersByName().end())
-      {
-        Counter::fileIdToId()[id] = i->second;
-        return i->second;
-      }
-
-      if (name.find("_MAX") != std::string::npos)
-        s_isMaxMask |= 1 << id;
-      countersByName().insert(Counter::IdCache::value_type(name, id));
-      Counter::fileIdToId()[id] = id;
-      if (isTick)
-        s_ticksCounterId = id;
-      if (s_keyName.empty())
-        s_keyName = name;
-      if (s_keyName == name)
-        s_keyValue = id;
-      return id;
-    }
-  
-  /** Maps the id of the counter as found in a file to the internal id specific
-      to that kind of counter. 
-    */
-  static int mapFileIdToId(int fileId)
+  void add(const Counter &other, bool isMax)
   {
-    ASSERT(fileId >= 0);
-    ASSERT((unsigned int) fileId < Counter::fileIdToId().size());
-    return Counter::fileIdToId()[fileId];
+    this->freq += other.freq;
+
+    if (isMax)
+    {
+      if (this->cnt < other.cnt)
+        this->cnt = other.cnt;
+    }
+    else
+      this->cnt += other.cnt;
   }
 
-  static int isMax(const std::string &name)
+  /** Adds the cumulative counts and freqs of @a other 
+      to this Counter.
+
+      @a other source counter.
+ 
+      @a isMax whether or not it needs to sum the counts
+       or take the maximum between the two.
+    */
+  void accumulate(const Counter &other, bool isMax)
+  {
+    this->cfreq += other.cfreq;
+
+    if (isMax)
     {
-      IdCache::const_iterator i = countersByName().find(name);
-      ASSERT(i != countersByName().end());
-      return isMax(i->second);
+      if (this->ccnt < other.ccnt)
+        this->ccnt = other.ccnt;
     }
+    else
+      this->ccnt += other.ccnt;
+  }
 
-  static bool isMax(int id)
-    {
-      ASSERT((id < 32) && (id >= 0));
-      return(s_isMaxMask & (1 << id));   
-    }
-
-  static Counter* getCounterInRing(Counter *&initialCounter, int id)
-    {
-      return Counter::popCounterFromRing(initialCounter, id, false);
-    }
-
-  static int ringSize(Counter *initialCounter)
-    {
-      Counter *i = initialCounter;
-      if (!i)
-        return 0;
-    
-      int size = 1;
-      while (i->next() != initialCounter)
-      {
-        i = i->m_next;
-        size++;
-      };
-      return size;
-    }
-
-
-  static Counter *addCounterToRing(Counter *&initialCounter, int id)
-    {
-      Counter *counter = Counter::getCounterInRing(initialCounter, id);
-
-      if (counter) 
-        return counter;
-
-      counter = new Counter(id);
-
-      if (! initialCounter)
-        initialCounter = counter;
-      else
-        initialCounter->add(counter);
-
-      return counter;
-    }
-
-  static Counter *popCounterFromRing(Counter *&initialCounter, int id=-1, bool pop=true)
-    {
-      if (!initialCounter)
-        return 0;
-      
-      Counter *i = initialCounter->next();
-      Counter *prev = initialCounter;
-    
-      while (i)
-      {
-        ASSERT(i);
-        ASSERT(i->next());
-        if (id == -1 || (i->id() == id))
-        {
-          if (pop && (i == i->next())) 
-            initialCounter = 0;
-          else if (pop && prev) 
-          { 
-            prev->setNext(i->next()); 
-            if (i == initialCounter) 
-              initialCounter = prev;
-          } 
-          return i;
-        }
-        prev = i;
-        i = i->next();
-        if (i == initialCounter->next())
-          return 0;
-      }
-      return 0;
-    }
-
-  static bool isKey(int id)
-    {
-      return s_keyValue == fileIdToId()[id];
-    }
-  
-  static void setKeyName(const std::string& name)
-    { s_keyName = name; }
-
-  typedef std::map<std::string, int> IdCache;
-
-  static IdCache &countersByName(void)
-    { 
-      static IdCache s_countersByName;
-      return s_countersByName;
-    }
-
-  StorageType &cnt() { return m_counts; }
-  StorageType &freq() { return m_freqs; }
-  StorageType &ccnt() { return m_cumulativeCounts; }
-  StorageType &cfreq() { return m_cumulativeFreqs; }
-private:
-  typedef std::vector<int> FileIdToId;
-
-  static FileIdToId &fileIdToId(void)
-    {
-      static FileIdToId s_fileIdToId;
-      return s_fileIdToId; 
-    }
-  
-  static IdCache s_countersByName;
-  static int s_lastAdded;
-  static int s_isMaxMask;
-  static int s_ticksCounterId;
-  static int s_keyValue;
-  static std::string s_keyName;
-  int m_type;
-  Counter *m_next;
-  StorageType m_counts;
-  StorageType m_freqs;
-  StorageType m_cumulativeCounts;
-  StorageType m_cumulativeFreqs;
+  /** The total counts of the counter. */
+  int64_t cnt;
+  /** The number of times the counter got triggered (e.g. number of allocations) */
+  int64_t freq;
+  /** The accumulated counts. */
+  int64_t ccnt;
+  /** The accumulated number of times the counter got triggered (e.g. the 
+      number of allocations of a node and all its children.)
+    */
+  int64_t cfreq;
 };
-
-int Counter::s_isMaxMask = 0;
-int Counter::s_ticksCounterId = -1;
-int Counter::s_keyValue = -1;
-std::string Counter::s_keyName;
 
 class NameChecker
 {
