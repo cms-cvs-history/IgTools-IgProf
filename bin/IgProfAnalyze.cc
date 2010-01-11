@@ -696,6 +696,7 @@ private:
   bool                          m_isPerfTicks;
   bool                          m_keyMax;
   bool                          m_disableFilters;
+  bool                          m_showPages;
 };
 
 
@@ -703,7 +704,8 @@ IgProfAnalyzerApplication::IgProfAnalyzerApplication(int argc, const char **argv
   :m_config(new Configuration()),
    m_argc(argc),
    m_argv(argv),
-   m_disableFilters(false)
+   m_disableFilters(false),
+   m_showPages(false)
 {}
 
 float
@@ -2078,7 +2080,7 @@ parseCounterDef(const std::string &line, int pos, int flags, lat::RegexpMatch *m
 }
 
 static bool
-parseLeak(const char *lineStart, Position &pos, int &leakAddress, int64_t &leakSize)
+parseLeak(const char *lineStart, Position &pos, int64_t &leakAddress, int64_t &leakSize)
 {
   // ";LK=\\(0x[\\da-z]+,\\d+\\)\\s*"
   const char *line = lineStart + pos();
@@ -2087,7 +2089,7 @@ parseLeak(const char *lineStart, Position &pos, int &leakAddress, int64_t &leakS
     return false; 
   
   char *endptr = 0;
-  int address = strtol(++line, &endptr, 16);
+  int64_t address = strtoll(++line, &endptr, 16);
   if (endptr == line)
     return false; 
   
@@ -2140,6 +2142,14 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
   // not the counter file id "i" is a key.
   std::vector<bool> keys;
   
+  // A vector keeping track of all the pages touched by the 
+  // allocations. We store here the address of the page,
+  // in order to improve lookup whether or not a page is 
+  // already there. This way the total number of pages
+  // touched is given by "count".
+  std::vector<int64_t> pages;
+  pages.reserve(20000);
+
   while (! reader.eof())
   {
     // One node per line.
@@ -2206,6 +2216,7 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
     nodestack.push_back(child);
     
     match.reset();
+    pages.clear();
 
     // Read the counter information.
     while (true)
@@ -2215,7 +2226,7 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
       int64_t ctrfreq;
       int64_t ctrvalNormal;
       int64_t ctrvalPeak;
-      int leakAddress;
+      int64_t leakAddress;
       int64_t leakSize;
       
       if (line.size() == pos())
@@ -2269,20 +2280,53 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
       else if (line.size() >= pos()+3
                && parseLeak(line.c_str(), pos, leakAddress, leakSize))
       {
-        // Allocations get handled only when --dump-allocations flag
-        // is passed in the command line.
-        // Here we simply attach the allocation information to the
-        // node. They will be printed out by a special filter later on.
-        // Notice that allocation information needs to be merged in
-        // just like counters do in the case of filtering
-        // and reorganization of the calltree.
-        if (!m_config->dumpAllocations)
+        // In case we specify --show-pages option, we keep an
+        // ordered unique list of all the (non completely allocated) pages
+        // that got touched. We only track beginning and end page since
+        // the others are not fragmented and not really interesting.
+        // This means that an allocation of 2MB has the same cost of an 
+        // allocation of 5KB or two allocation of 1B that are on different pages.
+        // Moreover 4096 allocations of 1B have the same cost of 1 allocation
+        // of 1B, if they are continuos (i.e. pooled allocation are considered
+        // good).
+        if (m_showPages)
+        {
+          int64_t startPageAddress = leakAddress >> 12;
+          std::vector<int64_t>::iterator spi = std::lower_bound(pages.begin(), 
+                                                                pages.end(), 
+                                                                startPageAddress);
+
+          // Add contribution to pages if page was never seen.
+          if ((spi == pages.end()) ||  (*spi != startPageAddress))
+            pages.insert(spi, startPageAddress);
+
+          int64_t endPageAddress = (leakAddress+leakSize) >> 12;
+          std::vector<int64_t>::iterator epi = std::lower_bound(pages.begin(),
+                                                                pages.end(),
+                                                                endPageAddress);
+          // Add contribution to pages if page was never seen.
+          if ((epi == pages.end()) ||  (*epi != endPageAddress))
+            pages.insert(epi, endPageAddress);
           continue;
-        child->allocations.resize(child->allocations.size() + 1);
-        Allocation &a = child->allocations.back(); 
-        a.address = leakAddress;
-        a.size = leakSize;
-        continue;
+        } 
+        else
+        {
+          // Allocations get handled only when --dump-allocations flag
+          // is passed in the command line.
+          // Here we simply attach the allocation information to the
+          // node. They will be printed out by a special filter later on.
+          // Notice that allocation information needs to be merged in
+          // just like counters do in the case of filtering
+          // and reorganization of the calltree.
+          if (!m_config->dumpAllocations)
+            continue;
+
+          child->allocations.resize(child->allocations.size() + 1);
+          Allocation &a = child->allocations.back();
+          a.address = leakAddress;
+          a.size = leakSize;
+          continue;
+        }
       }
       else
       {
@@ -2296,6 +2340,13 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
       child->COUNTER.cnt += ctrval;
       child->COUNTER.freq += ctrfreq;
     }
+
+    // In case the --show-pages option was specified,
+    // we keep track of pages touched, rather than the
+    // counter value.
+    if (m_showPages)
+      child->COUNTER.cnt = pages.size();
+
     lineCount++;
   }
 
@@ -2815,7 +2866,8 @@ private:
 class HeaderPrinter
 {
 public:
-  HeaderPrinter(bool showpaths, bool showcalls, int maxval, int maxcnt, bool diffMode)
+  HeaderPrinter(bool showpaths, bool showcalls,
+                int maxval, int maxcnt, bool diffMode)
     :m_showPaths(showpaths),
      m_showCalls(showcalls),
      m_maxval(maxval),
@@ -3260,9 +3312,9 @@ IgProfAnalyzerApplication::generateFlatReport(ProfileInfo &prof,
         (AlignedPrinter(maxval))("Self");
         valfmt("Self", "Children");
         printf("  ");
-        if (showcalls) 
-        { 
-          cntfmt("Calls", "Total"); 
+        if (showcalls)
+        {
+          cntfmt("Calls", "Total");
           printf("  ");
         }
         
@@ -3748,6 +3800,8 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
       m_config->minAverageValue = parseOptionToInt(*(++arg), "--min-average-value / -ma");
     else if (is("--dump-allocations"))
       m_config->dumpAllocations = true;
+    else if (is("--show-pages"))
+      m_showPages = true;
     else if (is("--"))
     {
       while (left(arg) - 1)
@@ -3760,6 +3814,15 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
     }
     else
       m_inputFiles.push_back(*arg);
+  }
+
+  // For the moment we force using MEM_LIVE.
+  if (m_showPages)
+  {
+    if (!m_key.empty())
+     dieWithUsage("Option --show-pages cannot be used with -r"); 
+    setKey("MEM_LIVE");
+    m_config->setShowCalls(false);
   }
 
   if (m_config->diffMode() && m_config->baseline().empty())

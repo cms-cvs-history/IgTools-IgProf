@@ -1,3 +1,32 @@
+2019-01-11  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* bin/IgProfAnalyse.cc: Add 64 bit support for allocation position
+	  (LK).
+	  
+	  bin/IgProfAnalyse.cc: Add --show-pages option which shows
+	  information about memory fragmentation rather than the actual memory
+	  counter. This means that we track the not-completely-allocated pages
+	  that each node in the calltree produces.
+
+	  Notice that this means that an allocation of 2MB has the same
+	  cost of an allocation of 5KB or two allocation of 1B that are on
+	  different pages.
+
+	  Moreover 4096 allocations of 1B have the same cost of 1
+	  allocation of 1B, if they are continuos (i.e. pooled
+	  allocation are considered good).
+
+	  The above is implemented by storing in `Counter::cnt`
+	  the number of pages touched, rather than the value for
+	  the counter. This is not exactly what you want to see
+	  in particular the results can be misleading when
+	  aggregating calltree nodes, but already gives some good
+	  information.
+
+	  Option --show-pages always uses counter "MEM_LIVE"
+	  and its incompatible with -r and --show-calls
+	  options, at least for the time being.
+
 2010-01-08  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* bin/IgProfAnalyse.cc, bin/IgProfAnalyse.h: code changed so that
