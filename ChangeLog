@@ -1,4 +1,13 @@
-2019-01-11  Giulio Eulisse <giulio.eulisse@cern.ch>
+2010-01-15  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* bin/IgProfAnalyse.cc:	I slightly changed the --show-pages option
+	  to count all the pages, even if they are in the middle of an
+	  allocation. --show-partial-pages uses the old metrics.
+	  Notice also that the output now reports MEM_LIVE@PAGES or
+	  MEM_LIVE@PARTIAL_PAGES rather than just MEM_LIVE when either
+	  --show-pages or --show-partial-pages is reported.
+
+2010-01-11  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* bin/IgProfAnalyse.cc: Add 64 bit support for allocation position
 	  (LK).

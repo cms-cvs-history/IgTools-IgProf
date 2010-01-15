@@ -696,6 +696,7 @@ private:
   bool                          m_isPerfTicks;
   bool                          m_keyMax;
   bool                          m_disableFilters;
+  bool                          m_showPartialPages;
   bool                          m_showPages;
 };
 
@@ -705,6 +706,7 @@ IgProfAnalyzerApplication::IgProfAnalyzerApplication(int argc, const char **argv
    m_argc(argc),
    m_argv(argv),
    m_disableFilters(false),
+   m_showPartialPages(false),
    m_showPages(false)
 {}
 
@@ -2217,6 +2219,7 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
     
     match.reset();
     pages.clear();
+    int64_t fullPagesCount = 0;
 
     // Read the counter information.
     while (true)
@@ -2307,6 +2310,13 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
           // Add contribution to pages if page was never seen.
           if ((epi == pages.end()) ||  (*epi != endPageAddress))
             pages.insert(epi, endPageAddress);
+
+          // Keep the contribution of full pages between start and end one,
+          // if any.
+          ASSERT(!m_showPartialPages);
+          int64_t fullPages = (endPageAddress - startPageAddress - 1);
+          if (!m_showPartialPages && fullPages > 0)
+            fullPagesCount += fullPages;
           continue;
         } 
         else
@@ -2345,8 +2355,7 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
     // we keep track of pages touched, rather than the
     // counter value.
     if (m_showPages)
-      child->COUNTER.cnt = pages.size();
-
+      child->COUNTER.cnt = pages.size() + fullPagesCount;
     lineCount++;
   }
 
@@ -3208,7 +3217,15 @@ IgProfAnalyzerApplication::generateFlatReport(ProfileInfo &prof,
     bool showcalls = m_config->showCalls();
     bool showpaths = m_config->showPaths();
     bool showlibs = m_config->showLib();
-    std::cout << "Counter: " << m_key << std::endl;
+    std::cout << "Counter: ";
+    
+    if (m_showPartialPages)
+      std::cout << m_key << "@PARTIAL_PAGES\n";
+    else if (m_showPages)
+      std::cout << m_key << "@PAGES\n";
+    else
+      std::cout << m_key << "\n";
+
     float tickPeriod = m_config->tickPeriod();
 
     int maxcnt=0;
@@ -3490,8 +3507,15 @@ IgProfAnalyzerApplication::generateFlatReport(ProfileInfo &prof,
                   "to_child_paths INTEGER,\n"
                   "pct REAL\n"
                   ");\nPRAGMA synchronous=OFF;\n\nBEGIN TRANSACTION;\n"
-                  "INSERT INTO summary (counter, total_count, total_freq, tick_period) VALUES(\"")
-              << m_key << "\", " << totals << ", " << totfreq << ", " << m_config->tickPeriod() << ");\n\n";
+                  "INSERT INTO summary (counter, total_count, total_freq, tick_period) VALUES(\"");
+    if (m_showPartialPages)
+      std::cout << m_key << "@PARTIAL_PAGES";
+    else if (m_showPages)
+      std::cout << m_key << "@PAGES";
+    else
+      std::cout << m_key;
+
+    std::cout  << "\", " << totals << ", " << totfreq << ", " << m_config->tickPeriod() << ");\n\n";
                 
     unsigned int insertCount = 0;
     std::set<int> filesDone;  
@@ -3800,6 +3824,11 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
       m_config->minAverageValue = parseOptionToInt(*(++arg), "--min-average-value / -ma");
     else if (is("--dump-allocations"))
       m_config->dumpAllocations = true;
+    else if (is("--show-partial-pages"))
+    {
+      m_showPartialPages = true;
+      m_showPages = true;
+    }
     else if (is("--show-pages"))
       m_showPages = true;
     else if (is("--"))
@@ -3820,7 +3849,7 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
   if (m_showPages)
   {
     if (!m_key.empty())
-     dieWithUsage("Option --show-pages cannot be used with -r"); 
+     dieWithUsage("Option --show-pages / --show-partial-pages cannot be used with -r"); 
     setKey("MEM_LIVE");
     m_config->setShowCalls(false);
   }
