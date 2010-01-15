@@ -7,6 +7,10 @@
 	  MEM_LIVE@PARTIAL_PAGES rather than just MEM_LIVE when either
 	  --show-pages or --show-partial-pages is reported.
 
+	* bin/IgProfAnalyse.cc:	--top-10 option was changed to be
+	  configurable. It is now possible to specify "--top <n>" and get the
+	  first "n" nodes in terms of cost.
+
 2010-01-11  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* bin/IgProfAnalyse.cc: Add 64 bit support for allocation position

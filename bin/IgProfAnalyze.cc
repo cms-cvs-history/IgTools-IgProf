@@ -56,7 +56,7 @@ dieWithUsage(const char *message = 0)
                 "  [-mr/--merge-regexp REGEXP]\n"
                 "  [-ml/--merge-libraries REGEXP]\n"
                 "  [-nf/--no-filter]\n"
-                "  { [-t/--text], [-s/--sqlite], [-10, --top-10], [--tree] }\n"
+                "  { [-t/--text], [-s/--sqlite], [--top <n>], [--tree] }\n"
                 "  [--libs] [--demangle] [--gdb] [-v/--verbose]\n"
                 "  [-b/--baseline FILE [--diff-mode]]\n"
                 "  [-Mc/--max-count-value <value>] [-mc/--min-count-value <value>]\n"
@@ -350,7 +350,6 @@ public:
   int64_t maxCallsValue;
   int64_t minAverageValue;
   int64_t maxAverageValue;
-  bool    top10;
   bool    tree;
   bool    useGdb;
   bool    dumpAllocations;
@@ -651,7 +650,7 @@ public:
                           TreeMapBuilderFilter *baselineBuilder,
                           FlatVector &sorted);
   void callgrind(ProfileInfo &prof);
-  void top10(ProfileInfo &prof);
+  void topN(ProfileInfo &prof);
   void tree(ProfileInfo &prof);
   void dumpAllocations(ProfileInfo &prof);
   void prepdata(ProfileInfo &prof);
@@ -698,6 +697,7 @@ private:
   bool                          m_disableFilters;
   bool                          m_showPartialPages;
   bool                          m_showPages;
+  size_t                        m_topN;
 };
 
 
@@ -707,7 +707,8 @@ IgProfAnalyzerApplication::IgProfAnalyzerApplication(int argc, const char **argv
    m_argv(argv),
    m_disableFilters(false),
    m_showPartialPages(false),
-   m_showPages(false)
+   m_showPages(false),
+   m_topN(0)
 {}
 
 float
@@ -1507,7 +1508,7 @@ public:
     m_kids.resize(m_indent);
   }
 
-  virtual std::string name() const { return "top 10 builder"; }
+  virtual std::string name() const { return "massif tree"; }
   virtual enum FilterType type() const { return BOTH; }
 private:
 
@@ -1540,19 +1541,30 @@ private:
 };
 
 /** This filter navigates the tree, finds out which
-    are the top ten contributions for a given counter
+    are the top N contributions for a given counter
     and reports them together with their stacktrace.
 
     While parsing the tree it maintains a stacktrace
     and if a leaf has a self counter which enters 
-    in the "top ten", it saves the stacktrace.
+    in the "top N", it saves the stacktrace.
 */
-class Top10BuilderFilter : public IgProfFilter
+class TopNBuilderFilter : public IgProfFilter
 {
 public:
-  Top10BuilderFilter(Configuration *config)
+  typedef std::vector<NodeInfo *> StackTrace;
+
+  TopNBuilderFilter(size_t rankingSize)
+  :m_rankingSize(rankingSize)
   {
-    memset(m_topTenValues, 0, 10 * sizeof(int64_t));
+    m_topNValues = new int64_t[rankingSize];
+    memset(m_topNValues, 0, sizeof(int64_t) * rankingSize);
+    m_topNStackTrace = new StackTrace[rankingSize]; 
+  }
+
+  ~TopNBuilderFilter()
+  {
+    delete[] m_topNValues;
+    delete[] m_topNStackTrace;
   }
 
   virtual void pre(NodeInfo *parent, NodeInfo *node)
@@ -1567,19 +1579,19 @@ public:
     Counter &nodeCounter = node->COUNTER;
 
     int min = -1;
-    for (int i = 0; i != 10; i++)
-      if (m_topTenValues[i] < nodeCounter.cnt
-          && (min == -1 || m_topTenValues[i] < m_topTenValues[min]))
+    for (size_t i = 0; i != m_rankingSize; ++i)
+      if (m_topNValues[i] < nodeCounter.cnt
+          && (min == -1 || m_topNValues[i] < m_topNValues[min]))
         min = i;
 
     if (min == -1)
       return;
 
-    m_topTenValues[min] = nodeCounter.cnt;
-    m_topTenStackTrace[min].resize(m_currentStackTrace.size());
+    m_topNValues[min] = nodeCounter.cnt;
+    m_topNStackTrace[min].resize(m_currentStackTrace.size());
     std::copy(m_currentStackTrace.begin(),
               m_currentStackTrace.end(),
-              m_topTenStackTrace[min].begin());
+              m_topNStackTrace[min].begin());
   }
   
   virtual void post(NodeInfo */*parent*/, NodeInfo */*node*/)
@@ -1588,18 +1600,18 @@ public:
       m_currentStackTrace.pop_back();
   }
   
-  std::vector<NodeInfo *> &stackTrace(size_t pos, int64_t &value)
+  StackTrace &stackTrace(size_t pos, int64_t &value)
   {
     std::vector<std::pair<int64_t, size_t> > sorted;
-    for (int i = 0; i != 10; ++i)
-      sorted.push_back(std::make_pair(m_topTenValues[i], i));
+    for (size_t i = 0; i != m_rankingSize; ++i)
+      sorted.push_back(std::make_pair(m_topNValues[i], i));
     
     std::sort(sorted.begin(), sorted.end(), Cmp());
-    value = m_topTenValues[sorted[pos].second];
-    return m_topTenStackTrace[sorted[pos].second];
+    value = m_topNValues[sorted[pos].second];
+    return m_topNStackTrace[sorted[pos].second];
   }
 
-  virtual std::string name() const { return "top 10 builder"; }
+  virtual std::string name() const { return "top N builder"; }
   virtual enum FilterType type() const { return BOTH; }
 
 private:
@@ -1611,8 +1623,9 @@ private:
     }
   };
 
-  int64_t                   m_topTenValues[10];
-  std::vector<NodeInfo *>   m_topTenStackTrace[10];
+  size_t                    m_rankingSize;
+  int64_t                   *m_topNValues;
+  StackTrace                *m_topNStackTrace;
   std::vector<NodeInfo *>   m_currentStackTrace;
 };
 
@@ -3020,14 +3033,14 @@ IgProfAnalyzerApplication::dumpAllocations(ProfileInfo &prof)
   // Dump the symbol information for the first 10 entries.
 
   // Actually building the top 10.
-  verboseMessage("Building top 10");
-  Top10BuilderFilter *topTenFilter = new Top10BuilderFilter(m_config);
-  walk(prof.spontaneous(), topTenFilter);
+  verboseMessage("Building top N");
+  TopNBuilderFilter *topNFilter = new TopNBuilderFilter(m_topN);
+  walk(prof.spontaneous(), topNFilter);
 
-  for (size_t i = 0; i != 10; i++)
+  for (size_t i = 0; i != m_topN; ++i)
   {
     int64_t value;
-    std::vector<NodeInfo *> &nodes = topTenFilter->stackTrace(i, value);
+    TopNBuilderFilter::StackTrace &nodes = topNFilter->stackTrace(i, value);
     if (!value)
       break;
 
@@ -3040,7 +3053,7 @@ IgProfAnalyzerApplication::dumpAllocations(ProfileInfo &prof)
 }
 
 void
-IgProfAnalyzerApplication::top10(ProfileInfo &prof)
+IgProfAnalyzerApplication::topN(ProfileInfo &prof)
 {
   prepdata(prof);
 
@@ -3082,19 +3095,21 @@ IgProfAnalyzerApplication::top10(ProfileInfo &prof)
     exit(1);
   }
   // Actually building the top 10.
-  verboseMessage("Building top 10");
-  Top10BuilderFilter *topTenFilter = new Top10BuilderFilter(m_config);
-  walk(prof.spontaneous(), topTenFilter);
-  for (size_t i = 0; i != 10; i++)
+  verboseMessage("Building top N");
+  TopNBuilderFilter *topNFilter = new TopNBuilderFilter(m_topN);
+  walk(prof.spontaneous(), topNFilter);
+  for (size_t i = 0; i != m_topN; i++)
   {
     std::cout << "## Entry " << i+1 << " (";
     int64_t value;
-    std::vector<NodeInfo *> &nodes = topTenFilter->stackTrace(i, value);
+    std::vector<NodeInfo *> &nodes = topNFilter->stackTrace(i, value);
     if (!value)
       break;
     if (m_isPerfTicks)
       std::cout << thousands(static_cast<double>(value) * m_config->tickPeriod(), 0, 2)
                 << " seconds)\n";
+    else if (m_showPages)
+      std::cout << thousands(value) << " pages)\n";
     else
       std::cout << thousands(value) << " bytes)\n";
   
@@ -3647,8 +3662,8 @@ IgProfAnalyzerApplication::run(void)
 
   if (m_config->callgrind())
     callgrind(*prof);
-  else if (m_config->top10)
-    top10(*prof);
+  else if (m_topN)
+    topN(*prof);
   else if (m_config->tree)
     tree(*prof);
   else if (m_config->dumpAllocations)
@@ -3754,8 +3769,8 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
       m_config->setOutputType(Configuration::TEXT);
     else if (is("--sqlite", "-s"))
       m_config->setOutputType(Configuration::SQLITE);
-    else if (is("--top-10", "-10"))
-      m_config->top10 = true;
+    else if (is("--top", "-tn"))
+      m_topN = parseOptionToInt(*(++arg), "--top / -tn");
     else if (is("--tree", "-T"))
       m_config->tree = true;
     else if (is("--demangle", "-d"))
