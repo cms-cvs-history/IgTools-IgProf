@@ -51,7 +51,8 @@ dieWithUsage(const char *message = 0)
     std::cerr << message << "\n";
 
   std::cerr << ("igprof-analyse\n"
-                "  [-r/--report KEY[,KEY]...] [-o/--order ORDER]\n"
+                "  {[-r/--report KEY[,KEY]...], --show-pages, --show-partial-pages, --show-locality-metrics}"
+                "  [-o/--order ORDER]\n"
                 "  [-p/--paths] [-c/--calls] [--value peak|normal]\n"
                 "  [-mr/--merge-regexp REGEXP]\n"
                 "  [-ml/--merge-libraries REGEXP]\n"
@@ -697,6 +698,7 @@ private:
   bool                          m_disableFilters;
   bool                          m_showPartialPages;
   bool                          m_showPages;
+  bool                          m_showLocalityMetrics;
   size_t                        m_topN;
 };
 
@@ -708,6 +710,7 @@ IgProfAnalyzerApplication::IgProfAnalyzerApplication(int argc, const char **argv
    m_disableFilters(false),
    m_showPartialPages(false),
    m_showPages(false),
+   m_showLocalityMetrics(false),
    m_topN(0)
 {}
 
@@ -2326,7 +2329,6 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
 
           // Keep the contribution of full pages between start and end one,
           // if any.
-          ASSERT(!m_showPartialPages);
           int64_t fullPages = (endPageAddress - startPageAddress - 1);
           if (!m_showPartialPages && fullPages > 0)
             fullPagesCount += fullPages;
@@ -2367,7 +2369,9 @@ IgProfAnalyzerApplication::readDump(ProfileInfo &prof, const std::string &filena
     // In case the --show-pages option was specified,
     // we keep track of pages touched, rather than the
     // counter value.
-    if (m_showPages)
+    if (m_showPages && m_showLocalityMetrics)
+      child->COUNTER.cnt = child->COUNTER.cnt ? 4096 * (pages.size() + fullPagesCount) / child->COUNTER.cnt : 0;
+    else if (m_showPages)
       child->COUNTER.cnt = pages.size() + fullPagesCount;
     lineCount++;
   }
@@ -3108,6 +3112,8 @@ IgProfAnalyzerApplication::topN(ProfileInfo &prof)
     if (m_isPerfTicks)
       std::cout << thousands(static_cast<double>(value) * m_config->tickPeriod(), 0, 2)
                 << " seconds)\n";
+    else if (m_showLocalityMetrics)
+      std::cout << thousands(value) << " spread factor)\n";
     else if (m_showPages)
       std::cout << thousands(value) << " pages)\n";
     else
@@ -3234,7 +3240,9 @@ IgProfAnalyzerApplication::generateFlatReport(ProfileInfo &prof,
     bool showlibs = m_config->showLib();
     std::cout << "Counter: ";
     
-    if (m_showPartialPages)
+    if (m_showLocalityMetrics)
+      std::cout << m_key << "@SPREAD_FACTOR\n";
+    else if (m_showPartialPages)
       std::cout << m_key << "@PARTIAL_PAGES\n";
     else if (m_showPages)
       std::cout << m_key << "@PAGES\n";
@@ -3523,7 +3531,9 @@ IgProfAnalyzerApplication::generateFlatReport(ProfileInfo &prof,
                   "pct REAL\n"
                   ");\nPRAGMA synchronous=OFF;\n\nBEGIN TRANSACTION;\n"
                   "INSERT INTO summary (counter, total_count, total_freq, tick_period) VALUES(\"");
-    if (m_showPartialPages)
+    if (m_showLocalityMetrics)
+      std::cout << m_key << "@SPREAD_FACTOR";
+    else if (m_showPartialPages)
       std::cout << m_key << "@PARTIAL_PAGES";
     else if (m_showPages)
       std::cout << m_key << "@PAGES";
@@ -3839,6 +3849,12 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
       m_config->minAverageValue = parseOptionToInt(*(++arg), "--min-average-value / -ma");
     else if (is("--dump-allocations"))
       m_config->dumpAllocations = true;
+    else if (is("--show-locality-metrics"))
+    {
+      m_showLocalityMetrics = true;
+      m_showPartialPages = true;
+      m_showPages = true;
+    }
     else if (is("--show-partial-pages"))
     {
       m_showPartialPages = true;
@@ -3846,6 +3862,8 @@ IgProfAnalyzerApplication::parseArgs(const ArgsList &args)
     }
     else if (is("--show-pages"))
       m_showPages = true;
+    else if (is("--show-locality-metric"))
+      m_showLocalityMetrics = true;
     else if (is("--"))
     {
       while (left(arg) - 1)

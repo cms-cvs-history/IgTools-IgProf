@@ -1,3 +1,12 @@
+2010-01-18  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* bin/IgProfAnalyze.cc: New flag --show-locality-metrics added.
+	  When specified, igprof reports calculates the metrics:
+
+	  4096*(number of pages) / (memory allocation)
+
+	  for every node.
+
 2010-01-15  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* bin/IgProfAnalyse.cc:	I slightly changed the --show-pages option
