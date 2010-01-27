@@ -15,6 +15,40 @@
 	  igprof-analyze now shows the progress of each filter by printing
 	  out a set of dots.
 
+	* bin/IgProfAnalyze.cc:	  igprof-analyse now correctly accounts for
+	  pages / ranges when running in paged mode.
+	    
+	  Previously, when running in "paged" mode (--show-pages,
+	  --show-partial-pages, --show-locality-metrics) separate
+	  allocations were merged together in single pages only when
+	  they happened to be done in the same calltree stack. Moreover
+	  the accounting of pages was happening at parse time, which
+	  meant that things were not propagated correctly when
+	  accumulating nodes.
+
+	  The new implementation solves the issue by keeping track
+	  of allocated ranges for the whole duration of the process
+	  and does all the operations set-wise rather then simply
+	  summing the size of those sets.
+			
+	  This required quite a bit of reworking of the internal structures that
+	  keep track of nodes in the call-tree (NodeInfo) and in the flat report
+	  (FlatInfo / CallInfo). 
+
+	  A new `mergeRanges` helper function has been introduced to do a merged
+	  sort of two sets of allocation ranges.
+
+	  A new `mergeSorted` helper function has been added to merge together
+	  continuous allocated memory ranges found in a sorted set of 
+	  memory ranges. 
+
+	  The `summarizePageInfo` method was added to promote page information so
+	  that it gets printed out in place of the counter.
+
+	  The --show-partial-pages option was renamed --show-page-ranges and shows
+	  the continuous ranges of memory pages allocated by a given entry in
+	  report.
+
 2010-01-18  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* bin/IgProfAnalyze.cc: New flag --show-locality-metrics added.
