@@ -49,6 +49,9 @@
 	  the continuous ranges of memory pages allocated by a given entry in
 	  report.
 
+	* bin/IgProfAnalyze.cc: show nodes with 0 cost when running in
+	  --show-locality-metrics mode.
+
 2010-01-18  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* bin/IgProfAnalyze.cc: New flag --show-locality-metrics added.
