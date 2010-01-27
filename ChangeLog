@@ -5,6 +5,12 @@
 	  why those cases can occur is due to the non-linear nature of some of
 	  the reports for page locality studies.
 
+	* bin/IgProfAnalyze.cc: NodeInfos are now allocated on a deque	
+	  rather than on the heap.
+	  Iterating on their children is now done by index, rather than by
+	  iterator and NodeInfo::begin() and NodeInfo::end() are removed
+	  to avoid confusion on what is actually happening.
+
 2010-01-18  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* bin/IgProfAnalyze.cc: New flag --show-locality-metrics added.
