@@ -2395,7 +2395,7 @@ struct StackItem
   NodeInfo *post;
 };
 
-void walk(NodeInfo *first, IgProfFilter *filter=0)
+void walk(NodeInfo *first, size_t total, IgProfFilter *filter=0)
 {
   // TODO: Apply more than one filter at the time.
   //     This method applies one filter at the time. Is it worth to do
@@ -2410,6 +2410,13 @@ void walk(NodeInfo *first, IgProfFilter *filter=0)
   firstItem.pre = first;
   firstItem.post = 0;
   stack.reserve(10000);
+  
+  if (total)
+    std::cerr << "\n" << filter->name();
+
+  size_t count = 0;
+  size_t newProgress = 0;
+  size_t oldProgress = 0;
 
   while (!stack.empty())
   {
@@ -2419,7 +2426,10 @@ void walk(NodeInfo *first, IgProfFilter *filter=0)
     if (pre)
     {
       if (filter->type() & IgProfFilter::PRE)
+      {
         filter->pre(parent, pre);
+        ++count;
+      }
       if (filter->type() & IgProfFilter::POST)
       {
         StackItem newItem;
@@ -2441,7 +2451,16 @@ void walk(NodeInfo *first, IgProfFilter *filter=0)
       }
     }
     else
+    {
       filter->post(parent, post);
+      ++count;
+    }
+    newProgress = (100 * count) / total;
+    if (newProgress > oldProgress)
+    {
+      oldProgress = newProgress; 
+      std::cerr << ".";
+    }
   }
 }
 
@@ -2468,7 +2487,7 @@ IgProfAnalyzerApplication::prepdata(ProfileInfo& prof)
   {
     IgProfFilter *filter = m_filters[fi];
     verboseMessage("Applying filter", filter->name().c_str());
-    walk(prof.spontaneous(), filter);
+    walk(prof.spontaneous(), m_nodesStorage.size(), filter);
   }
 
   if (m_config->mergeLibraries())
@@ -2476,19 +2495,19 @@ IgProfAnalyzerApplication::prepdata(ProfileInfo& prof)
     //    walk<NodeInfo>(prof.spontaneous(), new PrintTreeFilter);
 
     verboseMessage("Merge nodes belonging to the same library.");
-    walk(prof.spontaneous(), new UseFileNamesFilter(m_keyMax));
+    walk(prof.spontaneous(), m_nodesStorage.size(), new UseFileNamesFilter(m_keyMax));
     //    walk<NodeInfo>(prof.spontaneous(), new PrintTreeFilter);
   }
 
   if (!m_regexps.empty())
   {
     verboseMessage("Merge nodes using user-provided regular expression.");
-    walk(prof.spontaneous(), new RegexpFilter(m_regexps, m_keyMax));
+    walk(prof.spontaneous(), m_nodesStorage.size(), new RegexpFilter(m_regexps, m_keyMax));
   }
 
   verboseMessage("Summing counters");
-  walk(prof.spontaneous(), new AddCumulativeInfoFilter(m_keyMax));
-  walk(prof.spontaneous(), new CheckTreeConsistencyFilter());
+  walk(prof.spontaneous(), m_nodesStorage.size(), new AddCumulativeInfoFilter(m_keyMax));
+  walk(prof.spontaneous(), m_nodesStorage.size(), new CheckTreeConsistencyFilter());
 }
 
 class FlatInfoComparator 
@@ -2957,7 +2976,7 @@ IgProfAnalyzerApplication::tree(ProfileInfo &prof)
   //        passing a flatMap. 
   verboseMessage("Building call tree map");
   TreeMapBuilderFilter *callTreeBuilder = new TreeMapBuilderFilter(m_keyMax, &prof);
-  walk(prof.spontaneous(), callTreeBuilder);
+  walk(prof.spontaneous(), m_nodesStorage.size(), callTreeBuilder);
   // Sorting flat entries
   verboseMessage("Sorting");
   int rank = 1;
@@ -2988,7 +3007,7 @@ IgProfAnalyzerApplication::tree(ProfileInfo &prof)
 
   // Actually producing the tree.
   MassifTreeBuilder *treeBuilder = new MassifTreeBuilder(m_config);
-  walk(prof.spontaneous(), treeBuilder);
+  walk(prof.spontaneous(), m_nodesStorage.size(), treeBuilder);
 }
 
 void
@@ -2997,7 +3016,7 @@ IgProfAnalyzerApplication::dumpAllocations(ProfileInfo &prof)
   // Calculate the amount of allocations required to fill one page of
   // memory. This is a rough indication of fragmentation.
   AllocationsPerPage *fragmentationEvaluator = new AllocationsPerPage();
-  walk(prof.spontaneous(), fragmentationEvaluator);
+  walk(prof.spontaneous(), m_nodesStorage.size(), fragmentationEvaluator);
 
   prepdata(prof);
 
@@ -3005,7 +3024,7 @@ IgProfAnalyzerApplication::dumpAllocations(ProfileInfo &prof)
   //        passing a flatMap.
   verboseMessage("Building call tree map");
   TreeMapBuilderFilter *callTreeBuilder = new TreeMapBuilderFilter(m_keyMax, &prof);
-  walk(prof.spontaneous(), callTreeBuilder);
+  walk(prof.spontaneous(), m_nodesStorage.size(), callTreeBuilder);
 
   // Sorting flat entries
   verboseMessage("Sorting");
@@ -3037,14 +3056,14 @@ IgProfAnalyzerApplication::dumpAllocations(ProfileInfo &prof)
 
   // Produce the allocations map information.
   DumpAllocationsFilter dumper(std::cout);
-  walk(prof.spontaneous(), &dumper);
+  walk(prof.spontaneous(), m_nodesStorage.size(), &dumper);
 
   // Dump the symbol information for the first 10 entries.
 
   // Actually building the top 10.
   verboseMessage("Building top N");
   TopNBuilderFilter *topNFilter = new TopNBuilderFilter(m_topN);
-  walk(prof.spontaneous(), topNFilter);
+  walk(prof.spontaneous(), m_nodesStorage.size(), topNFilter);
 
   for (size_t i = 0; i != m_topN; ++i)
   {
@@ -3070,7 +3089,7 @@ IgProfAnalyzerApplication::topN(ProfileInfo &prof)
   //        passing a flatMap. 
   verboseMessage("Building call tree map");
   TreeMapBuilderFilter *callTreeBuilder = new TreeMapBuilderFilter(m_keyMax, &prof);
-  walk(prof.spontaneous(), callTreeBuilder);
+  walk(prof.spontaneous(), m_nodesStorage.size(), callTreeBuilder);
   // Sorting flat entries
   verboseMessage("Sorting");
   int rank = 1;
@@ -3106,7 +3125,7 @@ IgProfAnalyzerApplication::topN(ProfileInfo &prof)
   // Actually building the top 10.
   verboseMessage("Building top N");
   TopNBuilderFilter *topNFilter = new TopNBuilderFilter(m_topN);
-  walk(prof.spontaneous(), topNFilter);
+  walk(prof.spontaneous(), m_nodesStorage.size(), topNFilter);
   for (size_t i = 0; i != m_topN; i++)
   {
     std::cout << "## Entry " << i+1 << " (";
@@ -3138,7 +3157,7 @@ IgProfAnalyzerApplication::analyse(ProfileInfo &prof, TreeMapBuilderFilter *base
   prepdata(prof);
   verboseMessage("Building call tree map");
   TreeMapBuilderFilter *callTreeBuilder = new TreeMapBuilderFilter(m_keyMax, &prof);
-  walk(prof.spontaneous(), callTreeBuilder);
+  walk(prof.spontaneous(), m_nodesStorage.size(), callTreeBuilder);
   // Sorting flat entries
   verboseMessage("Sorting");
   int rank = 1;
@@ -3652,7 +3671,7 @@ IgProfAnalyzerApplication::run(void)
     this->readDump(*prof, m_config->baseline(), new BaseLineFilter);
     prepdata(*prof);
     baselineBuilder = new TreeMapBuilderFilter(m_keyMax, prof);
-    walk(prof->spontaneous(), baselineBuilder);
+    walk(prof->spontaneous(), m_nodesStorage.size(), baselineBuilder);
     std::cerr << std::endl;
   }
 
