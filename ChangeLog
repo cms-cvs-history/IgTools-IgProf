@@ -1,3 +1,10 @@
+2010-01-27  Giulio Eulisse <giulio.eulisse@cern.ch>
+
+	* scripts/igprof-navigator: igprof-navigator now displays "-.--"
+	  when a division by zero happens in calculating percentages. The reason
+	  why those cases can occur is due to the non-linear nature of some of
+	  the reports for page locality studies.
+
 2010-01-18  Giulio Eulisse <giulio.eulisse@cern.ch>
 
 	* bin/IgProfAnalyze.cc: New flag --show-locality-metrics added.
