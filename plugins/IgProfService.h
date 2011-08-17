@@ -38,6 +38,11 @@ namespace edm {
 
       void postCloseFile();
 
+      inline
+      bool isProcessWideService(IgProfService const*) {
+        return true;
+      }
+
     private:
 
       void makeDump(const std::string &format);
